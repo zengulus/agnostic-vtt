@@ -32,7 +32,7 @@ import {
   Image as ImageIcon,
 } from 'lucide-react';
 import { useTable } from './store.js';
-import { inviteUrl, launchDemo, send } from './connection.js';
+import { inviteUrl, launchDemo, liveAvailable, send } from './connection.js';
 import { AssetImage } from './assets.js';
 import { HistoryControls, TrackerPanel } from './components/Workshop.js';
 import { parseDice } from '../shared/dice.js';
@@ -161,10 +161,15 @@ export function App() {
             ) : (
               <>
                 <Users size={15} />
-                <span>{gm ? 'Invite party' : s.self ? 'Your party' : 'Gather your party'}</span>
+                <span>{gm ? 'Invite party' : s.self ? 'Your party' : 'Your table'}</span>
               </>
             )}
           </button>
+          {s.status === 'demo' && liveAvailable && (
+            <button className="role-switch" onClick={() => s.set({ dialog: 'launch' })}>
+              Log in
+            </button>
+          )}
           <HistoryControls />
           <button
             className="icon-button"

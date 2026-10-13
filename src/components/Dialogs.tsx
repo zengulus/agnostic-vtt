@@ -10,6 +10,9 @@ import {
   supabase,
   uploadImage,
   savedCampaigns,
+  signIn,
+  currentAccount,
+  signOut,
   resumeCampaign,
 } from '../connection.js';
 import { assetUrl, validateAsset } from '../../shared/assets.js';
@@ -64,7 +67,7 @@ export function Dialogs() {
   }, [s.dialog, s.set]);
   if (!s.dialog) return null;
   const title = {
-    launch: 'Your table',
+    launch: supabase ? 'Your campaigns' : 'Your table',
     map: 'Scene',
     token: 'Character',
     grid: 'Grid',
@@ -133,6 +136,9 @@ function Launch() {
     [name, setName] = useState('Storykeeper'),
     [campaign, setCampaign] = useState('The Hollow Chronicles'),
     [join, setJoin] = useState(params.has('room')),
+    [campaignAction, setCampaignAction] = useState(
+      !supabase || (params.has('room') && s.status !== 'live'),
+    ),
     [link, setLink] = useState(params.has('room') ? location.href : ''),
     [email, setEmail] = useState(''),
     [password, setPassword] = useState(''),
@@ -141,10 +147,32 @@ function Launch() {
     [busy, setBusy] = useState(false),
     [error, setError] = useState('');
   const [campaigns, setCampaigns] = useState<Array<{ id: string; name: string; role: string }>>([]);
+  const [account, setAccount] = useState<{ name: string; email: string } | null>(null);
+  const [authReady, setAuthReady] = useState(!supabase);
   useEffect(() => {
-    void savedCampaigns()
-      .then(setCampaigns)
-      .catch(() => {});
+    let active = true;
+    async function load() {
+      if (!liveAvailable) return;
+      try {
+        if (supabase) {
+          const restored = await currentAccount();
+          if (!active) return;
+          setAccount(restored);
+          if (!restored) return;
+          setName(restored.name);
+        }
+        const saved = await savedCampaigns();
+        if (active) setCampaigns(saved);
+      } catch (error) {
+        if (active) setError(error instanceof Error ? error.message : 'Could not load campaigns.');
+      } finally {
+        if (active) setAuthReady(true);
+      }
+    }
+    void load();
+    return () => {
+      active = false;
+    };
   }, []);
   if (!liveAvailable)
     return (
@@ -162,10 +190,100 @@ function Launch() {
         <p className="field-note">Live multiplayer is not configured on this site.</p>
       </div>
     );
+  if (!authReady)
+    return (
+      <p className="field-note" role="status">
+        Loading your account…
+      </p>
+    );
+  if (supabase && !account)
+    return (
+      <form
+        onSubmit={async (e) => {
+          e.preventDefault();
+          setBusy(true);
+          setError('');
+          try {
+            await signIn(name, email, password, signup);
+            const signedIn = await currentAccount();
+            if (!signedIn) throw new Error('Log in to access your campaigns.');
+            setAccount(signedIn);
+            setName(signedIn.name);
+            setCampaigns(await savedCampaigns());
+          } catch (error) {
+            setError(error instanceof Error ? error.message : 'Could not log in.');
+          } finally {
+            setBusy(false);
+          }
+        }}
+      >
+        {signup && (
+          <label>
+            Your name
+            <input
+              value={name}
+              onChange={(e) => setName(e.target.value)}
+              required
+              maxLength={32}
+              autoComplete="nickname"
+            />
+          </label>
+        )}
+        <label>
+          Email
+          <input
+            type="email"
+            value={email}
+            onChange={(e) => setEmail(e.target.value)}
+            required
+            autoComplete="email"
+          />
+        </label>
+        <label>
+          Password
+          <input
+            type="password"
+            value={password}
+            onChange={(e) => setPassword(e.target.value)}
+            required
+            minLength={8}
+            autoComplete={signup ? 'new-password' : 'current-password'}
+          />
+        </label>
+        {error && (
+          <p className="form-error" role="alert">
+            {error}
+          </p>
+        )}
+        <button className="primary modal-submit" disabled={busy}>
+          {busy ? 'Signing in…' : signup ? 'Create account' : 'Log in'}
+        </button>
+        <button
+          type="button"
+          className="subtle-button"
+          disabled={busy}
+          onClick={() => {
+            setSignup(!signup);
+            setError('');
+          }}
+        >
+          {signup ? 'Already have an account? Log in' : 'Create an account'}
+        </button>
+        <button
+          type="button"
+          className="subtle-button"
+          disabled={busy}
+          onClick={() => launchDemo()}
+        >
+          Demo
+        </button>
+      </form>
+    );
   return (
     <form
       onSubmit={async (e) => {
         e.preventDefault();
+        if (!campaignAction) return;
         setBusy(true);
         setError('');
         try {
@@ -177,7 +295,7 @@ function Launch() {
             if (!roomId)
               throw new Error('Paste the full invitation link shared by your game master.');
           }
-          await launch(name, campaign, roomId, invite, email, password, signup, role);
+          await launch(name, campaign, roomId, invite, undefined, undefined, false, role);
         } catch (error) {
           setError(error instanceof Error ? error.message : 'Could not open your table.');
         } finally {
@@ -185,16 +303,43 @@ function Launch() {
         }
       }}
     >
-      <p className="modal-description">
-        {supabase
-          ? 'One account. Endless adventures. Sign in to create or join your party’s table.'
-          : 'Live multiplayer uses the local server. Open an invitation in another browser to play together.'}
-      </p>
+      {account && (
+        <div className="account-summary">
+          <span>{account.email}</span>
+          <button
+            type="button"
+            disabled={busy}
+            onClick={async () => {
+              setBusy(true);
+              setError('');
+              try {
+                await signOut();
+                setAccount(null);
+                setCampaigns([]);
+                setPassword('');
+                setJoin(false);
+                setLink('');
+                setCampaignAction(false);
+              } catch (error) {
+                setError(error instanceof Error ? error.message : 'Could not sign out.');
+              } finally {
+                setBusy(false);
+              }
+            }}
+          >
+            Sign out
+          </button>
+        </div>
+      )}
       {campaigns.length > 0 && (
         <div className="resume-campaigns">
-          <span className="eyebrow">YOUR SAVED TABLES</span>
           {campaigns.map((c) => (
-            <button key={c.id} type="button" onClick={() => resumeCampaign(c.id, role)}>
+            <button
+              key={c.id}
+              type="button"
+              disabled={busy}
+              onClick={() => resumeCampaign(c.id, c.role === 'gm' ? role : 'player')}
+            >
               <span>
                 {c.name}
                 <small>{c.role === 'gm' ? 'Game master' : 'Player'}</small>
@@ -207,88 +352,109 @@ function Launch() {
       <label>
         Enter table as
         <select value={role} onChange={(e) => setRole(e.target.value as 'gm' | 'player')}>
-          <option value="gm">Game master (requires campaign permission)</option>
+          <option value="gm">Campaign role</option>
           <option value="player">Player</option>
         </select>
       </label>
-      <p className="field-note">
-        One account can GM some campaigns and play in others. Invitations always grant player
-        access. GMs can return to GM mode at any time.
-      </p>
+      {!campaigns.length && account && !error && (
+        <p className="field-note">Create a campaign or join with an invitation.</p>
+      )}
       <div className="segmented">
-        <button type="button" className={!join ? 'active' : ''} onClick={() => setJoin(false)}>
+        <button
+          type="button"
+          className={campaignAction && !join ? 'active' : ''}
+          onClick={() => {
+            setJoin(false);
+            setCampaignAction(true);
+          }}
+        >
           Create a campaign
         </button>
-        <button type="button" className={join ? 'active' : ''} onClick={() => setJoin(true)}>
+        <button
+          type="button"
+          className={campaignAction && join ? 'active' : ''}
+          onClick={() => {
+            setJoin(true);
+            setCampaignAction(true);
+          }}
+        >
           Join a party
         </button>
       </div>
-      <label>
-        Your name
-        <input value={name} onChange={(e) => setName(e.target.value)} required maxLength={32} />
-      </label>
-      {supabase && (
+      {campaignAction && (
         <>
-          <label>
-            Email
-            <input type="email" value={email} onChange={(e) => setEmail(e.target.value)} required />
-          </label>
-          <label>
-            Password
-            <input
-              type="password"
-              value={password}
-              onChange={(e) => setPassword(e.target.value)}
-              required
-              minLength={8}
-            />
-          </label>
-          <label className="check-label">
-            <input type="checkbox" checked={signup} onChange={(e) => setSignup(e.target.checked)} />
-            Create a new account
-          </label>
+          {!account && (
+            <label>
+              Your name
+              <input
+                value={name}
+                onChange={(e) => setName(e.target.value)}
+                required
+                maxLength={32}
+              />
+            </label>
+          )}
+          {join ? (
+            <label>
+              Invitation link
+              <input
+                type="url"
+                value={link}
+                onChange={(e) => setLink(e.target.value)}
+                placeholder="Paste your party’s invitation link"
+                required
+              />
+            </label>
+          ) : (
+            <label>
+              Campaign name
+              <input
+                value={campaign}
+                onChange={(e) => setCampaign(e.target.value)}
+                required
+                maxLength={60}
+              />
+            </label>
+          )}
         </>
       )}
-      {join ? (
-        <label>
-          Invitation link
-          <input
-            type="url"
-            value={link}
-            onChange={(e) => setLink(e.target.value)}
-            placeholder="Paste your party’s invitation link"
-            required
-          />
-        </label>
-      ) : (
-        <label>
-          Campaign name
-          <input
-            value={campaign}
-            onChange={(e) => setCampaign(e.target.value)}
-            required
-            maxLength={60}
-          />
-        </label>
-      )}
       {error && (
-        <p className="form-error" role="alert">
-          {error}
-        </p>
+        <>
+          <p className="form-error" role="alert">
+            {error}
+          </p>
+          {account && (
+            <button
+              type="button"
+              className="subtle-button"
+              disabled={busy}
+              onClick={async () => {
+                setBusy(true);
+                try {
+                  setCampaigns(await savedCampaigns());
+                  setError('');
+                } catch (error) {
+                  setError(error instanceof Error ? error.message : 'Could not load campaigns.');
+                } finally {
+                  setBusy(false);
+                }
+              }}
+            >
+              Retry campaigns
+            </button>
+          )}
+        </>
       )}
-      <button className="primary modal-submit" disabled={busy}>
-        <Sparkles size={16} />
-        {busy ? 'Opening the table…' : join ? 'Join your party' : 'Begin your adventure'}
-        <ArrowUpRight size={16} />
-      </button>
+      {campaignAction && (
+        <button className="primary modal-submit" disabled={busy}>
+          <Sparkles size={16} />
+          {busy ? 'Opening the table…' : join ? 'Join your party' : 'Create campaign'}
+          <ArrowUpRight size={16} />
+        </button>
+      )}
       <button type="button" className="subtle-button" onClick={() => launchDemo()}>
-        Try the offline demo instead
+        Demo
       </button>
-      {s.self && (
-        <p className="field-note">
-          Live campaigns save to the server. Demo changes last only in this tab.
-        </p>
-      )}
     </form>
   );
 }
@@ -984,7 +1150,7 @@ function Invite() {
                   }
                 >
                   <option value="player">Player</option>
-                  <option value="gm">Game master</option>
+                  <option value="gm">Campaign role</option>
                 </select>
                 <button
                   aria-label={`Remove ${m.name}`}

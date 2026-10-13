@@ -18,7 +18,8 @@
     "start": "node --env-file-if-exists=.env dist-server/server/index.js",
     "test": "vitest run",
     "test:e2e": "playwright test",
-    "format": "prettier --write src shared server tests *.ts *.json *.md docs .github/workflows render.yaml"
+    "format": "prettier --write src shared server tests *.ts *.json *.md docs .github/workflows render.yaml",
+    "test:hosted": "tsx scripts/verify-hosted.mjs"
   },
   "dependencies": {
     "@3d-dice/dice-box-threejs": "^0.0.12",

@@ -9,7 +9,7 @@ const serverUrl = (import.meta.env.VITE_SERVER_URL || '').replace(/\/$/, '');
 export const supabase = !!(
   import.meta.env.VITE_SUPABASE_URL && import.meta.env.VITE_SUPABASE_ANON_KEY
 );
-export const liveAvailable = import.meta.env.DEV || !!serverUrl;
+export const liveAvailable = import.meta.env.DEV || (!!serverUrl && supabase);
 let client: ReturnType<typeof createClient> | undefined;
 function authClient() {
   return (client ||= createClient(
@@ -94,7 +94,8 @@ export async function request<T>(path: string, data?: unknown): Promise<T> {
   return result as T;
 }
 export async function authorizedFetch(path: string, init: RequestInit = {}) {
-  if (useTable.getState().status === 'demo')
+  const listingCampaigns = path === '/api/campaigns' && (init.method || 'GET') === 'GET';
+  if (useTable.getState().status === 'demo' && !listingCampaigns)
     throw new Error('This feature needs a live campaign. The demo stays in this tab.');
   if (supabase) {
     const { data } = await authClient().auth.getSession();
@@ -132,8 +133,38 @@ export async function uploadImage(file: File, purpose: 'map' | 'token' = 'map') 
 export async function deleteImage(id: string) {
   await authorizedFetch(`/api/assets/${useTable.getState().room.id}/${id}`, { method: 'DELETE' });
 }
+export async function currentAccount() {
+  if (!liveAvailable || !supabase) return null;
+  const { data, error } = await authClient().auth.getSession();
+  if (error) throw error;
+  if (!data.session) {
+    session = null;
+    return null;
+  }
+  const user = data.session.user;
+  session = {
+    token: data.session.access_token,
+    id: user.id,
+    name: String(user.user_metadata?.name || user.email?.split('@')[0] || 'Adventurer').slice(
+      0,
+      32,
+    ),
+  };
+  return { name: session.name, email: user.email || '' };
+}
+export async function signOut() {
+  if (supabase) {
+    const { error } = await authClient().auth.signOut();
+    if (error) throw error;
+  }
+  session = null;
+  localStorage.removeItem('aether-guest');
+  launchDemo();
+  disconnect();
+  useTable.getState().set({ self: null, canGM: false, presence: [], dialog: 'launch' });
+}
 export async function savedCampaigns() {
-  if (!liveAvailable || useTable.getState().status === 'demo') return [];
+  if (!liveAvailable) return [];
   if (!session) {
     if (supabase) {
       const { data } = await authClient().auth.getSession();
@@ -153,6 +184,7 @@ export async function savedCampaigns() {
   return request<Array<{ id: string; name: string; role: 'gm' | 'player' }>>('/api/campaigns');
 }
 export function resumeCampaign(id: string, role?: 'gm' | 'player') {
+  if (useTable.getState().status === 'demo') disconnect();
   const url = new URL(location.href);
   url.searchParams.set('room', id);
   url.searchParams.delete('invite');
@@ -163,13 +195,19 @@ export function resumeCampaign(id: string, role?: 'gm' | 'player') {
 export async function signIn(name: string, email?: string, password?: string, signUp = false) {
   if (supabase) {
     if (email && password) {
+      const confirmationUrl = new URL(import.meta.env.BASE_URL, location.origin);
+      const params = new URLSearchParams(location.search);
+      for (const key of ['room', 'invite']) {
+        const value = params.get(key);
+        if (value) confirmationUrl.searchParams.set(key, value);
+      }
       const { data, error } = signUp
         ? await authClient().auth.signUp({
             email,
             password,
             options: {
               data: { name },
-              emailRedirectTo: `${location.origin}${import.meta.env.BASE_URL}`,
+              emailRedirectTo: confirmationUrl.toString(),
             },
           })
         : await authClient().auth.signInWithPassword({ email, password });
@@ -178,7 +216,11 @@ export async function signIn(name: string, email?: string, password?: string, si
     }
     const { data } = await authClient().auth.getSession();
     if (!data.session) throw new Error('Sign in to open a table.');
-    session = { id: data.session.user.id, name, token: data.session.access_token };
+    session = {
+      id: data.session.user.id,
+      name: String(data.session.user.user_metadata?.name || name).slice(0, 32),
+      token: data.session.access_token,
+    };
   } else {
     try {
       session = JSON.parse(localStorage.getItem('aether-guest') || 'null') as Session | null;

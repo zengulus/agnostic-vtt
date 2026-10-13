@@ -666,21 +666,24 @@ export function Tabletop() {
         <div className="table-welcome">
           <h2>The next chapter.</h2>
           <button className="primary" aria-label="Open a demo table" onClick={() => launchDemo()}>
-            Enter as game master
+            Demo
+          </button>
+          <button
+            className="subtle-button welcome-login"
+            disabled={!liveAvailable}
+            title={!liveAvailable ? 'Live play is not configured yet.' : undefined}
+            onClick={() => store.set({ dialog: 'launch' })}
+          >
+            Log in
           </button>
           <button
             className="subtle-button"
             aria-label="Try the player demo"
             onClick={() => launchDemo('player')}
           >
-            Enter as player
+            Player demo
           </button>
-          {liveAvailable && (
-            <button className="subtle-button" onClick={() => store.set({ dialog: 'launch' })}>
-              Open a live table
-            </button>
-          )}
-          <small>No account needed.</small>
+          <small>Demo needs no account.</small>
         </div>
       )}
       {selected && (

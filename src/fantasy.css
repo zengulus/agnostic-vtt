@@ -900,3 +900,42 @@
 .history-card .macro-results dt {
   color: var(--muted-ink);
 }
+.account-summary {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 15px;
+  padding-bottom: 18px;
+  border-bottom: 1px solid #aa906440;
+  margin-bottom: 20px;
+  font-size: 11px;
+  color: var(--muted-ink);
+}
+.account-summary > span {
+  overflow-wrap: anywhere;
+  min-width: 0;
+}
+.account-summary > button {
+  flex-shrink: 0;
+  color: var(--rubric);
+  font-size: 11px;
+}
+.table-welcome .welcome-login {
+  width: 100%;
+  border: 1px solid #a78b6045;
+  margin: 2px 0 7px;
+}
+
+.modal-launch form > .subtle-button {
+  margin: 13px 20px 0 0;
+}
+.modal-launch .primary {
+  font: 19px var(--serif);
+  letter-spacing: 0;
+}
+.modal-launch .segmented button {
+  color: var(--muted-ink);
+}
+.modal-launch .resume-campaigns {
+  margin-top: 0;
+}

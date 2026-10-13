@@ -31,6 +31,8 @@ jobs:
         run: npm run test:pages
         env:
           VITE_BASE_PATH: ${{ vars.VITE_BASE_PATH || format('/{0}/', github.event.repository.name) }}
+      - name: Verify hosted login and campaign entry with mocked services
+        run: npm run test:hosted
       - run: npm run test:e2e
       - uses: actions/upload-pages-artifact@v3
         if: github.event_name != 'pull_request' && github.ref == format('refs/heads/{0}', github.event.repository.default_branch)

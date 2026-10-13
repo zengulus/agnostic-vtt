@@ -15,8 +15,8 @@ function observe(page: Page) {
 }
 async function create(page: Page) {
   await page.goto('/');
-  await page.getByRole('button', { name: 'Open a live table' }).click();
-  await page.getByRole('button', { name: 'Begin your adventure' }).click();
+  await page.getByRole('button', { name: 'Log in' }).click();
+  await page.getByRole('button', { name: 'Create campaign' }).click();
   await expect(page.getByText('Live', { exact: true })).toBeVisible();
 }
 test('independent browser clients move tokens, share dice/chat, and reconnect', async ({
@@ -107,14 +107,14 @@ test('keyboard activation works alongside tabletop shortcuts', async ({ page }) 
     localStorage.setItem('aether-settings', JSON.stringify({ reducedMotion: true })),
   );
   await page.goto('/');
-  const launch = page.getByRole('button', { name: 'Open a live table' });
+  const launch = page.getByRole('button', { name: 'Log in' });
   await launch.focus();
   await page.keyboard.press('Space');
   await expect(page.getByRole('dialog')).toBeVisible();
   await page.keyboard.press('Escape');
   await expect(launch).toBeFocused();
   await page.keyboard.press('Enter');
-  await page.getByRole('button', { name: 'Begin your adventure' }).click();
+  await page.getByRole('button', { name: 'Create campaign' }).click();
   await expect(page.getByText('Live', { exact: true })).toBeVisible();
   await page.getByRole('button', { name: 'Roll the dice' }).focus();
   await page.keyboard.press('Enter');
@@ -150,7 +150,7 @@ for (const [name, settings, presets, rolls] of [
       { settings, presets },
     );
     await page.goto('/');
-    await expect(page.getByRole('button', { name: 'Open a live table' })).toBeVisible();
+    await expect(page.getByRole('button', { name: 'Log in' })).toBeVisible();
     await expect(page.locator('.presets button')).toHaveText([...rolls]);
     await page.getByRole('button', { name: 'Settings', exact: true }).click();
     await expect(page.getByLabel('Reduced motion')).toBeChecked();
@@ -264,10 +264,10 @@ test('desktop and tablet render without errors or overflowing the viewport', asy
   await expect(page.getByRole('heading', { name: 'The next chapter.' })).toBeVisible();
   await page.screenshot({ path: 'test-results/tabletop-desktop.png' });
   await page.setViewportSize({ width: 820, height: 1180 });
-  await expect(page.getByRole('button', { name: 'Open a live table' })).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Log in' })).toBeVisible();
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
   await page.setViewportSize({ width: 390, height: 844 });
-  await expect(page.getByRole('button', { name: 'Open a live table' })).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Log in' })).toBeVisible();
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
   await page.screenshot({ path: 'test-results/tabletop-mobile.png' });
   expect(errors).toEqual([]);
@@ -278,9 +278,9 @@ test('a campaign owner can sign in as a player and keep that role on reconnect',
   context,
 }) => {
   await page.goto('/');
-  await page.getByRole('button', { name: 'Open a live table', exact: true }).click();
+  await page.getByRole('button', { name: 'Log in', exact: true }).click();
   await page.getByLabel('Enter table as').selectOption('player');
-  await page.getByRole('button', { name: 'Begin your adventure', exact: true }).click();
+  await page.getByRole('button', { name: 'Create campaign', exact: true }).click();
   await expect(page.getByText('Live', { exact: true })).toBeVisible();
   await expect(page.getByRole('button', { name: 'Return to GM', exact: true })).toBeVisible();
   await expect(page.getByRole('button', { name: 'Fog reveal / conceal', exact: true })).toHaveCount(

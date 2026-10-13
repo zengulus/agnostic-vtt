@@ -18,8 +18,8 @@ function observe(page: Page) {
 }
 async function create(page: Page) {
   await page.goto('/');
-  await page.getByRole('button', { name: 'Open a live table' }).click();
-  await page.getByRole('button', { name: 'Begin your adventure' }).click();
+  await page.getByRole('button', { name: 'Log in' }).click();
+  await page.getByRole('button', { name: 'Create campaign' }).click();
   await expect(page.getByText('Live', { exact: true })).toBeVisible();
 }
 async function roomState(page: Page): Promise<RoomState> {

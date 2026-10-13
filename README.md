@@ -4,9 +4,11 @@ A playable, system-agnostic fantasy tabletop with Milestones 1–3 implemented. 
 
 The interface takes its cues from a campaign atlas: parchment, walnut, faded brass and oxblood ink, with restrained serif headings and a map-first layout.
 
-## GitHub Pages demo — no backend needed
+## Play from GitHub Pages
 
-The static frontend includes a playable, browser-only demo. Choose **Enter as game master** for GM tools or **Enter as player** for the player experience. Neither requires an account, Render, Supabase, HTTP API calls, or a WebSocket. Supabase authentication initializes only when opening live campaigns. Built-in maps, portraits, fonts and dice assets ship with the site. Fonts retain their bundled SIL Open Font License notices in `public/fonts/`.
+GitHub Pages hosts the frontend for both live campaigns and the standalone demo. With the live service variables configured at build time, visitors choose **Demo** or **Log in**. Login authenticates through Supabase and shows campaigns the account belongs to; selecting a campaign connects to Render for shared play. Creating a campaign requires an explicit choice. Invitation links grant player membership when accepted, and a GM can enter their own campaign as a player.
+
+The frontend also includes a playable, browser-only demo. Choose **Demo** for GM tools or **Player demo** for the player experience. Neither requires an account, Render, Supabase, HTTP API calls, or a WebSocket. Supabase authentication initializes only when opening live campaigns. Built-in maps, portraits, fonts and dice assets ship with the site. Fonts retain their bundled SIL Open Font License notices in `public/fonts/`.
 
 Try token movement, scene/grid/fog tools, drawing, turns, undo/redo, dice, macro import/rolls and chat. **Play as player** hides GM controls and projects the table through the same visibility rules as live campaigns; **Return to GM** restores GM access. **Reset demo** starts fresh. Demo changes live only in the current tab and reset on reload. Multiplayer invitations, uploaded image storage and Discord delivery require a live campaign. External image URLs still require their image host.
 
@@ -116,14 +118,35 @@ The unit/server checks include real HTTP/WebSocket clients, permissions, private
 
 For a visual review, run `npm run review:visuals` after building with `VITE_BASE_PATH=/agnostic-vtt/`. Headless Chromium captures desktop, laptop, tablet and phone layouts, including GM/player views, macros, settings and rolls. Open `test-results/visual-review/index.html` for the screenshot gallery and `report.json` for viewport checks. Set `SCREENSHOT_DIR` to retain separate before/after runs; `PLAYWRIGHT_CHROMIUM_EXECUTABLE` can select an installed browser.
 
-## Optional live-service deployment
+## Set up live play on GitHub Pages
 
-The Pages demo above works independently. Add these services only for authenticated, persistent multiplayer.
+Players use the same Pages address for demo and live play. Supabase provides accounts, campaign membership, snapshots and image storage; Render runs the authoritative game server. Pages remains the browser frontend.
 
 1. Create a Supabase project and apply [001_tabletop.sql](supabase/migrations/001_tabletop.sql), then [002_assets_and_membership.sql](supabase/migrations/002_assets_and_membership.sql). Migration 002 creates the private image bucket and removes revoked memberships during snapshot saves. Existing Milestone 1 installations only need 002. Enable email/password authentication; configure the Site URL and allowed redirect URL to your Pages address, including the repository subpath. This implementation uses password sign-in and email-confirmation redirects.
 2. Deploy the backend using [render.yaml](render.yaml). Set `SUPABASE_URL`, `SUPABASE_SERVICE_ROLE_KEY`, and `ALLOWED_ORIGINS` (your Pages **origin**, e.g. `https://yourname.github.io`; comma-separated for multiple origins). Keep the service role key on Render only. Render supplies `PORT`. Production refuses local guest authentication.
-3. Configure GitHub Pages to use GitHub Actions. Set repository **variables** `VITE_SERVER_URL`, `VITE_SUPABASE_URL`, and `VITE_SUPABASE_ANON_KEY` (public publishable/anon key). The workflow builds for `/repository-name/`. For an account root site or custom domain, also set `VITE_BASE_PATH=/`.
+3. Configure GitHub Pages to use GitHub Actions. Under **Settings → Secrets and variables → Actions → Variables**, set repository **variables** `VITE_SERVER_URL`, `VITE_SUPABASE_URL`, and `VITE_SUPABASE_ANON_KEY` (public publishable/anon key). The workflow builds for `/repository-name/`. For an account root site or custom domain, also set `VITE_BASE_PATH=/`.
 4. Push to `master`, inspect the workflow, and verify two authenticated browsers against the hosted server. Deployment requires access to your GitHub, Render, and Supabase projects; none is claimed by this repository.
+
+For `https://zengulus.github.io/agnostic-vtt/`, configure:
+
+| Location                        | Setting                     | Value                                                                                       |
+| ------------------------------- | --------------------------- | ------------------------------------------------------------------------------------------- |
+| GitHub repository variables     | `VITE_SERVER_URL`           | `https://your-service.onrender.com`                                                         |
+| GitHub repository variables     | `VITE_SUPABASE_URL`         | `https://your-project.supabase.co`                                                          |
+| GitHub repository variables     | `VITE_SUPABASE_ANON_KEY`    | Supabase public anon/publishable key                                                        |
+| GitHub repository variables     | `VITE_BASE_PATH`            | `/agnostic-vtt/` (already the workflow default)                                             |
+| Render environment              | `AUTH_MODE`                 | `supabase`                                                                                  |
+| Render environment              | `SUPABASE_URL`              | Same Supabase project URL                                                                   |
+| Render environment              | `SUPABASE_SERVICE_ROLE_KEY` | Server-only service role key                                                                |
+| Render environment              | `ALLOWED_ORIGINS`           | `https://zengulus.github.io` (origin only)                                                  |
+| Supabase Auth URL configuration | Site URL                    | `https://zengulus.github.io/agnostic-vtt/`                                                  |
+| Supabase Auth URL configuration | Redirect URLs               | `https://zengulus.github.io/agnostic-vtt/` and `https://zengulus.github.io/agnostic-vtt/**` |
+
+The redirect pattern retains `room` and `invite` query parameters through signup confirmation; its host and repository path are fixed. See [Supabase redirect configuration](https://supabase.com/docs/guides/auth/redirect-urls). Keep the confirmation email's confirmation-link template so Supabase returns users to the supplied redirect.
+
+The three `VITE_` service values are compiled into the frontend: changing them requires a new Pages build. Production enables **Log in** only when all three are supplied. The demo works even when configured cloud services are asleep or unavailable. A Render cold start can delay campaign access; a campaign-list error offers **Retry campaigns** and does not create a replacement campaign.
+
+`npm run test:hosted` builds a separate static frontend with mocked Supabase and Render endpoints. It checks login failures, memberships, GM/player entry, restored login, invitations, confirmation redirects, sign out and explicit campaign creation, and captures entry screens in `test-results/hosted-entry/`. It preserves the real deployment build in `dist`.
 
 The frontend is static. Authentication tokens are sent in the first WebSocket message, never in the connection URL. The backend validates users through Supabase Auth and caches verified tokens for at most 30 seconds. Roles and ownership come from server state. New invitees become persisted campaign members; rejoining members reuse the room cached in memory.
 
