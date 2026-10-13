@@ -1,0 +1,510 @@
+import { randomBytes } from 'node:crypto';
+import {
+  canControl,
+  projectRoom,
+  tokenVisible,
+  type StateChange,
+  type DurableRoom,
+  type Presence,
+  type UploadedAsset,
+} from '../shared/model.js';
+import type { ClientMessage, ServerMessage } from '../shared/protocol.js';
+import { clampPoint } from '../shared/geometry.js';
+import { applyChanges, inverseChanges, projectChanges } from '../shared/state.js';
+import { prepareAction } from './actions.js';
+import { newRoom } from '../shared/sample.js';
+import type { Identity } from './auth.js';
+import { metrics, type Persistence } from './persistence.js';
+
+export interface Peer {
+  identity: Identity;
+  send(message: ServerMessage): void;
+  close?(reason: string): void;
+}
+interface HistoryEntry {
+  groupId?: string;
+  authorId?: string;
+  forward: StateChange[];
+  inverse: StateChange[];
+  label: string;
+}
+interface LiveRoom {
+  undo: HistoryEntry[];
+  redo: HistoryEntry[];
+  data: DurableRoom;
+  peers: Set<Peer>;
+  seen: Map<string, boolean>;
+  dirty: boolean;
+  generation: number;
+  persistedRevision: number;
+  lastSaved: number;
+  savePromise?: Promise<void>;
+  timer?: ReturnType<typeof setTimeout>;
+  idleTimer?: ReturnType<typeof setTimeout>;
+}
+export class RoomManager {
+  private rooms = new Map<string, LiveRoom>();
+  private hydration = new Map<string, Promise<LiveRoom>>();
+  constructor(
+    readonly storage: Persistence,
+    readonly interval = 90000,
+    readonly debounce = 5000,
+  ) {}
+  get activeRoomCount() {
+    return this.rooms.size;
+  }
+  async create(identity: Identity, name: string) {
+    if (this.rooms.size >= 100) throw new Error('The table server is full. Try again later.');
+    const id = randomBytes(8).toString('hex'),
+      inviteCode = randomBytes(18).toString('base64url');
+    const data = newRoom(id, identity.id, identity.name, name, inviteCode);
+    data.state.savedAt = new Date().toISOString();
+    await this.storage.save(data);
+    this.rooms.set(id, this.live(data));
+    return { id, inviteCode };
+  }
+  private live(data: DurableRoom): LiveRoom {
+    return {
+      data,
+      undo: [],
+      redo: [],
+      peers: new Set(),
+      seen: new Map(),
+      dirty: false,
+      generation: 0,
+      persistedRevision: data.state.revision,
+      lastSaved: Date.now(),
+    };
+  }
+  private async load(id: string): Promise<LiveRoom> {
+    const loaded = this.rooms.get(id);
+    if (loaded) return loaded;
+    let pending = this.hydration.get(id);
+    if (!pending) {
+      pending = (async () => {
+        if (this.rooms.size >= 100) throw new Error('The table server is full.');
+        const data = await this.storage.load(id);
+        if (!data || data.state.version !== 1)
+          throw new Error('Campaign not found. Check your invitation link.');
+        const room = this.live(data);
+        this.rooms.set(id, room);
+        return room;
+      })();
+      this.hydration.set(id, pending);
+    }
+    try {
+      return await pending;
+    } finally {
+      this.hydration.delete(id);
+    }
+  }
+  async join(peer: Peer, id: string, inviteCode?: string): Promise<void> {
+    const room = await this.load(id);
+    if (room.data.revokedMembers?.includes(peer.identity.id))
+      throw new Error('Your membership was removed. Ask the campaign owner for access.');
+    if (room.idleTimer) clearTimeout(room.idleTimer);
+    if (!room.data.members[peer.identity.id]) {
+      if (!inviteCode || inviteCode !== room.data.inviteCode)
+        throw new Error('An invitation is required to join this campaign.');
+      if (Object.keys(room.data.members).length >= 10)
+        throw new Error('This table already has ten members.');
+      room.data.members[peer.identity.id] = { name: peer.identity.name, role: 'player' };
+      room.dirty = true;
+      room.generation++;
+      // Membership is durable on acceptance; gameplay still batches writes.
+      try {
+        await this.flush(room);
+      } catch (error) {
+        delete room.data.members[peer.identity.id];
+        throw error;
+      }
+    }
+    if (room.peers.size >= 20) throw new Error('Too many open connections at this table.');
+    room.peers.add(peer);
+    this.snapshot(room, peer);
+    this.broadcastPresence(room);
+    for (const p of room.peers) this.memberList(room, p);
+  }
+  async list(userId: string) {
+    return this.storage.list?.(userId) || [];
+  }
+  async authorize(roomId: string, userId: string, gm = false) {
+    const room = await this.load(roomId);
+    const member = room.data.members[userId];
+    if (!member || room.data.revokedMembers?.includes(userId))
+      throw new Error('Campaign access denied.');
+    if (gm && member.role !== 'gm')
+      throw new Error('Only the game master can upload or manage images.');
+    return room.data;
+  }
+  async assetReadable(roomId: string, id: string, userId: string) {
+    const data = await this.authorize(roomId, userId);
+    const state = projectRoom(data, userId);
+    if (!state.assets || !Object.hasOwn(state.assets, id)) throw new Error('Image access denied.');
+    return state.assets[id];
+  }
+  async registerAsset(roomId: string, userId: string, asset: UploadedAsset) {
+    await this.authorize(roomId, userId, true);
+    const room = this.rooms.get(roomId)!;
+    if (
+      Object.keys(room.data.state.assets || {}).length >= 64 ||
+      Object.values(room.data.state.assets || {}).reduce((n, a) => n + a.bytes, 0) + asset.bytes >
+        64 * 1024 * 1024
+    )
+      throw new Error(
+        'Campaign image limit reached (64 images / 64 MiB). Remove unused images first.',
+      );
+    const assets = { ...room.data.state.assets, [asset.id]: asset };
+    room.data.state = { ...room.data.state, assets };
+    room.generation++;
+    room.dirty = true;
+    try {
+      await this.flush(room);
+    } catch (error) {
+      const remaining = { ...room.data.state.assets };
+      delete remaining[asset.id];
+      room.data.state = { ...room.data.state, assets: remaining };
+      room.generation++;
+      room.dirty = true;
+      this.retry(room);
+      throw error;
+    }
+    for (const p of room.peers) this.snapshot(room, p);
+  }
+  async removeAsset(roomId: string, id: string, userId: string) {
+    await this.authorize(roomId, userId, true);
+    const room = this.rooms.get(roomId)!,
+      state = room.data.state;
+    const referenced = (a: { kind: string; url: string }) => a.kind === 'uploaded' && a.url === id;
+    for (const s of Object.values(state.scenes))
+      if (referenced(s.map) || Object.values(s.tokens).some((t) => referenced(t.image)))
+        throw new Error(
+          'This image is still used in a scene. Replace or remove its objects first.',
+        );
+    if (Object.values(state.tokenLibrary || {}).some((t) => referenced(t.image)))
+      throw new Error('This image is still used in your saved token library.');
+    if (!state.assets || !Object.hasOwn(state.assets, id)) throw new Error('Image not found.');
+    const assets = { ...state.assets };
+    delete assets[id];
+    room.data.state = { ...state, assets };
+    room.undo = [];
+    room.redo = [];
+    room.generation++;
+    room.dirty = true;
+    try {
+      await this.flush(room);
+    } catch (error) {
+      room.data.state = {
+        ...room.data.state,
+        assets: { ...room.data.state.assets, [id]: state.assets[id] },
+      };
+      room.generation++;
+      room.dirty = true;
+      this.retry(room);
+      throw error;
+    }
+    for (const p of room.peers) this.snapshot(room, p);
+  }
+  private presence(room: LiveRoom): Presence[] {
+    const map = new Map<string, Presence>();
+    for (const peer of room.peers) map.set(peer.identity.id, this.self(room, peer));
+    return [...map.values()];
+  }
+  private self(room: LiveRoom, peer: Peer): Presence {
+    return {
+      id: peer.identity.id,
+      name: peer.identity.name,
+      role: room.data.members[peer.identity.id].role,
+      color: peer.identity.id === room.data.ownerId ? '#d8b46c' : '#89b8c9',
+    };
+  }
+  private snapshot(room: LiveRoom, peer: Peer) {
+    peer.send({
+      v: 2,
+      type: 'ROOM_SNAPSHOT',
+      state: projectRoom(room.data, peer.identity.id),
+      self: this.self(room, peer),
+      presence: this.presence(room),
+      ...(peer.identity.id === room.data.ownerId ? { inviteCode: room.data.inviteCode } : {}),
+    });
+    this.history(room, peer);
+    this.memberList(room, peer);
+  }
+  private history(room: LiveRoom, peer: Peer) {
+    if (room.data.members[peer.identity.id]?.role === 'gm')
+      peer.send({
+        v: 2,
+        type: 'HISTORY_STATUS',
+        history: {
+          canUndo: !!room.undo.length,
+          canRedo: !!room.redo.length,
+          undoLabel: room.undo.at(-1)?.label || '',
+          redoLabel: room.redo.at(-1)?.label || '',
+        },
+      });
+  }
+  private memberList(room: LiveRoom, peer: Peer) {
+    if (room.data.members[peer.identity.id]?.role === 'gm')
+      peer.send({
+        v: 2,
+        type: 'MEMBERS_UPDATE',
+        ownerId: room.data.ownerId,
+        members: Object.entries(room.data.members).map(([id, m]) => ({
+          id,
+          ...m,
+          color: id === room.data.ownerId ? '#d8b46c' : '#89b8c9',
+        })),
+      });
+  }
+  private broadcastPresence(room: LiveRoom) {
+    for (const p of room.peers)
+      p.send({ v: 2, type: 'PRESENCE_UPDATE', presence: this.presence(room) });
+  }
+  async leave(peer: Peer, id: string) {
+    const room = this.rooms.get(id);
+    if (!room) return;
+    room.peers.delete(peer);
+    this.broadcastPresence(room);
+    if (!room.peers.size) {
+      if (room.timer) clearTimeout(room.timer);
+      room.timer = setTimeout(
+        () => void this.flush(room).catch(() => this.retry(room)),
+        this.debounce,
+      );
+      room.idleTimer = setTimeout(async () => {
+        try {
+          await this.flush(room);
+          if (!room.peers.size) {
+            if (room.timer) clearTimeout(room.timer);
+            this.rooms.delete(id);
+          }
+        } catch {
+          this.retry(room);
+        }
+      }, 15 * 60000);
+    }
+  }
+  handle(peer: Peer, id: string, message: ClientMessage) {
+    const room = this.rooms.get(id);
+    if (!room || !room.peers.has(peer)) throw new Error('Join a campaign first.');
+    const data = room.data,
+      role = data.members[peer.identity.id].role;
+    if (message.type === 'JOIN_ROOM') throw new Error('Already connected to a campaign.');
+    if (message.type === 'STATE_RESYNC') {
+      this.snapshot(room, peer);
+      return;
+    }
+    const key = `${peer.identity.id}:${message.actionId}`;
+    if (
+      room.seen.has(key) ||
+      (message.type === 'DICE_ROLL_REQUEST' &&
+        data.state.rolls.some(
+          (r) => r.actionId === message.actionId && r.userId === peer.identity.id,
+        ))
+    ) {
+      this.snapshot(room, peer);
+      return;
+    }
+    if (!data.members[peer.identity.id])
+      throw new Error('You are no longer a member of this campaign.');
+    if (message.type === 'PING') {
+      for (const p of room.peers)
+        p.send({ v: 2, type: 'PING', position: message.position, userId: peer.identity.id });
+      return;
+    }
+    if (message.type === 'TOKEN_MOVE_PREVIEW' || message.type === 'TOKEN_MOVE_PREVIEW_BATCH') {
+      const s = data.state.scenes[message.sceneId];
+      if (!s) throw new Error('Scene not found.');
+      const positions =
+        message.type === 'TOKEN_MOVE_PREVIEW'
+          ? [{ tokenId: message.tokenId, position: message.position }]
+          : message.positions;
+      const validated = positions.map((p) => {
+        const t = s.tokens[p.tokenId];
+        if (!t || !canControl(t, peer.identity.id, role) || !tokenVisible(t, s, role))
+          throw new Error('You do not control that token.');
+        return { ...p, position: clampPoint(p.position, s.width, s.height, t.size) };
+      });
+      for (const p of room.peers) {
+        if (p === peer) continue;
+        const pRole = data.members[p.identity.id].role;
+        const visible = validated.filter(
+          (x) => pRole === 'gm' || (s.tokens[x.tokenId].visibility === 'public' && !s.fog.enabled),
+        );
+        if (!visible.length) continue;
+        if (message.type === 'TOKEN_MOVE_PREVIEW')
+          p.send({
+            v: 2,
+            type: 'TOKEN_MOVE_PREVIEW',
+            sceneId: s.id,
+            tokenId: visible[0].tokenId,
+            position: visible[0].position,
+            userId: peer.identity.id,
+          });
+        else
+          p.send({
+            v: 2,
+            type: 'TOKEN_MOVE_PREVIEW_BATCH',
+            sceneId: s.id,
+            positions: visible,
+            userId: peer.identity.id,
+          });
+      }
+      return;
+    }
+    if (message.type === 'MEMBER_UPDATE' || message.type === 'INVITE_ROTATE') {
+      if (peer.identity.id !== data.ownerId)
+        throw new Error('Only the campaign owner manages membership and invitations.');
+      if (message.type === 'INVITE_ROTATE') data.inviteCode = randomBytes(18).toString('base64url');
+      else {
+        if (message.userId === data.ownerId)
+          throw new Error('The campaign owner cannot be removed or demoted.');
+        const member = data.members[message.userId];
+        if (!member) throw new Error('Member not found.');
+        if (message.role === 'remove') {
+          delete data.members[message.userId];
+          data.revokedMembers = [...new Set([...(data.revokedMembers || []), message.userId])];
+          for (const p of room.peers)
+            if (p.identity.id === message.userId) {
+              room.peers.delete(p);
+              p.send({ v: 2, type: 'REVOKED', message: 'You were removed from this campaign.' });
+              p.close?.('Membership revoked');
+            }
+        } else data.members[message.userId] = { ...member, role: message.role };
+      }
+      room.generation++;
+      room.dirty = true;
+      room.undo = [];
+      room.redo = [];
+      for (const p of room.peers) this.snapshot(room, p);
+      this.broadcastPresence(room);
+      void this.flush(room).catch(() => this.retry(room));
+      return;
+    }
+    const before = data.state;
+    let changes: StateChange[];
+    if (message.type === 'UNDO' || message.type === 'REDO') {
+      if (role !== 'gm') throw new Error('Only the game master can change this.');
+      const source = message.type === 'UNDO' ? room.undo : room.redo,
+        target = message.type === 'UNDO' ? room.redo : room.undo;
+      const entry = source.pop();
+      if (!entry) throw new Error('Nothing to ' + message.type.toLowerCase() + '.');
+      changes = message.type === 'UNDO' ? entry.inverse : entry.forward;
+      target.push(entry);
+    } else {
+      changes = prepareAction(data, peer.identity, message);
+      if (!['DICE_ROLL_REQUEST', 'CHAT_SEND'].includes(message.type)) {
+        const inverse = inverseChanges(before, changes);
+        const groupId = message.type === 'FOG_APPEND' ? message.groupId : undefined,
+          last = room.undo.at(-1);
+        if (groupId && last?.groupId === groupId && last.authorId === peer.identity.id)
+          last.forward.push(...changes);
+        else
+          room.undo.push({
+            forward: changes,
+            inverse,
+            label: message.type.toLowerCase().replaceAll('_', ' '),
+            groupId,
+            authorId: peer.identity.id,
+          });
+        room.redo = [];
+        while (room.undo.length > 50 || JSON.stringify(room.undo).length > 1024 * 1024)
+          room.undo.shift();
+      }
+    }
+    data.state = { ...applyChanges(before, changes), revision: before.revision + 1 };
+    room.dirty = true;
+    room.generation++;
+    room.seen.set(key, true);
+    if (room.seen.size > 2000) room.seen.delete(room.seen.keys().next().value!);
+    for (const p of room.peers) {
+      const projected = projectChanges(
+        changes,
+        before,
+        data.state,
+        data.members[p.identity.id].role,
+        p.identity.id,
+      );
+      p.send({
+        v: 2,
+        type: 'STATE_PATCH',
+        actionId: message.actionId,
+        revision: data.state.revision,
+        changes: projected,
+      });
+      for (const c of projected)
+        if (c.kind === 'roll') p.send({ v: 2, type: 'DICE_ROLL_RESULT', roll: c.roll });
+      this.history(room, p);
+    }
+    this.schedule(room);
+    if (message.type === 'SCENE_CHANGE') void this.flush(room).catch(() => this.retry(room));
+  }
+  private schedule(room: LiveRoom) {
+    if (!room.timer)
+      room.timer = setTimeout(
+        () => {
+          room.timer = undefined;
+          void this.flush(room).catch(() => this.retry(room));
+        },
+        Math.max(this.debounce, room.lastSaved + this.interval - Date.now()),
+      );
+  }
+  private retry(room: LiveRoom) {
+    console.error('Snapshot failed; retaining dirty room and retrying.');
+    for (const p of room.peers)
+      p.send({
+        v: 2,
+        type: 'ERROR',
+        message: 'Snapshot storage is unavailable. Your table is still live; saving will retry.',
+      });
+    if (room.timer) clearTimeout(room.timer);
+    room.timer = setTimeout(() => {
+      room.timer = undefined;
+      void this.flush(room).catch(() => this.retry(room));
+    }, 10000);
+  }
+  private async flush(room: LiveRoom): Promise<void> {
+    if (room.savePromise) {
+      await room.savePromise;
+      if (room.dirty) return this.flush(room);
+      return;
+    }
+    if (!room.dirty) return;
+    const snapshot = structuredClone(room.data),
+      generation = room.generation;
+    const savedAt = new Date().toISOString();
+    snapshot.state.savedAt = savedAt;
+    room.savePromise = (async () => {
+      await this.storage.save(snapshot);
+      room.persistedRevision = snapshot.state.revision;
+      room.lastSaved = Date.now();
+      room.data.state.savedAt = savedAt;
+      room.dirty = room.generation !== generation;
+      for (const p of room.peers)
+        p.send({ v: 2, type: 'SAVED', savedAt, revision: snapshot.state.revision });
+    })();
+    try {
+      await room.savePromise;
+    } finally {
+      room.savePromise = undefined;
+    }
+    if (room.dirty) this.schedule(room);
+  }
+  async flushAll() {
+    await Promise.all([...this.rooms.values()].map((r) => this.flush(r)));
+  }
+  async close() {
+    for (const r of this.rooms.values()) {
+      if (r.timer) clearTimeout(r.timer);
+      if (r.idleTimer) clearTimeout(r.idleTimer);
+    }
+    await this.flushAll();
+  }
+  get stats() {
+    return {
+      ...metrics,
+      activeRooms: this.rooms.size,
+      connections: [...this.rooms.values()].reduce((a, r) => a + r.peers.size, 0),
+    };
+  }
+}
