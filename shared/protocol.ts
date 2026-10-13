@@ -125,6 +125,23 @@ export const clientMessageSchema = z.discriminatedUnion('type', [
     role: z.enum(['gm', 'player', 'remove']),
   }),
   z.object({ ...base, type: z.literal('INVITE_ROTATE') }),
+  z.object({
+    ...base,
+    type: z.literal('MACRO_IMPORT'),
+    text: z.string().min(1).max(65536),
+    visibility: z.enum(['public', 'private']),
+  }),
+  z.object({ ...base, type: z.literal('MACRO_DELETE'), id: idSchema }),
+  z.object({
+    ...base,
+    type: z.literal('MACRO_ROLL_REQUEST'),
+    id: idSchema,
+    variables: z.record(
+      z.string().regex(/^[A-Za-z][A-Za-z0-9_]{0,23}$/),
+      z.number().finite().min(-10000).max(10000),
+    ),
+    visibility: z.enum(['public', 'private']),
+  }),
 ]);
 export type ClientMessage = z.infer<typeof clientMessageSchema>;
 export type Action = ClientMessage extends infer T
@@ -163,6 +180,14 @@ export type HistoryStatus = {
   redoLabel: string;
 };
 export type ExtraServerMessage =
+  | { v: 2; type: 'DISCORD_STATUS'; discord: DiscordStatus }
+  | {
+      v: 2;
+      type: 'DISCORD_DELIVERY';
+      rollId: string;
+      status: 'queued' | 'sent' | 'failed';
+      message: string;
+    }
   | { v: 2; type: 'HISTORY_STATUS'; history: HistoryStatus }
   | { v: 2; type: 'MEMBERS_UPDATE'; members: Array<Presence>; ownerId: string }
   | { v: 2; type: 'REVOKED'; message: string }
@@ -173,3 +198,9 @@ export type ExtraServerMessage =
       positions: Array<{ tokenId: string; position: Point }>;
       userId: string;
     };
+export interface DiscordStatus {
+  configured: boolean;
+  enabled: boolean;
+  mode: 'automatic' | 'manual';
+  canManage: boolean;
+}

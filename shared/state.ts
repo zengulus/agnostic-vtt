@@ -3,6 +3,7 @@ import {
   projectScene,
   projectTracker,
   projectAssets,
+  macroVisible,
   tokenVisible,
   type RoomState,
   type StateChange,
@@ -57,6 +58,11 @@ export function applyChanges(state: RoomState, changes: StateChange[]): RoomStat
       continue;
     }
     switch (c.kind) {
+      case 'macro':
+        next.macros = { ...next.macros };
+        if (c.macro) next.macros[c.id] = c.macro;
+        else delete next.macros[c.id];
+        break;
       case 'scene':
         next.scenes = { ...next.scenes, [c.scene.id]: c.scene };
         break;
@@ -94,6 +100,9 @@ export function inverseChanges(state: RoomState, changes: StateChange[]): StateC
   for (const c of changes) {
     const scene = 'sceneId' in c ? current.scenes[c.sceneId] : undefined;
     switch (c.kind) {
+      case 'macro':
+        inverse.unshift({ ...c, macro: current.macros?.[c.id] || null });
+        break;
       case 'token': {
         const old = scene?.tokens[c.token.id];
         inverse.unshift(
@@ -175,6 +184,12 @@ export function projectChanges(
     fogScenes = new Set<string>();
   const clean = (t: Token) => (role === 'gm' ? t : { ...t, note: undefined });
   for (const c of changes) {
+    if (c.kind === 'macro') {
+      const old = before.macros?.[c.id];
+      if (c.macro && macroVisible(c.macro, userId, role)) projected.push(c);
+      else if (old && macroVisible(old, userId, role)) projected.push({ ...c, macro: null });
+      continue;
+    }
     if (c.kind === 'token') {
       const old = before.scenes[c.sceneId]?.tokens[c.token.id],
         s = after.scenes[c.sceneId];

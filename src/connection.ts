@@ -1,5 +1,5 @@
 import { createClient } from '@supabase/supabase-js';
-import type { Action, ServerMessage } from '../shared/protocol.js';
+import type { Action, DiscordStatus, ServerMessage } from '../shared/protocol.js';
 import { useTable, notify } from './store.js';
 import { demoState } from './store.js';
 import { applyChanges } from '../shared/state.js';
@@ -20,6 +20,44 @@ let session: Session | null = null,
   attempts = 0,
   stopped = false;
 let config: { roomId: string; inviteCode?: string } | null = null;
+const actionWaiters = new Map<string, { resolve: () => void; reject: (error: Error) => void }>();
+export function sendAndWait(action: Action): Promise<void> {
+  const id = send(action);
+  if (!id) return Promise.reject(new Error('Connect to a live table first.'));
+  return new Promise((resolve, reject) => {
+    const timer = setTimeout(() => {
+      actionWaiters.delete(id);
+      reject(new Error('No confirmation received. Check the macro library before trying again.'));
+    }, 10000);
+    actionWaiters.set(id, {
+      resolve: () => {
+        clearTimeout(timer);
+        resolve();
+      },
+      reject: (error) => {
+        clearTimeout(timer);
+        reject(error);
+      },
+    });
+  });
+}
+export async function configureDiscord(
+  settings: { url?: string; enabled: boolean; mode: 'automatic' | 'manual' } | null,
+) {
+  const roomId = useTable.getState().room.id;
+  const response = await authorizedFetch(`/api/campaigns/${roomId}/discord`, {
+    method: settings ? 'PUT' : 'DELETE',
+    headers: { 'Content-Type': 'application/json' },
+    body: settings ? JSON.stringify(settings) : undefined,
+  });
+  const discord = (await response.json()) as DiscordStatus;
+  if (useTable.getState().room.id === roomId) useTable.getState().set({ discord });
+}
+export async function shareDiscord(rollId: string) {
+  await authorizedFetch(`/api/campaigns/${useTable.getState().room.id}/discord/rolls/${rollId}`, {
+    method: 'POST',
+  });
+}
 window.addEventListener('offline', () => socket?.close());
 window.addEventListener('online', () => {
   if (!stopped && config && session && useTable.getState().status === 'reconnecting') open();
@@ -224,6 +262,14 @@ function open() {
       notify('Your app version is out of date. Reload this page.');
       return;
     }
+    if ((message.type === 'STATE_PATCH' || message.type === 'ERROR') && message.actionId) {
+      const waiter = actionWaiters.get(message.actionId);
+      if (waiter) {
+        actionWaiters.delete(message.actionId);
+        if (message.type === 'ERROR') waiter.reject(new Error(message.message));
+        else waiter.resolve();
+      }
+    }
     switch (message.type) {
       case 'ROOM_SNAPSHOT':
         attempts = 0;
@@ -235,6 +281,17 @@ function open() {
           status: 'live',
           inviteCode: message.inviteCode,
           previews: {},
+          ...(store.room.id !== message.state.id
+            ? {
+                deliveries: {},
+                discord: {
+                  configured: false,
+                  enabled: false,
+                  mode: 'automatic' as const,
+                  canManage: false,
+                },
+              }
+            : {}),
           selected:
             store.room.id === message.state.id &&
             store.room.activeSceneId === message.state.activeSceneId &&
@@ -348,6 +405,19 @@ function open() {
       case 'MEMBERS_UPDATE':
         store.set({ members: message.members, ownerId: message.ownerId });
         break;
+      case 'DISCORD_STATUS':
+        store.set({ discord: message.discord });
+        break;
+      case 'DISCORD_DELIVERY':
+        store.set({
+          deliveries: Object.fromEntries(
+            [
+              ...Object.entries(store.deliveries).filter(([id]) => id !== message.rollId),
+              [message.rollId, { status: message.status, message: message.message }],
+            ].slice(-100),
+          ),
+        });
+        break;
       case 'REVOKED':
         disconnect();
         store.set({
@@ -358,6 +428,8 @@ function open() {
           selectedIds: [],
           members: [],
           ownerId: null,
+          discord: { configured: false, enabled: false, mode: 'automatic', canManage: false },
+          deliveries: {},
           dialog: 'launch',
           error: message.message,
           presentation: null,

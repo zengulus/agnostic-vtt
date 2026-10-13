@@ -4,6 +4,7 @@ import {
   emptyTracker,
   sceneSchema,
   tokenVisible,
+  macroVisible,
   type DurableRoom,
   type StateChange,
   type Token,
@@ -14,6 +15,7 @@ import { clampPoint, snapPoint } from '../shared/geometry.js';
 import { evaluateDice } from '../shared/dice.js';
 import { sampleScene } from '../shared/sample.js';
 import type { Identity } from './auth.js';
+import { importMacros, parseMacro, evaluateMacro } from '../shared/macros.js';
 export function assertAsset(room: DurableRoom, asset: Token['image']) {
   validateAsset(asset);
   if (asset.kind === 'uploaded' && !room.state.assets?.[asset.url])
@@ -68,6 +70,62 @@ export function prepareAction(room: DurableRoom, user: Identity, m: ClientMessag
     });
   };
   switch (m.type) {
+    case 'MACRO_IMPORT': {
+      const imported = importMacros(m.text);
+      if (imported.errors.length)
+        throw new Error(`Line ${imported.errors[0].line}: ${imported.errors[0].message}`);
+      const existing = Object.values(state.macros || {});
+      if (
+        existing.length + imported.macros.length > 200 ||
+        existing.filter((macro) => macro.ownerId === user.id).length + imported.macros.length > 100
+      )
+        throw new Error('Save at most 100 macros per person and 200 per campaign.');
+      return imported.macros.map((definition) => {
+        const id = randomUUID();
+        return {
+          kind: 'macro',
+          id,
+          macro: {
+            id,
+            name: definition.name,
+            source: definition.source,
+            ownerId: user.id,
+            visibility: m.visibility,
+          },
+        };
+      });
+    }
+    case 'MACRO_DELETE': {
+      const macro =
+        state.macros && Object.hasOwn(state.macros, m.id) ? state.macros[m.id] : undefined;
+      if (!macro || !macroVisible(macro, user.id, role)) throw new Error('Macro not found.');
+      if (macro.ownerId !== user.id && role !== 'gm')
+        throw new Error('Only its author or a game master can remove this macro.');
+      return [{ kind: 'macro', id: m.id, macro: null }];
+    }
+    case 'MACRO_ROLL_REQUEST': {
+      const macro =
+        state.macros && Object.hasOwn(state.macros, m.id) ? state.macros[m.id] : undefined;
+      if (!macro || !macroVisible(macro, user.id, role)) throw new Error('Macro not found.');
+      const result = evaluateMacro(parseMacro(macro.source), m.variables, randomInt);
+      return [
+        {
+          kind: 'roll',
+          roll: {
+            id: randomUUID(),
+            actionId: m.actionId,
+            userId: user.id,
+            userName: user.name,
+            expression: macro.name,
+            terms: result.groups.flatMap((group) => group.terms),
+            total: result.groups[0].total,
+            macro: result,
+            visibility: m.visibility,
+            createdAt: new Date().toISOString(),
+          },
+        },
+      ];
+    }
     case 'TOKEN_MOVE_COMMIT':
       return [move(m.sceneId, m.tokenId, m.position)];
     case 'TOKEN_MOVE_BATCH':

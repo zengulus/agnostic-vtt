@@ -15,6 +15,8 @@ import { resolveAsset } from '../assets.js';
 import { invalidateImage } from '../rendering.js';
 import { TokenLibraryDialog, AssetManagerDialog, ObjectsDialog } from './Workshop.js';
 import { DiceSettings } from './DiceSettings.js';
+import { MacroLibraryDialog } from './Macros.js';
+import { DiscordSettings } from './DiscordSettings.js';
 import { unlockSound } from '../sound.js';
 import type { Asset, Token } from '../../shared/model.js';
 export function Dialogs() {
@@ -60,6 +62,8 @@ export function Dialogs() {
     library: 'Your cast of characters',
     assets: 'The images in your world',
     objects: 'Regions, drawings & notes',
+    macros: 'Your book of macros',
+    discord: 'Bring the story to Discord',
   }[s.dialog];
   return (
     <div
@@ -100,6 +104,10 @@ export function Dialogs() {
           <AssetManagerDialog />
         ) : s.dialog === 'objects' ? (
           <ObjectsDialog />
+        ) : s.dialog === 'macros' ? (
+          <MacroLibraryDialog />
+        ) : s.dialog === 'discord' ? (
+          <DiscordSettings />
         ) : (
           <Help />
         )}

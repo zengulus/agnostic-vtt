@@ -1,0 +1,4 @@
+# One macro per line. X is entered when the macro runs.
+[Attack Name]\([Attack Roll(1d20 + X)],[Damage Roll(1d6 + [Fire(1d6)] + [Akashic(12)])])
+[Restoration]\([Healing Roll(2d6 + [Divine(4)] + X)])
+[Exploration]\([Perception Roll(1d20 + WIS)],[Travel Supplies(12 - [Consumed(1d4)])])

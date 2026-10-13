@@ -3,7 +3,7 @@ import type { Point, Presence, Roll, RoomState } from '../shared/model.js';
 import { sampleScene } from '../shared/sample.js';
 import type { Camera } from '../shared/geometry.js';
 import { dicePreferencesSchema, type DicePreferences } from '../shared/diceThemes.js';
-import type { HistoryStatus } from '../shared/protocol.js';
+import type { DiscordStatus, HistoryStatus } from '../shared/protocol.js';
 export type Tool = 'select' | 'pan' | 'measure' | 'ping' | 'zone' | 'fog' | 'draw' | 'text';
 export type Dialog =
   | 'launch'
@@ -16,6 +16,8 @@ export type Dialog =
   | 'library'
   | 'assets'
   | 'objects'
+  | 'macros'
+  | 'discord'
   | null;
 export const demoState: RoomState = {
   version: 1,
@@ -53,6 +55,8 @@ interface UIState {
   history: HistoryStatus;
   members: Presence[];
   ownerId: string | null;
+  discord: DiscordStatus;
+  deliveries: Record<string, { status: 'queued' | 'sent' | 'failed'; message: string }>;
   zoneShape: 'rectangle' | 'circle' | 'polygon' | 'line' | 'cone';
   zoneSnap: boolean;
   fogShape: 'circle' | 'rectangle' | 'polygon';
@@ -103,6 +107,8 @@ export const useTable = create<UIState>((set, get) => ({
   history: { canUndo: false, canRedo: false, undoLabel: '', redoLabel: '' },
   members: [],
   ownerId: null,
+  discord: { configured: false, enabled: false, mode: 'automatic', canManage: false },
+  deliveries: {},
   zoneShape: 'rectangle',
   zoneSnap: false,
   fogShape: 'circle',

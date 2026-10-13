@@ -57,8 +57,19 @@ try {
   if (!urls.every((image) => image.loaded && image.url.startsWith(`${address}assets/`))) {
     throw new Error('Built sample assets did not load from the repository subpath.');
   }
+  await page.getByRole('button', { name: 'Macros · import .txt' }).click();
+  const example = await page
+    .getByRole('link', { name: 'Download example macro.txt ↗' })
+    .getAttribute('href');
+  if (example !== `${base}examples/macro.txt`)
+    throw new Error('Macro example link does not use the repository subpath.');
+  const exampleResponse = await fetch(new URL(example, address));
+  if (!exampleResponse.ok || !(await exampleResponse.text()).includes('[Restoration]'))
+    throw new Error('Built macro.txt example is missing.');
   if (errors.length) throw new Error(errors.join('\n'));
-  console.log(`Static production smoke check passed at ${base}; map assets and UI loaded.`);
+  console.log(
+    `Static production smoke check passed at ${base}; map assets, macro.txt example and UI loaded.`,
+  );
 } finally {
   if (browser) await browser.close();
   preview.kill('SIGTERM');

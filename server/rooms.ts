@@ -15,6 +15,8 @@ import { prepareAction } from './actions.js';
 import { newRoom } from '../shared/sample.js';
 import type { Identity } from './auth.js';
 import { metrics, type Persistence } from './persistence.js';
+import { DiscordDelivery, normalizeWebhook } from './discord.js';
+import type { DiscordStatus } from '../shared/protocol.js';
 
 export interface Peer {
   identity: Identity;
@@ -39,6 +41,7 @@ interface LiveRoom {
   persistedRevision: number;
   lastSaved: number;
   savePromise?: Promise<void>;
+  configPromise?: Promise<void>;
   timer?: ReturnType<typeof setTimeout>;
   idleTimer?: ReturnType<typeof setTimeout>;
 }
@@ -49,6 +52,7 @@ export class RoomManager {
     readonly storage: Persistence,
     readonly interval = 90000,
     readonly debounce = 5000,
+    readonly discordDelivery = new DiscordDelivery(),
   ) {}
   get activeRoomCount() {
     return this.rooms.size;
@@ -136,6 +140,94 @@ export class RoomManager {
     if (gm && member.role !== 'gm')
       throw new Error('Only the game master can upload or manage images.');
     return room.data;
+  }
+  async discordStatus(roomId: string, userId: string): Promise<DiscordStatus> {
+    const data = await this.authorize(roomId, userId);
+    return {
+      configured: !!data.discord,
+      enabled: data.discord?.enabled || false,
+      mode: data.discord?.mode || 'automatic',
+      canManage: data.ownerId === userId,
+    };
+  }
+  async configureDiscord(
+    roomId: string,
+    userId: string,
+    settings: { url?: string; enabled: boolean; mode: 'automatic' | 'manual' } | null,
+  ) {
+    const data = await this.authorize(roomId, userId);
+    if (data.ownerId !== userId) throw new Error('Only the campaign owner can configure Discord.');
+    const room = this.rooms.get(roomId)!;
+    const pending = (room.configPromise || Promise.resolve())
+      .catch(() => {})
+      .then(async () => {
+        const previous = data.discord;
+        if (settings) {
+          const url = settings.url?.trim() ? normalizeWebhook(settings.url) : previous?.url;
+          if (!url) throw new Error('Enter a Discord webhook URL.');
+          data.discord = { url, enabled: settings.enabled, mode: settings.mode };
+        } else delete data.discord;
+        room.generation++;
+        room.dirty = true;
+        try {
+          await this.flush(room);
+        } catch (error) {
+          data.discord = previous;
+          room.generation++;
+          room.dirty = true;
+          this.retry(room);
+          throw error;
+        }
+        this.discordDelivery.cancelRoom(roomId);
+        for (const peer of room.peers) this.discordStatusMessage(room, peer);
+      });
+    room.configPromise = pending;
+    try {
+      await pending;
+    } finally {
+      if (room.configPromise === pending) room.configPromise = undefined;
+    }
+    return this.discordStatus(roomId, userId);
+  }
+  async shareDiscord(roomId: string, userId: string, rollId: string) {
+    const data = await this.authorize(roomId, userId),
+      roll = data.state.rolls.find((r) => r.id === rollId);
+    if (!roll || roll.visibility !== 'public')
+      throw new Error('Only existing public results can be sent to Discord.');
+    if (roll.userId !== userId && data.members[userId].role !== 'gm')
+      throw new Error('Send your own results or ask a game master.');
+    this.deliverDiscord(this.rooms.get(roomId)!, roll, true);
+  }
+  private discordStatusMessage(room: LiveRoom, peer: Peer) {
+    peer.send({
+      v: 2,
+      type: 'DISCORD_STATUS',
+      discord: {
+        configured: !!room.data.discord,
+        enabled: room.data.discord?.enabled || false,
+        mode: room.data.discord?.mode || 'automatic',
+        canManage: room.data.ownerId === peer.identity.id,
+      },
+    });
+  }
+  private deliverDiscord(room: LiveRoom, roll: import('../shared/model.js').Roll, manual = false) {
+    const config = room.data.discord;
+    if (!config?.enabled) {
+      if (manual) throw new Error('The campaign Discord webhook is disabled or not configured.');
+      return;
+    }
+    if (roll.visibility !== 'public' || (!manual && config.mode !== 'automatic')) return;
+    this.discordDelivery.enqueue(
+      room.data.state.id,
+      config.url,
+      roll,
+      room.data.state.name,
+      (status, message) => {
+        for (const peer of room.peers)
+          peer.send({ v: 2, type: 'DISCORD_DELIVERY', rollId: roll.id, status, message });
+      },
+      manual,
+    );
   }
   async assetReadable(roomId: string, id: string, userId: string) {
     const data = await this.authorize(roomId, userId);
@@ -229,6 +321,7 @@ export class RoomManager {
     });
     this.history(room, peer);
     this.memberList(room, peer);
+    this.discordStatusMessage(room, peer);
   }
   private history(room: LiveRoom, peer: Peer) {
     if (room.data.members[peer.identity.id]?.role === 'gm')
@@ -297,7 +390,7 @@ export class RoomManager {
     const key = `${peer.identity.id}:${message.actionId}`;
     if (
       room.seen.has(key) ||
-      (message.type === 'DICE_ROLL_REQUEST' &&
+      (['DICE_ROLL_REQUEST', 'MACRO_ROLL_REQUEST'].includes(message.type) &&
         data.state.rolls.some(
           (r) => r.actionId === message.actionId && r.userId === peer.identity.id,
         ))
@@ -393,7 +486,7 @@ export class RoomManager {
       target.push(entry);
     } else {
       changes = prepareAction(data, peer.identity, message);
-      if (!['DICE_ROLL_REQUEST', 'CHAT_SEND'].includes(message.type)) {
+      if (!['DICE_ROLL_REQUEST', 'MACRO_ROLL_REQUEST', 'CHAT_SEND'].includes(message.type)) {
         const inverse = inverseChanges(before, changes);
         const groupId = message.type === 'FOG_APPEND' ? message.groupId : undefined,
           last = room.undo.at(-1);
@@ -437,6 +530,21 @@ export class RoomManager {
       this.history(room, p);
     }
     this.schedule(room);
+    for (const change of changes)
+      if (change.kind === 'roll') {
+        try {
+          this.deliverDiscord(room, change.roll);
+        } catch {
+          for (const peer of room.peers)
+            peer.send({
+              v: 2,
+              type: 'DISCORD_DELIVERY',
+              rollId: change.roll.id,
+              status: 'failed',
+              message: 'Discord queue unavailable. Your roll remains in table history.',
+            });
+        }
+      }
     if (message.type === 'SCENE_CHANGE') void this.flush(room).catch(() => this.retry(room));
   }
   private schedule(room: LiveRoom) {
@@ -494,6 +602,7 @@ export class RoomManager {
     await Promise.all([...this.rooms.values()].map((r) => this.flush(r)));
   }
   async close() {
+    this.discordDelivery.close();
     for (const r of this.rooms.values()) {
       if (r.timer) clearTimeout(r.timer);
       if (r.idleTimer) clearTimeout(r.idleTimer);

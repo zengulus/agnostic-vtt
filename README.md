@@ -38,6 +38,42 @@ Settings include dice/number colours, metal/glass/plastic/wood/gemstone material
 
 Low performance mode disables shadows and particles. Cinematic mode uses 2048-pixel shadows, up to 2× pixel density and additional particles. Physics code loads on demand. The adapter fixes upstream forced-d4 result retention, scales playback while retaining fixed physics steps, and manages resize/GPU cleanup.
 
+## Macro files and named rolls
+
+Open **Macros · import .txt** in the dice panel. Choose `macro.txt` or paste definitions, review the preview, and import. Each nonblank line is a separate macro. LF, CRLF, CR, a UTF-8 BOM and `#` comment lines are supported. An invalid line prevents the entire import; errors identify its line. Download a ready-to-use [example file](public/examples/macro.txt) from the dialog.
+
+```text
+[Attack Name]\([Attack Roll(1d20 + X)],[Damage Roll(1d6 + [Fire(1d6)] + [Akashic(12)])])
+[Restoration]\([Healing Roll(2d6 + [Divine(4)] + X)])
+[Exploration]\([Perception Roll(1d20 + WIS)],[Travel Supplies(12 - [Consumed(1d4)])])
+```
+
+The backslash before the outer parenthesis is optional. The importer accepts the supplied example with its final `])` missing and previews the completed definition before saving; missing internal delimiters remain errors. A macro has a name and comma-separated `[Roll name(expression)]` groups. Expressions support standard dice, integer constants, `+`/`-`, numeric inputs such as `X` or `WIS`, and `[Label(expression)]` contributions. This is a bounded data grammar, without JavaScript evaluation.
+
+Select a saved macro, enter its numeric inputs, choose public/private results, and roll. For example, `X = 5`, an attack die of 14, and damage dice of 3 and 4 display:
+
+```text
+Attack Name
+Attack Roll: 19
+Damage Roll: 3 + 4 Fire damage + 12 Akashic damage = 19
+```
+
+Names are generic: `[Healing Roll(...)]`, `[Resource Roll(...)]`, `[Awareness(...)]`, or your own headings work the same way. A heading ending in `Roll` supplies the label suffix: `Fire damage`, `Divine healing`, etc. Other headings preserve labels without a suffix. Labeled expressions display their subtotals; individual dice faces also appear in the arithmetic presentation. Nested labels are grouped under their outer label. Unlabeled groups show their final result. Each group has its own total; unrelated rolls are never added together in the UI or Discord message.
+
+Imported macros persist in campaign snapshots. Public definitions can be used by any campaign member; private definitions are visible to their author and GMs. Only the author or a GM can delete a macro. Result privacy is chosen separately, with private definitions defaulting to private results in the UI. Server randomness, permissions, replay and recent roll history apply to macros just as they do to ordinary dice. One execution is one history entry containing every result group. The legacy `Roll.total` field holds the first group's total; macro-aware consumers should read `Roll.macro.groups`.
+
+Limits: 64 KiB per import, 100 definitions per import/person, 200 per campaign, 4096 characters per definition, eight groups, 20 dice and 40 numeric/dice contributions across the whole macro, four nested label levels, and 12 numeric inputs. Numeric inputs accept finite values between −10,000 and 10,000; constants are integers up to 10,000. Advanced dice conventions and arbitrary scripting are future work.
+
+## Discord webhooks
+
+The campaign owner opens **Discord webhook ↗**, pastes a channel webhook URL, and saves. Automatic posting of public dice and macro results is the default. Settings also offer manual delivery from roll history, disabling delivery, replacing the webhook and removing it. Private results cannot be forwarded, including by a GM. Each macro is a single Discord message with a field for each named roll.
+
+The URL is an HTTP credential sent once over the authenticated settings endpoint and saved only in the server's protected durable snapshot. It is never returned in status responses, campaign projections or WebSocket messages, and the app does not save it to browser storage. Only the campaign owner can configure it; other members can manually send their own public results, and GMs can send any public result. An existing saved URL can be kept by leaving its field blank. No additional environment variables, database migration, bot account or browser-to-Discord request is needed.
+
+Delivery uses the [Discord webhook API](https://docs.discord.com/developers/resources/webhook) with confirmation, mention suppression, HTTPS endpoint validation, blocked redirects, bounded embed text, an eight-second request deadline and an ordered queue per webhook. It observes [Discord rate limits](https://github.com/discord/discord-api-docs/blob/main/developers/topics/rate-limits.mdx), retries HTTP 429 up to three attempts, and shows queued/sent/failed status in roll history. Failed delivery never rolls back a tabletop result. An explicit retry is available; uncertain network failures are not retried automatically because the original message may have arrived. Updating or removing settings cancels pending delivery; an already transmitted message cannot be recalled.
+
+Queues and delivery deduplication are in memory, bounded to 200 pending messages globally, 50 per webhook and 1000 recent delivery states. A restart can discard pending messages and delivery status; manually sending an older result after a restart may duplicate a previous Discord message. Roll and macro persistence still follow the normal snapshot schedule. No live Discord channel has been contacted during verification; HTTP responses, rate limits and failures are tested with an injected transport.
+
 ## Verify
 
 ```bash
@@ -49,7 +85,7 @@ npm run test:e2e
 
 To smoke-check a production build under a repository subpath, build with `VITE_BASE_PATH=/agnostic-vtt/` and run `node scripts/verify-pages.mjs`. This verifies static startup and asset loading, without signing in to cloud services.
 
-The 63 unit/server checks include real HTTP/WebSocket clients, permissions, private uploads, grouped fog history, atomic batches, membership changes and restart recovery. Nine Chromium scenarios cover independent users, uploads/templates/statuses/group movement, drawing privacy, fog geometry, hidden turns, persistent preferences, tablet controls and actual forced physical dice faces. A large-map check exercises a 10,000-pixel hex scene with 100 tokens and verifies viewport-bounded grid work. For an existing browser binary, set `PLAYWRIGHT_CHROMIUM_EXECUTABLE` to its absolute path.
+The 108 unit/server checks include real HTTP/WebSocket clients, permissions, private uploads, grouped fog history, atomic batches, membership changes, restart recovery, macro parsing/imports, separate result totals and webhook delivery. Eleven Chromium scenarios cover independent users, uploads/templates/statuses/group movement, drawing privacy, fog geometry, hidden turns, persistent preferences, tablet controls, actual forced physical dice faces, multiline macro imports and webhook settings. A large-map check exercises a 10,000-pixel hex scene with 100 tokens and verifies viewport-bounded grid work. For an existing browser binary, set `PLAYWRIGHT_CHROMIUM_EXECUTABLE` to its absolute path.
 
 ## Deployment
 

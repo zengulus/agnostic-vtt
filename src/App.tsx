@@ -44,6 +44,8 @@ import { parseDice } from '../shared/dice.js';
 import { Tabletop } from './components/Tabletop.js';
 import { RollPresentation } from './components/RollPresentation.js';
 import { Dialogs } from './components/Dialogs.js';
+import { MacroResults } from './components/Macros.js';
+import { DiscordShare } from './components/DiscordSettings.js';
 import type { Tool } from './store.js';
 import { unlockSound } from './sound.js';
 
@@ -502,37 +504,49 @@ function Chronicle() {
             ) : (
               <div className="roll-history">
                 {[...s.room.rolls].reverse().map((r) => (
-                  <button
-                    className="history-card"
-                    key={r.id}
-                    onClick={() => s.set({ presentation: r, rollQueue: [] })}
-                  >
-                    <span className="history-user">
-                      <span>{r.userName}</span>
-                      <small>
-                        {r.visibility === 'private' && <Lock size={10} />}{' '}
-                        {new Date(r.createdAt).toLocaleTimeString([], {
-                          hour: '2-digit',
-                          minute: '2-digit',
-                        })}
-                      </small>
-                    </span>
-                    <span className="history-result">
-                      <span>
-                        <span className="history-expression">{r.expression}</span>
+                  <article className="history-card" key={r.id}>
+                    <button
+                      className="history-replay"
+                      aria-label={`Replay ${r.expression}`}
+                      onClick={() => s.set({ presentation: r, rollQueue: [] })}
+                    >
+                      <span className="history-user">
+                        <span>{r.userName}</span>
                         <small>
-                          {r.terms
-                            .map((t) => (t.kind === 'dice' ? t.values.join(' + ') : t.label))
-                            .join(' · ')}
+                          {r.visibility === 'private' && <Lock size={10} />}{' '}
+                          {new Date(r.createdAt).toLocaleTimeString([], {
+                            hour: '2-digit',
+                            minute: '2-digit',
+                          })}
                         </small>
                       </span>
-                      <strong>{r.total}</strong>
-                    </span>
-                    <span className="history-footer">
-                      {r.visibility === 'private' ? 'Private · you & GM' : 'Shared with the party'}
-                      <ArrowUpRight size={11} />
-                    </span>
-                  </button>
+                      {r.macro ? (
+                        <>
+                          <strong className="macro-history-name">{r.macro.name}</strong>
+                          <MacroResults result={r.macro} />
+                        </>
+                      ) : (
+                        <span className="history-result">
+                          <span>
+                            <span className="history-expression">{r.expression}</span>
+                            <small>
+                              {r.terms
+                                .map((t) => (t.kind === 'dice' ? t.values.join(' + ') : t.label))
+                                .join(' · ')}
+                            </small>
+                          </span>
+                          <strong>{r.total}</strong>
+                        </span>
+                      )}
+                      <span className="history-footer">
+                        {r.visibility === 'private'
+                          ? 'Private · you & GM'
+                          : 'Shared with the party'}
+                        <ArrowUpRight size={11} />
+                      </span>
+                    </button>
+                    <DiscordShare roll={r} />
+                  </article>
                 ))}
               </div>
             )}
@@ -595,6 +609,12 @@ function Chronicle() {
         )}
       </div>
       <div className="dice-workbench">
+        <div className="macro-tools">
+          <button onClick={() => s.set({ dialog: 'macros' })}>Macros · import .txt</button>
+          {s.discord.canManage && (
+            <button onClick={() => s.set({ dialog: 'discord' })}>Discord webhook ↗</button>
+          )}
+        </div>
         <div className="section-heading">
           <h2>
             Let fate decide <span>✧</span>

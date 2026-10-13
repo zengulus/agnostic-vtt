@@ -42,7 +42,7 @@ export function createApp(
       'Access-Control-Allow-Headers',
       'Authorization,Content-Type,X-Image-Name,X-Image-Purpose',
     );
-    res.setHeader('Access-Control-Allow-Methods', 'GET,POST,DELETE,OPTIONS');
+    res.setHeader('Access-Control-Allow-Methods', 'GET,POST,PUT,DELETE,OPTIONS');
     if (req.method === 'OPTIONS') {
       res.writeHead(204);
       res.end();
@@ -70,7 +70,7 @@ export function createApp(
         json(res, 200, await manager.list(user.id));
         return;
       }
-      if (req.method === 'POST' || req.method === 'DELETE') {
+      if (req.method === 'POST' || req.method === 'PUT' || req.method === 'DELETE') {
         const ip = req.socket.remoteAddress || 'unknown',
           now = Date.now();
         let bucket = buckets.get(ip);
@@ -81,6 +81,38 @@ export function createApp(
         }
         if (++bucket.count > 20) {
           json(res, 429, { error: 'Too many requests. Try again in a minute.' });
+          return;
+        }
+      }
+      const discord =
+        /^\/api\/campaigns\/([a-zA-Z0-9_-]{6,64})\/discord(?:\/rolls\/([a-zA-Z0-9_-]{1,64}))?$/.exec(
+          req.url || '',
+        );
+      if (discord) {
+        const user = await auth.verify((req.headers.authorization || '').replace(/^Bearer /, ''));
+        if (!discord[2] && req.method === 'GET') {
+          json(res, 200, await manager.discordStatus(discord[1], user.id));
+          return;
+        }
+        if (!discord[2] && req.method === 'PUT') {
+          const settings = z
+            .object({
+              url: z.string().max(512).optional(),
+              enabled: z.boolean(),
+              mode: z.enum(['automatic', 'manual']),
+            })
+            .strict()
+            .parse(await body(req));
+          json(res, 200, await manager.configureDiscord(discord[1], user.id, settings));
+          return;
+        }
+        if (!discord[2] && req.method === 'DELETE') {
+          json(res, 200, await manager.configureDiscord(discord[1], user.id, null));
+          return;
+        }
+        if (discord[2] && req.method === 'POST') {
+          await manager.shareDiscord(discord[1], user.id, discord[2]);
+          json(res, 202, { queued: true });
           return;
         }
       }

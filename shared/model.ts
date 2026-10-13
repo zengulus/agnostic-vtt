@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import type { Macro, MacroResult } from './macros.js';
 
 export const VERSION = 2 as const;
 export const idSchema = z
@@ -179,6 +180,7 @@ export interface Roll {
   total: number;
   visibility: 'public' | 'private';
   createdAt: string;
+  macro?: MacroResult;
 }
 export interface Chat {
   id: string;
@@ -206,6 +208,7 @@ export interface RoomState {
   tokenLibrary?: Record<string, Token>;
   tracker?: Tracker;
   assets?: Record<string, UploadedAsset>;
+  macros?: Record<string, Macro>;
 }
 /** Server-only fields are NEVER included in ROOM_SNAPSHOT. */
 export interface DurableRoom {
@@ -214,6 +217,7 @@ export interface DurableRoom {
   inviteCode: string;
   members: Record<string, { name: string; role: 'gm' | 'player' }>;
   revokedMembers?: string[];
+  discord?: { url: string; enabled: boolean; mode: 'automatic' | 'manual' };
 }
 export type Change =
   | { kind: 'token'; sceneId: string; token: Token }
@@ -234,7 +238,8 @@ export type TableChange =
   | { kind: 'tracker'; tracker: Tracker }
   | { kind: 'scene-delete'; sceneId: string }
   | { kind: 'assets'; assets: Record<string, UploadedAsset> };
-export type StateChange = Change | TableChange;
+export type MacroChange = { kind: 'macro'; id: string; macro: Macro | null };
+export type StateChange = Change | TableChange | MacroChange;
 
 export function canControl(token: Token, userId: string, role: 'gm' | 'player') {
   return (
@@ -279,7 +284,13 @@ export function projectRoom(room: DurableRoom, userId: string): RoomState {
     ),
     tracker: projectTracker(room.state.tracker || emptyTracker(), role),
     assets: projectAssets(room.state, userId === room.ownerId || role === 'gm', role),
+    macros: Object.fromEntries(
+      Object.entries(room.state.macros || {}).filter(([, m]) => macroVisible(m, userId, role)),
+    ),
   };
+}
+export function macroVisible(macro: Macro, userId: string, role: 'gm' | 'player') {
+  return macro.visibility === 'public' || macro.ownerId === userId || role === 'gm';
 }
 export function projectTracker(tracker: Tracker, role: 'gm' | 'player'): Tracker {
   const entries = tracker.entries.filter((e) => role === 'gm' || !e.hidden);

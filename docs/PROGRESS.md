@@ -2,7 +2,7 @@
 
 ## Current milestone
 
-Milestones 1, 2 and 3 implemented. Application 0.3.0; WebSocket protocol 2. Durable snapshot version 1 remains compatible through additive fields.
+Milestones 1, 2 and 3 implemented, with generic imported dice macros and Discord forwarding added. Application 0.3.0; WebSocket protocol 2. Durable snapshot version 1 remains compatible through additive fields; update both applications for the new protocol messages.
 
 ## Implemented
 
@@ -19,17 +19,20 @@ Milestones 1, 2 and 3 implemented. Application 0.3.0; WebSocket protocol 2. Dura
 - Saved campaign listing/resumption, owner role management/removal and invitation rotation. Revocation closes existing connections and blocks invitation re-entry.
 - Structural-sharing patches, incremental fog geometry, dirty/animation-driven drawing, viewport-clipped hex grids, 64 MiB raster cache, lazy thumbnails, touch pinch/pan and tablet access to scene/library controls.
 - GitHub Pages subpath support, Actions workflow, Render blueprint, env examples, and setup documentation.
+- Newline-separated `macro.txt` import/paste with BOM/comments/CRLF support, atomic validation, repair preview for missing final delimiters, public/private definitions, generic named result groups, numeric inputs, nested labeled contributions, authoritative randomness, physical presentation, replay and persistent history. An example file is downloadable in the dialog.
+- Owner-configured campaign Discord webhook, automatic public-result forwarding by default, optional manual delivery, private-result exclusion, credential-free status projection, protected snapshot storage, bounded ordered delivery queues, rate-limit handling, deduplication, cancellation and explicit retries. Discord failures do not affect authoritative rolls.
 
 ## Verification
 
 - Strict TypeScript and production frontend/backend builds pass, including `/agnostic-vtt/` asset paths.
-- 63 unit and real-server checks pass: previous dice/URL/coordinate/protocol/persistence coverage plus private upload access/validation/normalization/rollback, atomic group permissions, hidden layer/template/tracker projection, rectangle/polygon fog visibility, grouped undo/redo, bounded history, mixed visibility previews, round progression, membership revocation/invitation rotation, campaign listing and restart recovery.
-- Nine Chromium acceptance scenarios pass: independent users/reconnect and shared chat/rolls, external previews/errors, native map/token uploads, statuses/templates/groups/undo, drawing privacy, polygon regions, reveal/conceal fog, hex settings, hidden turns, scene changes, persistent preferences, minimal arithmetic and desktop/tablet/mobile layouts. Actual physical rendering validates every supported die/percentile combination, transparent gemstone d4s, alternate throws, 0.5×/2× playback and cinematic shadow resolution.
+- 108 unit and real-server checks pass: previous dice/URL/coordinate/protocol/persistence coverage plus private upload access/validation/normalization/rollback, atomic group permissions, hidden layer/template/tracker projection, rectangle/polygon fog visibility, grouped undo/redo, bounded history, mixed visibility previews, round progression, membership revocation/invitation rotation, campaign listing and restart recovery. New coverage checks macro grammar/bounds/arithmetic, atomic multiline import, private definitions/results, separate totals, crypto outcomes shared across clients, restart recovery, owner-only webhook configuration, secret-free projections, automatic/manual delivery, mention suppression, payload bounds, queue limits, 429 handling, cooldowns across empty queues, cancellation, delivery deduplication and explicit retries.
+- Eleven Chromium acceptance scenarios cover independent users/reconnect and shared chat/rolls, external previews/errors, native map/token uploads, statuses/templates/groups/undo, drawing privacy, polygon regions, reveal/conceal fog, hex settings, hidden turns, scene changes, persistent preferences, minimal arithmetic and desktop/tablet/mobile layouts. Actual physical rendering validates every supported die/percentile combination, transparent gemstone d4s, alternate throws, 0.5×/2× playback and cinematic shadow resolution. New scenarios exercise newline file import/repair preview, X inputs, attack/damage/healing outputs, constant-only private macros, reconnect, invalid-line feedback and owner webhook settings without storing the secret in browser preferences.
 - A large-map check renders a 10,000 × 10,000 hex scene with 100 tokens and bounds grid work to the viewport. Timing is diagnostic, not a universal frame-rate claim.
-- An additional Chromium smoke check loads the built production application with Supabase enabled under `/agnostic-vtt/` and verifies that its sample map assets load from the correct subpath. Build-time sample endpoint values were used only for this check; live authentication was not attempted.
+- An additional Chromium smoke check loads the built production application with Supabase enabled under `/agnostic-vtt/` and verifies that its sample map assets and downloadable `macro.txt` load from the correct subpath. Build-time sample endpoint values were used only for this check; live authentication was not attempted.
 - Browser inspection found and fixed upstream d4 stale results after face forcing. The adapter clears preliminary results and owns the resize lifecycle.
 - npm dependency audit reports zero known vulnerabilities after upgrading the test runner.
 - Cloud authentication, SQL migrations, and hosting require configured projects and are not yet verified against live services.
+- Discord delivery tests inject HTTP responses; no live webhook or channel has been used.
 
 ## Decisions
 
@@ -39,6 +42,8 @@ Milestones 1, 2 and 3 implemented. Application 0.3.0; WebSocket protocol 2. Dura
 - One Render process; warm rooms and hydration locks prevent repeated snapshot reads on simultaneous joins.
 - Snapshot-only durability: default 90 seconds; periodic dirty writes, transition saves, and shutdown saves. Recent state can be lost on an unexpected crash.
 - Durable history retains 100 recent rolls and messages; players receive only authorised data. Shared undo is ephemeral and clears on restart, membership changes or asset deletion.
+- Generic macros use a data-only grammar and named groups, with 20 dice per execution. The first group's total remains in the legacy roll field; presentation and integrations read each group independently. Label suffixes follow the user-supplied roll heading, without attack/damage-specific mechanics.
+- Webhook credentials live outside projected room state in protected server snapshots. Discord delivery is asynchronous and best effort; queues/statuses remain ephemeral, with no database write per delivery or automatic retry of uncertain network outcomes.
 
 ## Known limits
 
@@ -49,6 +54,8 @@ Milestones 1, 2 and 3 implemented. Application 0.3.0; WebSocket protocol 2. Dura
 - Whole-footprint token visibility errs toward concealment; overlapping partial reveals can leave tokens withheld. Already received content cannot be made secret retroactively.
 - Existing cloud installations must apply migration 002, update both protocol-2 applications and reload clients. Live private Storage and SQL migration behavior are not cloud-verified.
 - Removed identities remain denied even with a valid invitation; owner reinstatement UI is not included. Walls, lighting, protected map tiles, richer handouts, advanced dice conventions and cursor presence remain future work.
+- Macro limits: 64 KiB imports, 100 definitions per person / 200 per campaign, eight result groups, 40 contributions, four label levels, 12 bounded numeric inputs. Nested labels present an outer subtotal. Token-linked macros and advanced dice conventions remain future work.
+- Discord queues/statuses reset after a server restart, so pending messages may be lost and manually resent history may duplicate earlier delivery. An in-flight or already delivered message cannot be recalled on configuration changes.
 
 ## Next milestone
 

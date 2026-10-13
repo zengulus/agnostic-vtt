@@ -1,0 +1,376 @@
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { mkdtemp, rm } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { randomUUID } from 'node:crypto';
+import type { AddressInfo } from 'node:net';
+import { WebSocket } from 'ws';
+import { FilePersistence } from '../server/persistence.js';
+import { LocalAuth } from '../server/auth.js';
+import { RoomManager } from '../server/rooms.js';
+import { createApp } from '../server/app.js';
+import { DiscordDelivery } from '../server/discord.js';
+import { applyChanges } from '../shared/state.js';
+import { macroText } from '../shared/macros.js';
+import type { Action, ServerMessage } from '../shared/protocol.js';
+import type { RoomState } from '../shared/model.js';
+
+const endpoint =
+  'https://discord.com/api/webhooks/123456789012345678/abcdefghijklmnopqrstuvwxyz_123456';
+const example = String.raw`[Attack Name]\([Attack Roll(1d20 + X)],[Damage Roll(1d6 + [Fire(1d6)] + [Akashic(12)])`;
+class Client {
+  messages: ServerMessage[] = [];
+  state!: RoomState;
+  ws: WebSocket;
+  constructor(url: string) {
+    this.ws = new WebSocket(url, { origin: 'http://localhost:5173' });
+    this.ws.on('message', (data) => {
+      const message: ServerMessage = JSON.parse(data.toString());
+      this.messages.push(message);
+      if (message.type === 'ROOM_SNAPSHOT') this.state = message.state;
+      if (message.type === 'STATE_PATCH')
+        this.state = { ...applyChanges(this.state, message.changes), revision: message.revision };
+    });
+  }
+  send(action: Action, actionId: string = randomUUID()) {
+    this.ws.send(JSON.stringify({ ...action, v: 2, actionId }));
+    return actionId;
+  }
+  async wait<T extends ServerMessage['type']>(
+    type: T,
+    predicate: (m: Extract<ServerMessage, { type: T }>) => boolean = () => true,
+  ): Promise<Extract<ServerMessage, { type: T }>> {
+    const end = Date.now() + 4000;
+    while (Date.now() < end) {
+      const index = this.messages.findIndex(
+        (m) => m.type === type && predicate(m as Extract<ServerMessage, { type: T }>),
+      );
+      if (index >= 0)
+        return this.messages.splice(index, 1)[0] as Extract<ServerMessage, { type: T }>;
+      await new Promise((r) => setTimeout(r, 5));
+    }
+    throw new Error(`Missing ${type}: ${JSON.stringify(this.messages)}`);
+  }
+  async commit(action: Action) {
+    const id = this.send(action);
+    return this.wait('STATE_PATCH', (m) => m.actionId === id);
+  }
+}
+describe('macros and campaign Discord over real HTTP/WebSockets', () => {
+  let dir: string,
+    storage: FilePersistence,
+    manager: RoomManager,
+    app: ReturnType<typeof createApp>,
+    auth: LocalAuth,
+    owner: ReturnType<LocalAuth['issue']>,
+    player: ReturnType<LocalAuth['issue']>,
+    other: ReturnType<LocalAuth['issue']>,
+    room: { id: string; inviteCode: string },
+    http: string;
+  const clients: Client[] = [],
+    transport = vi.fn<typeof fetch>();
+  async function start() {
+    manager = new RoomManager(storage, 60000, 100, new DiscordDelivery(transport, async () => {}));
+    app = createApp(manager, auth, new Set(['http://localhost:5173']));
+    await new Promise<void>((r) => app.server.listen(0, '127.0.0.1', r));
+    http = `http://127.0.0.1:${(app.server.address() as AddressInfo).port}`;
+  }
+  async function client(identity = owner) {
+    const c = new Client(http.replace('http:', 'ws:') + '/ws');
+    clients.push(c);
+    await new Promise<void>((resolve, reject) => {
+      c.ws.once('open', resolve);
+      c.ws.once('error', reject);
+    });
+    c.send({
+      type: 'JOIN_ROOM',
+      token: identity.token,
+      roomId: room.id,
+      inviteCode: room.inviteCode,
+    });
+    await c.wait('ROOM_SNAPSHOT');
+    return c;
+  }
+  const request = (path = '', identity = owner, init: RequestInit = {}) =>
+    fetch(`${http}/api/campaigns/${room.id}/discord${path}`, {
+      ...init,
+      headers: {
+        Authorization: `Bearer ${identity.token}`,
+        'Content-Type': 'application/json',
+        ...init.headers,
+      },
+    });
+  const configure = (mode = 'automatic', identity = owner, url = endpoint) =>
+    request('', identity, { method: 'PUT', body: JSON.stringify({ url, enabled: true, mode }) });
+  beforeEach(async () => {
+    dir = await mkdtemp(join(tmpdir(), 'aether-macros-'));
+    storage = new FilePersistence(dir);
+    auth = new LocalAuth('macro-test-key');
+    owner = auth.issue('Keeper');
+    player = auth.issue('Wanderer');
+    other = auth.issue('Other');
+    transport.mockReset().mockImplementation(async () => new Response('{"id":"message"}'));
+    await start();
+    room = await manager.create(owner, 'Macro campaign');
+  });
+  afterEach(async () => {
+    clients.forEach((c) => c.ws.terminate());
+    clients.length = 0;
+    await app.close();
+    await rm(dir, { recursive: true, force: true });
+    vi.restoreAllMocks();
+  });
+  it('atomically imports multiple lines, rolls identically for all clients, and does not write per roll', async () => {
+    const gm = await client(),
+      pc = await client(player),
+      save = vi.spyOn(storage, 'save');
+    const imported = await gm.commit({
+      type: 'MACRO_IMPORT',
+      text: `${example}\r\n[Restoration]([Healing Roll(2d6 + [Divine(4)])])`,
+      visibility: 'public',
+    });
+    await pc.wait('STATE_PATCH', (m) => m.actionId === imported.actionId);
+    expect(Object.values(pc.state.macros!)).toHaveLength(2);
+    const macro = Object.values(pc.state.macros!)[0];
+    expect(macro.source.endsWith('])')).toBe(true);
+    const variables = { X: 5 },
+      action: Action = {
+        type: 'MACRO_ROLL_REQUEST',
+        id: macro.id,
+        variables,
+        visibility: 'public',
+      },
+      patch = await pc.commit(action);
+    await gm.wait('STATE_PATCH', (m) => m.actionId === patch.actionId);
+    const a = await gm.wait('DICE_ROLL_RESULT'),
+      b = await pc.wait('DICE_ROLL_RESULT');
+    expect(a).toEqual(b);
+    const result = a.roll.macro!;
+    expect(result.groups.map((g) => g.name)).toEqual(['Attack Roll', 'Damage Roll']);
+    expect(result.groups[0].total).toBe(result.groups[0].terms[0].values[0] + 5);
+    expect(result.groups[1].total).toBe(
+      result.groups[1].terms[0].values[0] + result.groups[1].terms[1].values[0] + 12,
+    );
+    expect(macroText(result)).toContain('Fire damage + 12 Akashic damage');
+    expect(pc.state.rolls).toHaveLength(1);
+    expect(save).not.toHaveBeenCalled();
+    pc.send(action, patch.actionId);
+    await pc.wait('ROOM_SNAPSHOT');
+    expect(pc.state.rolls).toHaveLength(1);
+    const before = pc.state.revision,
+      id = pc.send({
+        type: 'MACRO_IMPORT',
+        text: `[Valid]([Check(1)])\n[Broken]([Check(d7)])`,
+        visibility: 'public',
+      });
+    expect((await pc.wait('ERROR', (m) => m.actionId === id)).message).toContain('Line 2');
+    expect(pc.state.revision).toBe(before);
+    expect(Object.values(pc.state.macros!)).toHaveLength(2);
+  });
+  it('protects private definitions and outcomes, validates variables, and authorizes deletion', async () => {
+    const gm = await client(),
+      pc = await client(player),
+      spectator = await client(other);
+    const imported = await pc.commit({
+      type: 'MACRO_IMPORT',
+      text: '[Secret ritual]([Focus Roll(d6 + X)])',
+      visibility: 'private',
+    });
+    const id = Object.keys(pc.state.macros!)[0];
+    expect(
+      (await spectator.wait('STATE_PATCH', (m) => m.actionId === imported.actionId)).changes,
+    ).toEqual([]);
+    await gm.wait('STATE_PATCH', (m) => m.actionId === imported.actionId);
+    expect(gm.state.macros![id]).toBeDefined();
+    const denied = spectator.send({
+      type: 'MACRO_ROLL_REQUEST',
+      id,
+      variables: { X: 2 },
+      visibility: 'public',
+    });
+    expect((await spectator.wait('ERROR', (m) => m.actionId === denied)).message).toContain(
+      'not found',
+    );
+    const missing = pc.send({
+      type: 'MACRO_ROLL_REQUEST',
+      id,
+      variables: {},
+      visibility: 'private',
+    });
+    expect((await pc.wait('ERROR', (m) => m.actionId === missing)).message).toContain('for X');
+    const prototype = gm.send({
+      type: 'MACRO_ROLL_REQUEST',
+      id: 'toString',
+      variables: {},
+      visibility: 'public',
+    });
+    expect((await gm.wait('ERROR', (m) => m.actionId === prototype)).message).toBe(
+      'Macro not found.',
+    );
+    const patch = await pc.commit({
+      type: 'MACRO_ROLL_REQUEST',
+      id,
+      variables: { X: -2 },
+      visibility: 'private',
+    });
+    await gm.wait('DICE_ROLL_RESULT');
+    await pc.wait('DICE_ROLL_RESULT');
+    expect(
+      (await spectator.wait('STATE_PATCH', (m) => m.actionId === patch.actionId)).changes,
+    ).toEqual([]);
+    expect(spectator.state.rolls).toHaveLength(0);
+    await pc.commit({ type: 'MACRO_IMPORT', text: '[Shared]([Check(d20)])', visibility: 'public' });
+    await spectator.wait('STATE_PATCH', (m) =>
+      m.changes.some((c) => c.kind === 'macro' && c.macro?.name === 'Shared'),
+    );
+    const shared = Object.values(spectator.state.macros!)[0],
+      removal = spectator.send({ type: 'MACRO_DELETE', id: shared.id });
+    expect((await spectator.wait('ERROR', (m) => m.actionId === removal)).message).toContain(
+      'author',
+    );
+    await pc.commit({ type: 'MACRO_DELETE', id });
+    expect(pc.state.macros![id]).toBeUndefined();
+  });
+  it('posts public macros and ordinary dice automatically, never private results, and deduplicates clicks', async () => {
+    const gm = await client(),
+      pc = await client(player);
+    expect((await configure()).status).toBe(200);
+    await gm.commit({ type: 'MACRO_IMPORT', text: example, visibility: 'public' });
+    const id = Object.keys(gm.state.macros!)[0];
+    const patch = await gm.commit({
+        type: 'MACRO_ROLL_REQUEST',
+        id,
+        variables: { X: 3 },
+        visibility: 'public',
+      }),
+      result = await gm.wait('DICE_ROLL_RESULT');
+    await manager.discordDelivery.idle();
+    expect(transport).toHaveBeenCalledTimes(1);
+    const payload = JSON.parse(String(transport.mock.calls[0][1]?.body));
+    expect(payload.embeds[0].title).toBe('Attack Name');
+    expect(payload.embeds[0].fields).toHaveLength(2);
+    gm.send(
+      { type: 'MACRO_ROLL_REQUEST', id, variables: { X: 3 }, visibility: 'public' },
+      patch.actionId,
+    );
+    await gm.wait('ROOM_SNAPSHOT');
+    expect((await request(`/rolls/${result.roll.id}`, owner, { method: 'POST' })).status).toBe(202);
+    await manager.discordDelivery.idle();
+    expect(transport).toHaveBeenCalledTimes(1);
+    await pc.commit({ type: 'DICE_ROLL_REQUEST', expression: '2d6 + 4', visibility: 'public' });
+    await manager.discordDelivery.idle();
+    expect(transport).toHaveBeenCalledTimes(2);
+    await pc.commit({ type: 'MACRO_ROLL_REQUEST', id, variables: { X: 2 }, visibility: 'private' });
+    const privateResult = await pc.wait('DICE_ROLL_RESULT', (m) => m.roll.visibility === 'private');
+    await manager.discordDelivery.idle();
+    expect(transport).toHaveBeenCalledTimes(2);
+    expect((await request(`/rolls/${privateResult.roll.id}`, owner, { method: 'POST' })).ok).toBe(
+      false,
+    );
+  });
+  it('keeps the webhook secret in durable server storage and restricts management to the owner', async () => {
+    const gm = await client(),
+      pc = await client(player);
+    expect((await configure('automatic', player)).ok).toBe(false);
+    await gm.commit({ type: 'MACRO_IMPORT', text: example, visibility: 'public' });
+    expect((await configure()).ok).toBe(true);
+    const status = await (await request('', player)).json();
+    expect(status).toEqual({
+      configured: true,
+      enabled: true,
+      mode: 'automatic',
+      canManage: false,
+    });
+    gm.send({ type: 'STATE_RESYNC' });
+    pc.send({ type: 'STATE_RESYNC' });
+    const a = await gm.wait('ROOM_SNAPSHOT'),
+      b = await pc.wait('ROOM_SNAPSHOT');
+    expect(JSON.stringify([a, b, ...gm.messages, ...pc.messages, status])).not.toContain(
+      'abcdefghijklmnopqrstuvwxyz',
+    );
+    expect((await storage.load(room.id))?.discord?.url).toContain('abcdefghijklmnopqrstuvwxyz');
+    expect((await configure('automatic', owner, 'http://localhost/secrets')).ok).toBe(false);
+    gm.send({ type: 'MEMBER_UPDATE', userId: player.id, role: 'gm' });
+    await pc.wait('MEMBERS_UPDATE', (message) =>
+      message.members.some((member) => member.id === player.id && member.role === 'gm'),
+    );
+    expect((await configure('automatic', player)).ok).toBe(false);
+  });
+  it('uses manual mode only when clicked and rejects attempts to send another player’s results', async () => {
+    const gm = await client(),
+      pc = await client(player),
+      spectator = await client(other);
+    expect((await configure('manual')).ok).toBe(true);
+    await pc.commit({ type: 'DICE_ROLL_REQUEST', expression: 'd6', visibility: 'public' });
+    const result = await pc.wait('DICE_ROLL_RESULT');
+    await manager.discordDelivery.idle();
+    expect(transport).not.toHaveBeenCalled();
+    expect((await request(`/rolls/${result.roll.id}`, other, { method: 'POST' })).ok).toBe(false);
+    expect((await request(`/rolls/${result.roll.id}`, player, { method: 'POST' })).status).toBe(
+      202,
+    );
+    await manager.discordDelivery.idle();
+    expect(transport).toHaveBeenCalledTimes(1);
+    expect(spectator.state.rolls).toHaveLength(1);
+    expect((await request('', owner, { method: 'DELETE' })).ok).toBe(true);
+    expect((await manager.discordStatus(room.id, owner.id)).configured).toBe(false);
+    await gm.commit({ type: 'DICE_ROLL_REQUEST', expression: 'd20', visibility: 'public' });
+    await manager.discordDelivery.idle();
+    expect(transport).toHaveBeenCalledTimes(1);
+  });
+  it('retains authoritative results when Discord fails and allows an explicit retry', async () => {
+    const gm = await client();
+    await configure();
+    transport.mockRejectedValueOnce(new Error(`URL secret: ${endpoint}`));
+    await gm.commit({ type: 'DICE_ROLL_REQUEST', expression: 'd20', visibility: 'public' });
+    const result = await gm.wait('DICE_ROLL_RESULT');
+    expect((await gm.wait('DISCORD_DELIVERY', (m) => m.status === 'failed')).message).not.toContain(
+      endpoint,
+    );
+    expect(gm.state.rolls[0].id).toBe(result.roll.id);
+    expect((await request(`/rolls/${result.roll.id}`, owner, { method: 'POST' })).ok).toBe(true);
+    await manager.discordDelivery.idle();
+    expect(transport).toHaveBeenCalledTimes(2);
+  });
+  it('recovers imported macros, result groups and webhook configuration after restart', async () => {
+    const gm = await client();
+    await configure('manual');
+    await gm.commit({ type: 'MACRO_IMPORT', text: example, visibility: 'public' });
+    const id = Object.keys(gm.state.macros!)[0];
+    const patch = await gm.commit({
+      type: 'MACRO_ROLL_REQUEST',
+      id,
+      variables: { X: 3 },
+      visibility: 'public',
+    });
+    const previous = gm.state.rolls[0];
+    clients.forEach((c) => c.ws.terminate());
+    clients.length = 0;
+    await app.close();
+    await start();
+    const restored = await client();
+    expect(restored.state.macros![id].name).toBe('Attack Name');
+    expect(restored.state.rolls[0]).toEqual(previous);
+    expect(await manager.discordStatus(room.id, owner.id)).toMatchObject({
+      configured: true,
+      mode: 'manual',
+    });
+    restored.send(
+      { type: 'MACRO_ROLL_REQUEST', id, variables: { X: 3 }, visibility: 'public' },
+      patch.actionId,
+    );
+    await restored.wait('ROOM_SNAPSHOT');
+    expect(restored.state.rolls).toHaveLength(1);
+    expect(transport).not.toHaveBeenCalled();
+  });
+  it('rolls back failed settings persistence', async () => {
+    await client();
+    const save = vi.spyOn(storage, 'save').mockRejectedValueOnce(new Error('Unavailable')),
+      log = vi.spyOn(console, 'error').mockImplementation(() => {});
+    expect((await configure()).ok).toBe(false);
+    expect((await manager.discordStatus(room.id, owner.id)).configured).toBe(false);
+    expect(transport).not.toHaveBeenCalled();
+    save.mockRestore();
+    log.mockRestore();
+  });
+});

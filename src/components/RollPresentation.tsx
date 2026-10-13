@@ -5,9 +5,11 @@ import { physicalDice, predeterminedNotation } from '../../shared/dice.js';
 import type DiceBox from '@3d-dice/dice-box-threejs';
 import { playTone } from '../sound.js';
 import type { Roll } from '../../shared/model.js';
+import { MacroResults } from './Macros.js';
 export function RollPresentation({ roll }: { roll: Roll }) {
   const { reducedMotion: reduce, sound, dice, finishRoll } = useTable();
-  const reducedMotion = reduce || dice.presentation === 'minimal';
+  const reducedMotion =
+    reduce || dice.presentation === 'minimal' || !physicalDice(roll.terms).length;
   const [phase, setPhase] = useState<'rolling' | 'terms' | 'total'>(
       reducedMotion ? 'total' : 'rolling',
     ),
@@ -114,10 +116,17 @@ export function RollPresentation({ roll }: { roll: Roll }) {
   }, [roll.id, reducedMotion, dice, sound, stageId, roll.terms]);
   useEffect(() => {
     if (phase === 'total') {
-      const timer = setTimeout(finishRoll, reducedMotion ? 2800 : 4200 / dice.speed);
+      const timer = setTimeout(
+        finishRoll,
+        roll.macro
+          ? 7000 + roll.macro.groups.length * 1000
+          : reducedMotion
+            ? 2800
+            : 4200 / dice.speed,
+      );
       return () => clearTimeout(timer);
     }
-  }, [phase, finishRoll, reducedMotion, dice.speed]);
+  }, [phase, finishRoll, reducedMotion, dice.speed, roll.macro]);
   const contributions = roll.terms.flatMap((t) =>
     t.kind === 'dice'
       ? t.values.map((v) => ({ value: v * t.sign, label: `d${t.sides}` }))
@@ -155,53 +164,61 @@ export function RollPresentation({ roll }: { roll: Roll }) {
         </div>
       </div>
       {!reducedMotion && <div id={stageId} className="physical-dice" ref={container} />}
-      {phase !== 'rolling' && (
-        <div className="arithmetic">
-          <div className="arith-terms">
-            {contributions.map((c, i) => (
-              <div
-                className={`arith-term ${c.value < 0 ? 'negative' : ''}`}
-                key={i}
-                style={{ animationDelay: `${i * 0.09}s` }}
-              >
-                <span>
-                  {i > 0 && c.value >= 0 ? '+' : ''}
-                  {c.value}
-                </span>
-                <small>{c.label}</small>
-              </div>
-            ))}
-            <span className="arith-arrow">→</span>
+      {phase !== 'rolling' &&
+        (roll.macro ? (
+          <div className="arithmetic macro-arithmetic">
+            <MacroResults result={roll.macro} details reveal={phase === 'total'} />
           </div>
-          {phase === 'total' && dice.particles && !reducedMotion && dice.performance !== 'low' && (
-            <div className="roll-particles" aria-hidden="true">
-              {Array.from({ length: dice.performance === 'cinematic' ? 24 : 12 }, (_, i) => (
-                <span
+        ) : (
+          <div className="arithmetic">
+            <div className="arith-terms">
+              {contributions.map((c, i) => (
+                <div
+                  className={`arith-term ${c.value < 0 ? 'negative' : ''}`}
                   key={i}
-                  style={
-                    {
-                      '--angle': `${i * 137.5}deg`,
-                      '--travel': `${70 + (i % 4) * 22}px`,
-                      animationDelay: `${(i % 5) * 0.04}s`,
-                    } as React.CSSProperties
-                  }
+                  style={{ animationDelay: `${i * 0.09}s` }}
                 >
-                  ✦
-                </span>
+                  <span>
+                    {i > 0 && c.value >= 0 ? '+' : ''}
+                    {c.value}
+                  </span>
+                  <small>{c.label}</small>
+                </div>
               ))}
+              <span className="arith-arrow">→</span>
             </div>
-          )}
-          {phase === 'total' && (
-            <div className="arith-total" data-testid="roll-total">
-              <span className="total-rune" aria-hidden="true">
-                ◇
-              </span>
-              <strong>{roll.total}</strong>
-              <span className="eyebrow">TOTAL</span>
-            </div>
-          )}
-        </div>
-      )}
+            {phase === 'total' &&
+              dice.particles &&
+              !reducedMotion &&
+              dice.performance !== 'low' && (
+                <div className="roll-particles" aria-hidden="true">
+                  {Array.from({ length: dice.performance === 'cinematic' ? 24 : 12 }, (_, i) => (
+                    <span
+                      key={i}
+                      style={
+                        {
+                          '--angle': `${i * 137.5}deg`,
+                          '--travel': `${70 + (i % 4) * 22}px`,
+                          animationDelay: `${(i % 5) * 0.04}s`,
+                        } as React.CSSProperties
+                      }
+                    >
+                      ✦
+                    </span>
+                  ))}
+                </div>
+              )}
+            {phase === 'total' && (
+              <div className="arith-total" data-testid="roll-total">
+                <span className="total-rune" aria-hidden="true">
+                  ◇
+                </span>
+                <strong>{roll.total}</strong>
+                <span className="eyebrow">TOTAL</span>
+              </div>
+            )}
+          </div>
+        ))}
       <div className="roll-caption">
         {phase === 'rolling'
           ? 'A little uncertainty. A world of possibility.'
