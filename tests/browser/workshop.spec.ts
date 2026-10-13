@@ -20,7 +20,7 @@ async function create(page: Page) {
   await page.goto('/');
   await page.getByRole('button', { name: 'Open a live table' }).click();
   await page.getByRole('button', { name: 'Begin your adventure' }).click();
-  await expect(page.getByText('LIVE SESSION', { exact: true })).toBeVisible();
+  await expect(page.getByText('Live', { exact: true })).toBeVisible();
 }
 async function roomState(page: Page): Promise<RoomState> {
   return page.evaluate(async () => {
@@ -122,7 +122,7 @@ test('local uploads, statuses, independent template placement, group edits and u
   expect(state.scenes.hollow.tokens.mage.x).toBe(840);
   await page.keyboard.press('Control+z');
   await expect.poll(async () => (await roomState(page)).scenes.hollow.tokens.ranger.x).toBe(600);
-  await page.getByRole('button', { name: 'Manage images', exact: true }).click();
+  await page.getByRole('button', { name: 'Images', exact: true }).click();
   await expect(page.getByAltText('warden.png')).toBeVisible();
   await page.getByRole('button', { name: 'Close dialog' }).click();
   await page.getByRole('button', { name: 'Map settings', exact: true }).click();
@@ -159,7 +159,7 @@ test('geometry, drawing layers, hidden turns, hex settings and scene changes syn
   await pc.goto(invite);
   await pc.getByLabel('Your name').fill('Observer');
   await pc.getByRole('button', { name: 'Join your party', exact: true }).click();
-  await expect(pc.getByText('LIVE SESSION', { exact: true })).toBeVisible();
+  await expect(pc.getByText('Live', { exact: true })).toBeVisible();
   await gm.getByRole('button', { name: 'Text annotation', exact: true }).click();
   await gm.getByLabel('Annotation text').fill('Private route');
   await gm.getByRole('combobox', { name: 'Layer', exact: true }).selectOption('gm');
@@ -256,7 +256,7 @@ test('dice themes persist, minimal arithmetic remains authoritative, and tablet 
   await page.getByLabel('Tray appearance').selectOption('astral');
   await page.getByLabel('Performance preset').selectOption('low');
   await page.getByLabel('Arithmetic theme').selectOption('minimal');
-  await page.getByRole('button', { name: 'Back to the story', exact: true }).click();
+  await page.getByRole('button', { name: 'Done', exact: true }).click();
   await page.getByRole('textbox', { name: 'DICE EXPRESSION' }).fill('2d6+5-2');
   await page.getByRole('button', { name: 'Roll the dice' }).click();
   await expect(page.getByTestId('roll-total')).toBeVisible();
@@ -275,7 +275,7 @@ test('dice themes persist, minimal arithmetic remains authoritative, and tablet 
   );
   await expect(page.getByLabel('Throw style')).toHaveValue('orbit');
   await expect(page.getByLabel('Arithmetic theme')).toHaveValue('minimal');
-  await page.getByRole('button', { name: 'Back to the story', exact: true }).click();
+  await page.getByRole('button', { name: 'Done', exact: true }).click();
   await create(page);
   await page.setViewportSize({ width: 820, height: 1180 });
   await page.getByRole('button', { name: 'Toggle library', exact: true }).click();

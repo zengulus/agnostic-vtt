@@ -75,11 +75,8 @@ export function MacroLibraryDialog() {
   };
   return (
     <div className="macro-library">
-      <p className="dialog-intro">
-        Save named rolls for anything your game needs: attacks, healing, checks, resources and more.
-      </p>
       <div className="macro-list">
-        {!macros.length && <p className="muted">Your saved macros will appear here.</p>}
+        {!macros.length && <p className="muted">No saved macros yet.</p>}
         {macros.map((m) => (
           <div className={`macro-library-row ${selected === m.id ? 'selected' : ''}`} key={m.id}>
             <button
@@ -185,8 +182,9 @@ export function MacroLibraryDialog() {
           when you roll.
         </p>
         <label className="file-import">
-          <Upload size={15} />
-          Choose a .txt file
+          <span>
+            <Upload size={15} /> Choose a .txt file
+          </span>
           <input
             aria-label="Import macro.txt"
             type="file"

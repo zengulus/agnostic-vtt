@@ -7,7 +7,6 @@ import {
   Trash2,
   Copy,
   Pencil,
-  MousePointer2,
   Group,
   Ungroup,
   Save,
@@ -652,9 +651,8 @@ export function Tabletop() {
         }}
       />
       <div className="scene-heading">
-        <span className="eyebrow">THE CURRENT SCENE</span>
         <h1>{scene.name}</h1>
-        <span className="scene-meta">
+        <span className="scene-meta sr-only">
           {scene.width} × {scene.height} <i />{' '}
           {scene.grid.enabled
             ? scene.grid.type === 'hex'
@@ -664,29 +662,25 @@ export function Tabletop() {
           <i /> {Object.keys(scene.tokens).length} tokens
         </span>
       </div>
-      <div className="map-compass" aria-hidden="true">
-        <span>N</span>
-        <div>✧</div>
-      </div>
       {!store.self && (
         <div className="table-welcome">
-          <span className="eyebrow">YOUR NEXT CHAPTER STARTS HERE</span>
-          <h2>A place for extraordinary stories.</h2>
-          <p>Gather your party. Unfold a world. Let the dice decide.</p>
-          <button className="primary" onClick={() => launchDemo()}>
-            <MousePointer2 size={16} />
-            Open a demo table
-            <span>↗</span>
+          <h2>The next chapter.</h2>
+          <button className="primary" aria-label="Open a demo table" onClick={() => launchDemo()}>
+            Enter as game master
           </button>
-          <button className="subtle-button" onClick={() => launchDemo('player')}>
-            Try the player demo
+          <button
+            className="subtle-button"
+            aria-label="Try the player demo"
+            onClick={() => launchDemo('player')}
+          >
+            Enter as player
           </button>
           {liveAvailable && (
             <button className="subtle-button" onClick={() => store.set({ dialog: 'launch' })}>
               Open a live table
             </button>
           )}
-          <small>No account needed. Demo changes last until you reload.</small>
+          <small>No account needed.</small>
         </div>
       )}
       {selected && (
@@ -753,22 +747,6 @@ export function Tabletop() {
         </div>
       )}
       <ToolOptions finishPolygon={finishPolygon} clearDraft={clearDraft} />
-      <div className="table-hint">
-        <kbd>{store.tool === 'select' ? 'SPACE' : store.tool.toUpperCase()}</kbd>
-        <span>
-          {store.tool === 'select'
-            ? 'hold to pan · scroll to zoom'
-            : store.tool === 'fog'
-              ? `${store.fogMode} · ${store.fogShape} · GM preview is translucent`
-              : store.tool === 'zone'
-                ? 'drag to mark a region'
-                : store.tool === 'measure'
-                  ? 'drag to measure a distance'
-                  : store.tool === 'ping'
-                    ? 'click to call your party’s attention'
-                    : 'drag the canvas to explore'}
-        </span>
-      </div>
       <div className="zoom-controls">
         <button aria-label="Zoom out" onClick={() => zoomBy(0.8)}>
           <Minus size={15} />

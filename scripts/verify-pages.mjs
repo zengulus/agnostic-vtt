@@ -57,7 +57,7 @@ try {
     }
   });
   await page.goto(address, { waitUntil: 'domcontentloaded' });
-  await page.getByRole('heading', { name: 'A place for extraordinary stories.' }).waitFor();
+  await page.getByRole('heading', { name: 'The next chapter.' }).waitFor();
   await page.waitForFunction(() => {
     const images = [...document.querySelectorAll('.scene-thumb img')];
     return images.length > 0 && images.every((image) => image.complete && image.naturalWidth > 0);
@@ -72,7 +72,7 @@ try {
   }
   await page.screenshot({ path: '/tmp/aether-demo-welcome.png' });
   await page.getByRole('button', { name: 'Open a demo table' }).click();
-  await expect(page.getByText('OFFLINE DEMO', { exact: true })).toBeVisible();
+  await expect(page.getByText('Demo', { exact: true })).toBeVisible();
   await page.getByRole('button', { name: 'Cover scene with fog', exact: true }).click();
   await page.getByRole('button', { name: 'Play as player', exact: true }).click();
   await expect(page.getByRole('button', { name: 'Fog reveal / conceal', exact: true })).toHaveCount(

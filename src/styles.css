@@ -212,8 +212,8 @@ i {
   color: #b4b793;
 }
 .campaign-title small {
-  font-size: 10px;
-  color: #829080;
+  font-size: 11px;
+  color: #a2b39a;
   font-weight: 400;
   margin-top: 4px;
 }
@@ -225,6 +225,20 @@ i {
   align-items: center;
   gap: 19px;
   margin-left: auto;
+}
+.role-switch {
+  padding: 7px 10px;
+  min-height: 34px;
+  border: 1px solid #c8b98738;
+  border-radius: 5px;
+  background: #c8b98708;
+  color: #d8c599;
+  font-size: 11px;
+  white-space: nowrap;
+}
+.role-switch:hover:not(:disabled) {
+  background: #c8b98718;
+  border-color: #c8b98770;
 }
 .connection {
   font-size: 8px;
@@ -456,8 +470,8 @@ i {
   box-shadow: 0 0 8px #c4ac7540;
 }
 .subtle-button {
-  color: #9caa92;
-  font-size: 10px;
+  color: #b3c1a8;
+  font-size: 11px;
   justify-content: flex-start;
   line-height: 1.7;
   padding: 8px 0;
@@ -750,8 +764,9 @@ i {
   margin-bottom: 10px;
 }
 .table-welcome small {
-  font-size: 9px;
-  color: #7d8e78;
+  font-size: 11px;
+  line-height: 1.6;
+  color: #a2b39a;
 }
 .selection-toolbar {
   position: absolute;
@@ -874,8 +889,8 @@ i {
   margin-bottom: 9px;
 }
 .empty-chronicle p {
-  font-size: 10px;
-  color: #7f9177;
+  font-size: 12px;
+  color: #a2b39a;
   line-height: 1.8;
 }
 .empty-line {
@@ -1043,17 +1058,38 @@ i {
   gap: 14px;
 }
 .file-import {
-  display: flex;
-  align-items: center;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
   gap: 8px;
   cursor: pointer;
   padding: 12px;
   border: 1px dashed #c8b98760;
   border-radius: 5px;
 }
+.file-import > span {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
 .file-import input {
+  min-width: 0;
   width: 100%;
+  margin: 0;
+  padding: 0;
+  background: transparent;
+  border: 0;
+  box-shadow: none;
   font-size: 12px;
+}
+.file-import input::file-selector-button {
+  margin-right: 10px;
+  padding: 8px 10px;
+  border: 1px solid #c8b98740;
+  border-radius: 4px;
+  background: #18251b;
+  color: #e2d4b1;
+  font: inherit;
+  cursor: pointer;
 }
 .macro-import textarea {
   font-family: monospace;
@@ -1464,6 +1500,7 @@ i {
   backdrop-filter: blur(7px);
   display: grid;
   place-items: center;
+  grid-template-columns: minmax(0, 1fr);
   padding: 24px;
   animation: fade-in 0.18s;
 }
@@ -1475,7 +1512,10 @@ i {
   max-height: 90dvh;
   overflow: auto;
   width: 470px;
+  min-width: 0;
   max-width: 100%;
+  scrollbar-width: thin;
+  scrollbar-color: #718369 #18231a;
   padding: 23px 28px 27px;
 }
 .modal-header {
@@ -1513,8 +1553,8 @@ i {
   justify-content: space-between;
 }
 .field-note {
-  font-size: 10px;
-  color: #7f9475;
+  font-size: 11px;
+  color: #a4b696;
   line-height: 1.65;
   margin-top: 12px;
 }
@@ -1975,6 +2015,15 @@ i {
     transform: scale(1) rotate(0);
   }
 }
+@media (min-width: 621px) and (max-height: 850px) {
+  .empty-chronicle {
+    padding: 12px 0;
+  }
+  .empty-orbit,
+  .empty-line {
+    display: none;
+  }
+}
 @media (min-width: 1700px) {
   .app {
     grid-template-columns: 64px 245px minmax(280px, 1fr) 324px;
@@ -2204,6 +2253,10 @@ i {
   .header-actions {
     gap: 7px;
   }
+  .role-switch {
+    padding: 6px 7px;
+    font-size: 10px;
+  }
   .invite-button {
     font-size: 9px;
     padding: 8px;
@@ -2336,7 +2389,7 @@ i {
     padding: 10px;
   }
   .table-welcome small {
-    font-size: 8px;
+    font-size: 10px;
   }
   .selection-toolbar {
     bottom: 55px;

@@ -17,7 +17,7 @@ async function create(page: Page) {
   await page.goto('/');
   await page.getByRole('button', { name: 'Open a live table' }).click();
   await page.getByRole('button', { name: 'Begin your adventure' }).click();
-  await expect(page.getByText('LIVE SESSION', { exact: true })).toBeVisible();
+  await expect(page.getByText('Live', { exact: true })).toBeVisible();
 }
 test('independent browser clients move tokens, share dice/chat, and reconnect', async ({
   browser,
@@ -38,7 +38,7 @@ test('independent browser clients move tokens, share dice/chat, and reconnect', 
   await pc.goto(invite);
   await pc.getByLabel('Your name').fill('Second player');
   await pc.getByRole('button', { name: 'Join your party', exact: true }).click();
-  await expect(pc.getByText('LIVE SESSION', { exact: true })).toBeVisible();
+  await expect(pc.getByText('Live', { exact: true })).toBeVisible();
   const box = (await gm.locator('canvas').first().boundingBox())!;
   const zoom = Math.min((box.width - 70) / 1600, (box.height - 70) / 1200),
     cx = (box.width - 1600 * zoom) / 2,
@@ -88,13 +88,13 @@ test('independent browser clients move tokens, share dice/chat, and reconnect', 
   await gm.getByRole('button', { name: 'Party chat', exact: true }).click();
   await expect(gm.getByText('The crossing looks safe.', { exact: true })).toBeVisible();
   await b.setOffline(true);
-  await expect(pc.getByText('RECONNECTING', { exact: true })).toBeVisible({ timeout: 15000 });
+  await expect(pc.getByText('Reconnecting', { exact: true })).toBeVisible({ timeout: 15000 });
   const draft = pc.getByRole('textbox', { name: 'Message your party' });
   await draft.fill('Keep this draft until we reconnect.');
   await pc.getByRole('button', { name: 'Send message' }).click();
   await expect(draft).toHaveValue('Keep this draft until we reconnect.');
   await b.setOffline(false);
-  await expect(pc.getByText('LIVE SESSION', { exact: true })).toBeVisible({ timeout: 20000 });
+  await expect(pc.getByText('Live', { exact: true })).toBeVisible({ timeout: 20000 });
   await pc.getByRole('button', { name: 'Send message' }).click();
   await expect(draft).toHaveValue('');
   await expect(gm.getByText('Keep this draft until we reconnect.', { exact: true })).toBeVisible();
@@ -115,7 +115,7 @@ test('keyboard activation works alongside tabletop shortcuts', async ({ page }) 
   await expect(launch).toBeFocused();
   await page.keyboard.press('Enter');
   await page.getByRole('button', { name: 'Begin your adventure' }).click();
-  await expect(page.getByText('LIVE SESSION', { exact: true })).toBeVisible();
+  await expect(page.getByText('Live', { exact: true })).toBeVisible();
   await page.getByRole('button', { name: 'Roll the dice' }).focus();
   await page.keyboard.press('Enter');
   await expect(page.getByTestId('roll-total')).toBeVisible();
@@ -198,7 +198,7 @@ test('map/token URL preview, errors, resizing, and accessible preferences work',
   await expect(page.getByRole('button', { name: /External wanderer/ })).toBeVisible();
   await page.getByRole('button', { name: 'Settings', exact: true }).click();
   await page.getByLabel('Reduced motion').check();
-  await page.getByRole('button', { name: 'Back to the story', exact: true }).click();
+  await page.getByRole('button', { name: 'Done', exact: true }).click();
   await page.getByRole('button', { name: 'Roll the dice' }).click();
   await expect(page.getByTestId('roll-total')).toBeVisible();
   await expect(page.locator('.physical-dice')).toHaveCount(0);
@@ -261,9 +261,7 @@ test('desktop and tablet render without errors or overflowing the viewport', asy
   const errors: string[] = [];
   page.on('pageerror', (e) => errors.push(e.message));
   await page.goto('/');
-  await expect(
-    page.getByRole('heading', { name: 'A place for extraordinary stories.' }),
-  ).toBeVisible();
+  await expect(page.getByRole('heading', { name: 'The next chapter.' })).toBeVisible();
   await page.screenshot({ path: 'test-results/tabletop-desktop.png' });
   await page.setViewportSize({ width: 820, height: 1180 });
   await expect(page.getByRole('button', { name: 'Open a live table' })).toBeVisible();
@@ -283,7 +281,7 @@ test('a campaign owner can sign in as a player and keep that role on reconnect',
   await page.getByRole('button', { name: 'Open a live table', exact: true }).click();
   await page.getByLabel('Enter table as').selectOption('player');
   await page.getByRole('button', { name: 'Begin your adventure', exact: true }).click();
-  await expect(page.getByText('LIVE SESSION', { exact: true })).toBeVisible();
+  await expect(page.getByText('Live', { exact: true })).toBeVisible();
   await expect(page.getByRole('button', { name: 'Return to GM', exact: true })).toBeVisible();
   await expect(page.getByRole('button', { name: 'Fog reveal / conceal', exact: true })).toHaveCount(
     0,
@@ -293,9 +291,9 @@ test('a campaign owner can sign in as a player and keep that role on reconnect',
   await page.getByRole('button', { name: 'Play as player', exact: true }).click();
   await expect(page.locator('.scene-meta')).toContainText('0 tokens');
   await context.setOffline(true);
-  await expect(page.getByText('RECONNECTING', { exact: true })).toBeVisible();
+  await expect(page.getByText('Reconnecting', { exact: true })).toBeVisible();
   await context.setOffline(false);
-  await expect(page.getByText('LIVE SESSION', { exact: true })).toBeVisible({ timeout: 20000 });
+  await expect(page.getByText('Live', { exact: true })).toBeVisible({ timeout: 20000 });
   await expect(page.getByRole('button', { name: 'Return to GM', exact: true })).toBeVisible();
   await expect(page.locator('.scene-meta')).toContainText('0 tokens');
   await page.getByRole('button', { name: 'Return to GM', exact: true }).click();

@@ -210,10 +210,6 @@ export function TokenLibraryDialog() {
     gm = s.self?.role === 'gm';
   return (
     <>
-      <p className="modal-description">
-        Keep reusable portraits, ownership, resources and statuses with your campaign. Place as many
-        independent instances as you need.
-      </p>
       <div className="library-actions">
         <button className="subtle-button" onClick={() => s.set({ dialog: 'map' })}>
           Scene settings
@@ -677,12 +673,7 @@ export function TrackerPanel() {
           </div>
         ))}
       </div>
-      {!tracker.entries.length && (
-        <p className="field-note">
-          Add participants and choose the order for your game. This tracker works for turns,
-          spotlight order, or any numbered sequence.
-        </p>
-      )}
+      {!tracker.entries.length && <p className="field-note">No participants yet.</p>}
       {gm && (
         <form
           onSubmit={(e) => {

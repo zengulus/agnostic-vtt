@@ -141,9 +141,7 @@ export function RollPresentation({ roll }: { roll: Roll }) {
     >
       <div className="roll-topline">
         <span>
-          <span className="eyebrow">
-            {roll.visibility === 'private' ? 'PRIVATE · YOU & GM' : 'THE DICE HAVE SPOKEN'}
-          </span>
+          <span className="eyebrow">{roll.visibility === 'private' ? 'Private roll' : 'Dice'}</span>
           <strong>
             {roll.userName} rolls {roll.expression}
           </strong>
@@ -220,16 +218,8 @@ export function RollPresentation({ roll }: { roll: Roll }) {
           </div>
         ))}
       <div className="roll-caption">
-        {phase === 'rolling'
-          ? 'A little uncertainty. A world of possibility.'
-          : fallback
-            ? 'Authoritative result · 3D rendering unavailable'
-            : 'Server-authoritative result'}
-        {phase === 'total' && (
-          <button onClick={finishRoll}>
-            Return to the story <span>↗</span>
-          </button>
-        )}
+        {fallback && <span>Shown without animation.</span>}
+        {phase === 'total' && <button onClick={finishRoll}>Continue</button>}
       </div>
     </div>
   );

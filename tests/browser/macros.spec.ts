@@ -7,7 +7,7 @@ async function create(page: Page) {
   await page.goto('/');
   await page.getByRole('button', { name: 'Open a live table' }).click();
   await page.getByRole('button', { name: 'Begin your adventure' }).click();
-  await expect(page.getByText('LIVE SESSION', { exact: true })).toBeVisible();
+  await expect(page.getByText('Live', { exact: true })).toBeVisible();
 }
 async function roomState(page: Page): Promise<RoomState> {
   return page.evaluate(async () => {
@@ -36,7 +36,7 @@ test('newline file import, generic results, numeric inputs, privacy and recovery
   await pc.goto(invite);
   await pc.getByLabel('Your name').fill('Macro player');
   await pc.getByRole('button', { name: 'Join your party', exact: true }).click();
-  await expect(pc.getByText('LIVE SESSION', { exact: true })).toBeVisible();
+  await expect(pc.getByText('Live', { exact: true })).toBeVisible();
   await gm.getByRole('button', { name: 'Macros · import .txt' }).click();
   await gm.getByLabel('Import macro.txt', { exact: true }).setInputFiles({
     name: 'macro.txt',
@@ -94,7 +94,7 @@ test('newline file import, generic results, numeric inputs, privacy and recovery
   await gm.getByRole('button', { name: 'Dismiss roll' }).click();
   await pc.reload();
   await pc.getByRole('button', { name: 'Join your party', exact: true }).click();
-  await expect(pc.getByText('LIVE SESSION', { exact: true })).toBeVisible();
+  await expect(pc.getByText('Live', { exact: true })).toBeVisible();
   await pc.getByRole('button', { name: 'Macros · import .txt' }).click();
   await expect(pc.getByRole('button', { name: 'Prepare Attack Name', exact: true })).toBeVisible();
   await expect(pc.getByRole('button', { name: 'Prepare Secret ritual', exact: true })).toHaveCount(
@@ -119,7 +119,7 @@ test('newline file import, generic results, numeric inputs, privacy and recovery
   await expect(pc.locator('.roll-overlay .macro-results dt').last()).toHaveText('Result8:');
   await expect(pc.locator('.roll-overlay .macro-results dd').last()).toBeVisible();
   await pc.screenshot({ path: '/tmp/aether-macro-mobile.png' });
-  await pc.getByRole('button', { name: 'Return to the story' }).click();
+  await pc.getByRole('button', { name: 'Continue' }).click();
   await gm.screenshot({ path: 'test-results/macro-history.png' });
   expect(errors).toEqual([]);
   await a.close();

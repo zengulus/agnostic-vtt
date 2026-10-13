@@ -2,9 +2,11 @@
 
 A playable, system-agnostic fantasy tabletop with Milestones 1–3 implemented. React + strict TypeScript, Canvas 2D, deterministic Three.js/Cannon dice physics, and an authoritative Node WebSocket server. No gameplay database polling or Supabase Realtime.
 
+The interface takes its cues from a campaign atlas: parchment, walnut, faded brass and oxblood ink, with restrained serif headings and a map-first layout.
+
 ## GitHub Pages demo — no backend needed
 
-The static frontend includes a playable, browser-only demo. Choose **Open a demo table** for GM tools or **Try the player demo** for the player experience. Neither requires an account, Render, Supabase, HTTP API calls, or a WebSocket. Supabase authentication initializes only when opening live campaigns. Built-in maps, portraits, fonts and dice assets ship with the site. Fonts retain their bundled SIL Open Font License notices in `public/fonts/`.
+The static frontend includes a playable, browser-only demo. Choose **Enter as game master** for GM tools or **Enter as player** for the player experience. Neither requires an account, Render, Supabase, HTTP API calls, or a WebSocket. Supabase authentication initializes only when opening live campaigns. Built-in maps, portraits, fonts and dice assets ship with the site. Fonts retain their bundled SIL Open Font License notices in `public/fonts/`.
 
 Try token movement, scene/grid/fog tools, drawing, turns, undo/redo, dice, macro import/rolls and chat. **Play as player** hides GM controls and projects the table through the same visibility rules as live campaigns; **Return to GM** restores GM access. **Reset demo** starts fresh. Demo changes live only in the current tab and reset on reload. Multiplayer invitations, uploaded image storage and Discord delivery require a live campaign. External image URLs still require their image host.
 
@@ -65,7 +67,7 @@ Low performance mode disables shadows and particles. Cinematic mode uses 2048-pi
 
 ## Macro files and named rolls
 
-Open **Macros · import .txt** in the dice panel. Choose `macro.txt` or paste definitions, review the preview, and import. Each nonblank line is a separate macro. LF, CRLF, CR, a UTF-8 BOM and `#` comment lines are supported. An invalid line prevents the entire import; errors identify its line. Download a ready-to-use [example file](public/examples/macro.txt) from the dialog.
+Open **Macros** in the dice panel. Choose `macro.txt` or paste definitions, review the preview, and import. Each nonblank line is a separate macro. LF, CRLF, CR, a UTF-8 BOM and `#` comment lines are supported. An invalid line prevents the entire import; errors identify its line. Download a ready-to-use [example file](public/examples/macro.txt) from the dialog.
 
 ```text
 [Attack Name]\([Attack Roll(1d20 + X)],[Damage Roll(1d6 + [Fire(1d6)] + [Akashic(12)])])
@@ -111,6 +113,8 @@ npm run test:e2e
 To smoke-check a production build under a repository subpath, build with `VITE_BASE_PATH=/agnostic-vtt/` and run `node scripts/verify-pages.mjs`. This exercises demo GM/player switching, fog filtering, undo, dice, chat, macros, reset and repository-subpath assets with all cloud/API requests blocked and WebSocket creation treated as a failure. It also works when the build contains unavailable live-service URLs.
 
 The unit/server checks include real HTTP/WebSocket clients, permissions, private uploads, grouped fog history, atomic batches, membership changes, restart recovery, macro parsing/imports, separate result totals and webhook delivery. Additional regressions cover simultaneous joins, failed membership saves, idle eviction, room capacity during pending saves/loads, stale socket messages, pending confirmations and private presentation cleanup after role changes. Chromium scenarios cover independent users, uploads/templates/statuses/group movement, drawing privacy, fog geometry, hidden turns, persistent and damaged preferences, keyboard activation, disconnected chat drafts, tablet controls, actual forced physical dice faces, multiline macro imports and webhook settings. A large-map check exercises a 10,000-pixel hex scene with 100 tokens and verifies viewport-bounded grid work. For an existing browser binary, set `PLAYWRIGHT_CHROMIUM_EXECUTABLE` to its absolute path.
+
+For a visual review, run `npm run review:visuals` after building with `VITE_BASE_PATH=/agnostic-vtt/`. Headless Chromium captures desktop, laptop, tablet and phone layouts, including GM/player views, macros, settings and rolls. Open `test-results/visual-review/index.html` for the screenshot gallery and `report.json` for viewport checks. Set `SCREENSHOT_DIR` to retain separate before/after runs; `PLAYWRIGHT_CHROMIUM_EXECUTABLE` can select an installed browser.
 
 ## Optional live-service deployment
 

@@ -64,18 +64,18 @@ export function Dialogs() {
   }, [s.dialog, s.set]);
   if (!s.dialog) return null;
   const title = {
-    launch: 'Gather around the table',
-    map: 'A world worth exploring',
-    token: 'Bring a character to life',
-    grid: 'The shape of your world',
-    invite: 'An invitation to adventure',
-    settings: 'Make the table yours',
-    help: 'Your tabletop, at a glance',
-    library: 'Your cast of characters',
-    assets: 'The images in your world',
+    launch: 'Your table',
+    map: 'Scene',
+    token: 'Character',
+    grid: 'Grid',
+    invite: 'Your party',
+    settings: 'Preferences',
+    help: 'Table guide',
+    library: 'Character library',
+    assets: 'Images',
     objects: 'Regions, drawings & notes',
-    macros: 'Your book of macros',
-    discord: 'Bring the story to Discord',
+    macros: 'Macros',
+    discord: 'Discord',
   }[s.dialog];
   return (
     <div
@@ -93,7 +93,6 @@ export function Dialogs() {
         tabIndex={-1}
       >
         <div className="modal-header">
-          <span className="eyebrow">AETHER TABLE</span>
           <button aria-label="Close dialog" onClick={() => s.set({ dialog: null })}>
             <X size={19} />
           </button>
@@ -485,9 +484,6 @@ function MapDialog() {
         s.set({ dialog: null, fitNonce: s.fitNonce + 1 });
       }}
     >
-      <p className="modal-description">
-        Unfold a new landscape. Use a direct image link to make it part of your story.
-      </p>
       <AssetPicker
         asset={asset}
         onChange={(a, w, h) => {
@@ -588,9 +584,6 @@ function TokenDialog() {
         s.set({ dialog: null, selected: token.id, selectedIds: [token.id] });
       }}
     >
-      <p className="modal-description">
-        A portrait, a name, a place in the story. Tokens work with any game system.
-      </p>
       <AssetPicker purpose="token" asset={token.image} onChange={(image) => update({ image })} />
       <label>
         Name
@@ -956,9 +949,7 @@ function Invite() {
     [copied, setCopied] = useState(false);
   return (
     <>
-      <p className="modal-description">
-        There’s always room for another story. Your invitation admits players to this campaign.
-      </p>
+      <p className="modal-description">Anyone with your invitation can join as a player.</p>
       <div className="party-list">
         {s.presence.map((p) => (
           <div key={p.id}>
@@ -1057,9 +1048,6 @@ function Settings() {
   };
   return (
     <>
-      <p className="modal-description">
-        A little more wonder, or a little less motion. These preferences are yours alone.
-      </p>
       <DiceSettings />
       <label className="setting-toggle">
         <span>
@@ -1083,12 +1071,8 @@ function Settings() {
           onChange={(e) => save({ sound: e.target.checked })}
         />
       </label>
-      <p className="field-note">
-        The server determines results. Dice physics only presents them. Private rolls are visible to
-        their roller and the GM.
-      </p>
       <button className="primary modal-submit" onClick={() => s.set({ dialog: null })}>
-        Back to the story
+        Done
         <Check size={16} />
       </button>
     </>
@@ -1097,7 +1081,6 @@ function Settings() {
 function Help() {
   return (
     <>
-      <p className="modal-description">Less setup. More story. Everything you need to begin.</p>
       <div className="help-list">
         {[
           ['V', 'Select & drag', 'Move a token you control. Right-click a selected token to edit.'],

@@ -1,16 +1,13 @@
 import { useEffect, useState } from 'react';
 import {
   ArrowUpRight,
-  Check,
   ChevronDown,
   ChevronRight,
-  Cloud,
   Compass,
   Eye,
   Grid3X3,
   HelpCircle,
   Layers,
-  Link2,
   Lock,
   Map,
   MessageSquare,
@@ -18,17 +15,15 @@ import {
   Move,
   Plus,
   Ruler,
+  RotateCcw,
+  Feather,
   Settings2,
-  Shield,
-  SlidersHorizontal,
   Sparkles,
   Square,
   Star,
   Users,
   Volume2,
   VolumeX,
-  Wifi,
-  WifiOff,
   X,
   Pencil,
   Type,
@@ -95,15 +90,12 @@ export function App() {
           </span>
         </a>
         <div className="campaign-title">
-          <span className="campaign-icon">
-            <Compass size={17} />
-          </span>
           <span>
             {s.room.name}
             <small>
               {s.self
                 ? `${s.self.role === 'gm' ? 'Game master' : 'Player'} · ${s.self.name}`
-                : 'A shared canvas for your imagination'}
+                : 'A new adventure'}
             </small>
           </span>
           <button
@@ -115,28 +107,37 @@ export function App() {
           </button>
         </div>
         <div className="header-actions">
-          <span className={`connection ${s.status}`}>
+          <span
+            className={`connection ${s.status}`}
+            title={
+              s.status === 'demo'
+                ? 'Demo changes reset on reload'
+                : s.room.savedAt
+                  ? `Saved ${new Date(s.room.savedAt).toLocaleTimeString()}`
+                  : undefined
+            }
+          >
             <span />
             {s.status === 'live'
-              ? 'LIVE SESSION'
+              ? 'Live'
               : s.status === 'reconnecting'
-                ? 'RECONNECTING'
+                ? 'Reconnecting'
                 : s.status === 'connecting'
-                  ? 'CONNECTING'
+                  ? 'Connecting'
                   : s.status === 'demo'
-                    ? 'OFFLINE DEMO'
-                    : 'DEMO PREVIEW'}
+                    ? 'Demo'
+                    : ''}
           </span>
           {s.canGM && s.self && (
             <button
-              className="subtle-button"
+              className="role-switch"
               disabled={s.status !== 'live' && s.status !== 'demo'}
               onClick={() => send({ type: 'SESSION_ROLE', role: gm ? 'player' : 'gm' })}
             >
               {gm ? 'Play as player' : 'Return to GM'}
             </button>
           )}
-          {s.self && (
+          {s.self && s.status !== 'demo' && (
             <div className="party-avatars">
               {s.presence.slice(0, 4).map((p) => (
                 <span key={p.id} title={`${p.name} · ${p.role}`} style={{ borderColor: p.color }}>
@@ -146,24 +147,23 @@ export function App() {
             </div>
           )}
           <button
-            className="invite-button"
+            className={`invite-button ${s.status === 'demo' ? 'reset-demo' : ''}`}
+            aria-label={s.status === 'demo' ? 'Reset demo' : undefined}
+            title={s.status === 'demo' ? 'Reset demo' : undefined}
             onClick={() =>
               s.status === 'demo'
                 ? launchDemo(s.self?.role)
                 : s.set({ dialog: s.self ? 'invite' : 'launch' })
             }
           >
-            <Users size={15} />
-            <span>
-              {s.status === 'demo'
-                ? 'Reset demo'
-                : gm
-                  ? 'Invite party'
-                  : s.self
-                    ? 'Your party'
-                    : 'Gather your party'}
-            </span>
-            <ArrowUpRight size={14} />
+            {s.status === 'demo' ? (
+              <RotateCcw size={16} />
+            ) : (
+              <>
+                <Users size={15} />
+                <span>{gm ? 'Invite party' : s.self ? 'Your party' : 'Gather your party'}</span>
+              </>
+            )}
           </button>
           <HistoryControls />
           <button
@@ -224,20 +224,8 @@ export function App() {
       </aside>
       {library && (
         <aside className="library">
-          <div className="panel-heading">
-            <span className="eyebrow">YOUR WORLD</span>
-            <button
-              aria-label="Scene settings"
-              title="Scene settings"
-              onClick={() => s.set({ dialog: 'map' })}
-            >
-              <SlidersHorizontal size={15} />
-            </button>
-          </div>
           <div className="section-heading">
-            <h2>
-              Scenes <span>{Object.keys(s.room.scenes).length.toString().padStart(2, '0')}</span>
-            </h2>
+            <h2>Scenes</h2>
             {(gm || !s.self) && (
               <button
                 aria-label="Add a map from URL"
@@ -262,7 +250,6 @@ export function App() {
               >
                 <div className="scene-thumb">
                   <AssetImage asset={sc.map} referrerPolicy="no-referrer" alt="" />
-                  {scene.id === sc.id && <span>ACTIVE SCENE</span>}
                 </div>
                 <div className="scene-card-caption">
                   <span>{sc.name}</span>
@@ -275,16 +262,9 @@ export function App() {
               </button>
             ))}
           </div>
-          <button className="subtle-button add-map" onClick={() => s.set({ dialog: 'map' })}>
-            <Link2 size={14} />
-            {gm ? 'Add or replace a map' : 'Map details'}
-          </button>
           <div className="library-divider" />
           <div className="section-heading">
-            <h2>
-              On the table{' '}
-              <span>{Object.keys(scene.tokens).length.toString().padStart(2, '0')}</span>
-            </h2>
+            <h2>Characters</h2>
             {gm && (
               <button
                 aria-label="Add token"
@@ -310,9 +290,7 @@ export function App() {
                 />
                 <span>
                   {t.name.split(' · ')[0]}
-                  <small>
-                    {t.visibility === 'gm' ? 'GM only' : t.name.split(' · ')[1] || 'Scene token'}
-                  </small>
+                  <small>{t.visibility === 'gm' ? 'GM only' : t.name.split(' · ')[1] || ''}</small>
                 </span>
                 {t.visibility === 'gm' ? (
                   <Lock size={12} />
@@ -322,39 +300,25 @@ export function App() {
               </button>
             ))}
           </div>
-          {gm && (
+          <div className="library-actions">
             <button
               className="subtle-button"
-              onClick={() => s.set({ selected: null, dialog: 'token' })}
+              aria-label="Saved token library"
+              onClick={() => s.set({ dialog: 'library' })}
             >
-              <Plus size={14} />
-              Bring a character to life
-            </button>
-          )}
-          <div className="library-actions">
-            <button className="subtle-button" onClick={() => s.set({ dialog: 'library' })}>
               <FolderOpen size={14} />
-              Saved token library
+              Character library
             </button>
             {gm && (
               <button className="subtle-button" onClick={() => s.set({ dialog: 'assets' })}>
                 <ImageIcon size={14} />
-                Manage images
+                Images
               </button>
             )}
             <button className="subtle-button" onClick={() => s.set({ dialog: 'objects' })}>
               <Layers size={14} />
-              Regions & drawing layers
+              Drawings & notes
             </button>
-          </div>
-          <div className="library-bottom">
-            <span className="ornament">✧</span>
-            <p>
-              Every great adventure
-              <br />
-              begins with a shared table.
-            </p>
-            <span>AETHER TABLE · V0.3</span>
           </div>
         </aside>
       )}
@@ -402,34 +366,6 @@ export function App() {
         </div>
       </main>
       <Chronicle />
-      <footer className="status-bar">
-        <span>
-          <span className="tiny-sigil">✧</span> ANY SYSTEM. YOUR STORY.
-        </span>
-        <span className="save-status">
-          {s.status === 'live' ? <Cloud size={12} /> : <WifiOff size={12} />}{' '}
-          {s.status === 'live'
-            ? s.room.savedAt
-              ? 'Last snapshot ' +
-                new Date(s.room.savedAt).toLocaleTimeString([], {
-                  hour: '2-digit',
-                  minute: '2-digit',
-                })
-              : 'Waiting for snapshot'
-            : s.status === 'demo'
-              ? 'Demo · changes stay in this tab until reload'
-              : s.status === 'offline'
-                ? 'Explore the demo or open a live table'
-                : 'Reconnecting to your table'}
-          <i />
-          Rev {s.room.revision}
-        </span>
-        <span>
-          <Shield size={11} /> {s.self?.role === 'gm' ? 'GAME MASTER' : s.self ? 'PLAYER' : 'DEMO'}{' '}
-          <i />
-          {s.status === 'live' ? <Wifi size={11} /> : <span>◇</span>}
-        </span>
-      </footer>
       {s.error && (
         <div className="toast" role="alert">
           <span>{s.error}</span>
@@ -525,21 +461,10 @@ function Chronicle() {
           <TrackerPanel />
         ) : s.panel === 'chronicle' ? (
           <>
-            <div className="activity-heading">
-              <span className="eyebrow">THE STORY SO FAR</span>
-              <span>{s.room.rolls.length} rolls</span>
-            </div>
             {!s.room.rolls.length ? (
               <div className="empty-chronicle">
-                <span className="empty-orbit">
-                  <span>✧</span>
-                </span>
-                <h3>Fate is waiting.</h3>
-                <p>
-                  Your party’s rolls appear here.
-                  <br />A little chance, a little magic.
-                </p>
-                <div className="empty-line" />
+                <Feather size={26} strokeWidth={1} aria-hidden="true" />
+                <p>The tale is yet unwritten.</p>
               </div>
             ) : (
               <div className="roll-history">
@@ -579,9 +504,7 @@ function Chronicle() {
                         </span>
                       )}
                       <span className="history-footer">
-                        {r.visibility === 'private'
-                          ? 'Private · you & GM'
-                          : 'Shared with the party'}
+                        {r.visibility === 'private' ? 'Private' : 'Party'}
                         <ArrowUpRight size={11} />
                       </span>
                     </button>
@@ -593,16 +516,10 @@ function Chronicle() {
           </>
         ) : (
           <>
-            <div className="activity-heading">
-              <span className="eyebrow">AROUND THE TABLE</span>
-              <Users size={14} />
-            </div>
             <div className="chat-messages">
               {!s.room.chat.length && (
                 <div className="empty-chronicle">
-                  <MessageSquare size={30} />
-                  <h3>A story told together.</h3>
-                  <p>Say hello to your party.</p>
+                  <p>A quiet table. Say hello.</p>
                 </div>
               )}
               {s.room.chat.map((c) => (
@@ -649,15 +566,16 @@ function Chronicle() {
       </div>
       <div className="dice-workbench">
         <div className="macro-tools">
-          <button onClick={() => s.set({ dialog: 'macros' })}>Macros · import .txt</button>
+          <button aria-label="Macros · import .txt" onClick={() => s.set({ dialog: 'macros' })}>
+            <Feather size={13} />
+            Macros
+          </button>
           {s.discord.canManage && (
             <button onClick={() => s.set({ dialog: 'discord' })}>Discord webhook ↗</button>
           )}
         </div>
         <div className="section-heading">
-          <h2>
-            Let fate decide <span>✧</span>
-          </h2>
+          <h2>Dice</h2>
           <button
             title="Dice presentation settings"
             aria-label="Dice presentation settings"
@@ -686,7 +604,7 @@ function Chronicle() {
           }}
         >
           <label className="expression-label" htmlFor="dice-expression">
-            DICE EXPRESSION
+            <span className="sr-only">Dice expression</span>
             <button
               type="button"
               title="Save this roll preset"
@@ -707,7 +625,6 @@ function Chronicle() {
             </button>
           </label>
           <div className="expression-input">
-            <span>◇</span>
             <input
               id="dice-expression"
               value={expression}
@@ -731,7 +648,7 @@ function Chronicle() {
               onClick={() => setPrivate(!privateRoll)}
             >
               {privateRoll ? <Lock size={12} /> : <Users size={12} />}{' '}
-              {privateRoll ? 'Private · you & GM' : 'Share with party'}
+              {privateRoll ? 'Private' : 'Party'}
               <ChevronDown size={12} />
             </button>
             <button
@@ -747,16 +664,14 @@ function Chronicle() {
             </button>
           </div>
           <button
+            aria-label="Roll the dice"
             className="roll-button"
             disabled={pending || s.status === 'reconnecting' || s.status === 'connecting'}
           >
-            <Sparkles size={17} />
-            {pending ? 'Casting the dice…' : 'Roll the dice'}
-            <kbd>↵</kbd>
+            {pending ? 'Rolling…' : 'Roll'}
           </button>
         </form>
         <div className="presets">
-          <span>QUICK ROLLS</span>
           <div>
             {presets.map((p) => (
               <button key={p} title={`Use ${p}`} onClick={() => setExpression(p)}>
@@ -764,9 +679,6 @@ function Chronicle() {
               </button>
             ))}
           </div>
-        </div>
-        <div className="dice-note">
-          <Check size={11} /> Fair rolls. Shared outcomes. A little wonder.
         </div>
       </div>
     </aside>

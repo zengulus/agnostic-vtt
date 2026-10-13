@@ -165,6 +165,8 @@ export class SceneRenderer {
     ctx.scale(c.zoom, c.zoom);
     ctx.shadowColor = '#000';
     ctx.shadowBlur = 30;
+    ctx.fillStyle = '#c6b38c';
+    ctx.fillRect(-6, -6, s.width + 12, s.height + 12);
     ctx.fillStyle = '#1d2924';
     ctx.fillRect(0, 0, s.width, s.height);
     ctx.shadowBlur = 0;
@@ -351,7 +353,7 @@ export class SceneRenderer {
     if (t.visibility === 'gm') ctx.globalAlpha = 0.5;
     if (o.selected.includes(t.id)) {
       ctx.shadowColor = t.color;
-      ctx.shadowBlur = 20;
+      ctx.shadowBlur = 0;
       ctx.strokeStyle = t.color;
       ctx.lineWidth = 2 / zoom;
       ctx.beginPath();
@@ -386,12 +388,12 @@ export class SceneRenderer {
     ctx.stroke();
     ctx.restore();
     const label = t.name.split(' · ')[0];
-    ctx.font = `500 ${11 / zoom}px sans-serif`;
+    ctx.font = `${13 / zoom}px Georgia`;
     ctx.textAlign = 'center';
     const tw = ctx.measureText(label).width;
-    ctx.fillStyle = '#111b16ed';
+    ctx.fillStyle = '#eadbbdec';
     ctx.fillRect(p.x - tw / 2 - 7 / zoom, p.y + r + 6 / zoom, tw + 14 / zoom, 20 / zoom);
-    ctx.fillStyle = '#eee8d9';
+    ctx.fillStyle = '#483527';
     ctx.fillText(label, p.x, p.y + r + 20 / zoom);
     if (t.resource) {
       const bw = t.size * 0.7;
