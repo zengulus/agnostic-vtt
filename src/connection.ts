@@ -1,3 +1,4 @@
+import { demoAction, startDemo } from './demo.js';
 import { createClient } from '@supabase/supabase-js';
 import type { Action, DiscordStatus, ServerMessage } from '../shared/protocol.js';
 import { useTable, notify } from './store.js';
@@ -5,10 +6,17 @@ import { demoState } from './store.js';
 import { applyChanges } from '../shared/state.js';
 import type { Asset, UploadedAsset } from '../shared/model.js';
 const serverUrl = (import.meta.env.VITE_SERVER_URL || '').replace(/\/$/, '');
-export const supabase =
+export const supabase = !!(
   import.meta.env.VITE_SUPABASE_URL && import.meta.env.VITE_SUPABASE_ANON_KEY
-    ? createClient(import.meta.env.VITE_SUPABASE_URL, import.meta.env.VITE_SUPABASE_ANON_KEY)
-    : null;
+);
+export const liveAvailable = import.meta.env.DEV || !!serverUrl;
+let client: ReturnType<typeof createClient> | undefined;
+function authClient() {
+  return (client ||= createClient(
+    import.meta.env.VITE_SUPABASE_URL,
+    import.meta.env.VITE_SUPABASE_ANON_KEY,
+  ));
+}
 interface Session {
   token: string;
   id: string;
@@ -19,9 +27,21 @@ let session: Session | null = null,
   reconnect: ReturnType<typeof setTimeout> | undefined,
   attempts = 0,
   stopped = false;
-let config: { roomId: string; inviteCode?: string } | null = null;
+let config: { roomId: string; inviteCode?: string; role?: 'gm' | 'player' } | null = null;
 const actionWaiters = new Map<string, { resolve: () => void; reject: (error: Error) => void }>();
+function rejectPendingActions(message: string) {
+  for (const waiter of actionWaiters.values()) waiter.reject(new Error(message));
+  actionWaiters.clear();
+}
 export function sendAndWait(action: Action): Promise<void> {
+  if (useTable.getState().status === 'demo') {
+    try {
+      demoAction(action);
+      return Promise.resolve();
+    } catch (error) {
+      return Promise.reject(error);
+    }
+  }
   const id = send(action);
   if (!id) return Promise.reject(new Error('Connect to a live table first.'));
   return new Promise((resolve, reject) => {
@@ -63,26 +83,28 @@ window.addEventListener('online', () => {
   if (!stopped && config && session && useTable.getState().status === 'reconnecting') open();
 });
 export async function request<T>(path: string, data?: unknown): Promise<T> {
-  const response = await fetch(`${serverUrl}${path}`, {
+  const response = await authorizedFetch(path, {
     method: data ? 'POST' : 'GET',
     headers: {
       'Content-Type': 'application/json',
-      ...(session ? { Authorization: `Bearer ${session.token}` } : {}),
     },
     body: data ? JSON.stringify(data) : undefined,
   });
   const result = await response.json();
-  if (!response.ok) throw new Error(result.error || 'The server could not complete this request.');
   return result as T;
 }
 export async function authorizedFetch(path: string, init: RequestInit = {}) {
+  if (useTable.getState().status === 'demo')
+    throw new Error('This feature needs a live campaign. The demo stays in this tab.');
   if (supabase) {
-    const { data } = await supabase.auth.getSession();
+    const { data } = await authClient().auth.getSession();
     if (data.session && session) session.token = data.session.access_token;
   }
+  const headers = new Headers(init.headers);
+  if (session) headers.set('Authorization', `Bearer ${session.token}`);
   const response = await fetch(`${serverUrl}${path}`, {
     ...init,
-    headers: { ...init.headers, ...(session ? { Authorization: `Bearer ${session.token}` } : {}) },
+    headers,
   });
   if (!response.ok) {
     let message = 'Request failed.';
@@ -111,9 +133,10 @@ export async function deleteImage(id: string) {
   await authorizedFetch(`/api/assets/${useTable.getState().room.id}/${id}`, { method: 'DELETE' });
 }
 export async function savedCampaigns() {
+  if (!liveAvailable || useTable.getState().status === 'demo') return [];
   if (!session) {
     if (supabase) {
-      const { data } = await supabase.auth.getSession();
+      const { data } = await authClient().auth.getSession();
       if (data.session)
         session = {
           token: data.session.access_token,
@@ -129,19 +152,19 @@ export async function savedCampaigns() {
   if (!session) return [];
   return request<Array<{ id: string; name: string; role: 'gm' | 'player' }>>('/api/campaigns');
 }
-export function resumeCampaign(id: string) {
+export function resumeCampaign(id: string, role?: 'gm' | 'player') {
   const url = new URL(location.href);
   url.searchParams.set('room', id);
   url.searchParams.delete('invite');
   history.replaceState({}, '', url);
-  connect(id);
+  connect(id, undefined, role);
   useTable.getState().set({ dialog: null });
 }
 export async function signIn(name: string, email?: string, password?: string, signUp = false) {
   if (supabase) {
     if (email && password) {
       const { data, error } = signUp
-        ? await supabase.auth.signUp({
+        ? await authClient().auth.signUp({
             email,
             password,
             options: {
@@ -149,11 +172,11 @@ export async function signIn(name: string, email?: string, password?: string, si
               emailRedirectTo: `${location.origin}${import.meta.env.BASE_URL}`,
             },
           })
-        : await supabase.auth.signInWithPassword({ email, password });
+        : await authClient().auth.signInWithPassword({ email, password });
       if (error) throw error;
       if (!data.session) throw new Error('Check your email to confirm your account, then sign in.');
     }
-    const { data } = await supabase.auth.getSession();
+    const { data } = await authClient().auth.getSession();
     if (!data.session) throw new Error('Sign in to open a table.');
     session = { id: data.session.user.id, name, token: data.session.access_token };
   } else {
@@ -184,23 +207,40 @@ export async function launch(
   email?: string,
   password?: string,
   signUp = false,
+  role?: 'gm' | 'player',
 ) {
-  await signIn(name, email, password, signUp);
-  if (!roomId) {
-    const created = await request<{ id: string; inviteCode: string }>('/api/campaigns', {
-      name: campaignName,
-    });
-    roomId = created.id;
-    inviteCode = created.inviteCode;
+  const wasDemo = useTable.getState().status === 'demo';
+  if (wasDemo) useTable.getState().set({ status: 'offline' });
+  try {
+    await signIn(name, email, password, signUp);
+    if (!roomId) {
+      const created = await request<{ id: string; inviteCode: string }>('/api/campaigns', {
+        name: campaignName,
+      });
+      roomId = created.id;
+      inviteCode = created.inviteCode;
+    }
+    const url = new URL(location.href);
+    url.searchParams.set('room', roomId);
+    if (inviteCode) url.searchParams.set('invite', inviteCode);
+    else url.searchParams.delete('invite');
+    history.replaceState({}, '', url);
+    connect(roomId, inviteCode, role);
+    useTable.getState().set({ dialog: null });
+  } catch (error) {
+    if (wasDemo) useTable.getState().set({ status: 'demo' });
+    throw error;
   }
-  const url = new URL(location.href);
-  url.searchParams.set('room', roomId);
-  if (inviteCode) url.searchParams.set('invite', inviteCode);
-  history.replaceState({}, '', url);
-  connect(roomId, inviteCode);
-  useTable.getState().set({ dialog: null });
 }
 export function send(action: Action) {
+  if (useTable.getState().status === 'demo') {
+    try {
+      return demoAction(action);
+    } catch (error) {
+      notify(error instanceof Error ? error.message : 'Demo action failed.');
+      return null;
+    }
+  }
   if (socket?.readyState !== WebSocket.OPEN || useTable.getState().status !== 'live') {
     notify('Your table is reconnecting. Try again once the connection returns.');
     return null;
@@ -209,14 +249,17 @@ export function send(action: Action) {
   socket.send(JSON.stringify({ ...action, v: 2, actionId }));
   return actionId;
 }
-export function connect(roomId: string, inviteCode?: string) {
+export function connect(roomId: string, inviteCode?: string, role?: 'gm' | 'player') {
+  rejectPendingActions('The campaign changed before this action was confirmed.');
   stopped = false;
-  config = { roomId, inviteCode };
+  config = { roomId, inviteCode, role };
   attempts = 0;
   open();
 }
 function open() {
   if (!session || !config || stopped) return;
+  const activeSession = session,
+    activeConfig = config;
   if (reconnect) clearTimeout(reconnect);
   if (socket) {
     socket.onclose = null;
@@ -229,33 +272,37 @@ function open() {
   socket = new WebSocket(endpoint);
   const active = socket;
   const watchdog = setTimeout(() => {
-    if (useTable.getState().status !== 'live') active.close();
+    if (socket === active && useTable.getState().status !== 'live') active.close();
   }, 12000);
   socket.onopen = async () => {
     try {
       if (supabase) {
-        const { data } = await supabase.auth.getSession();
+        const { data } = await authClient().auth.getSession();
         if (!data.session) throw new Error('Your session expired. Sign in again.');
-        session!.token = data.session.access_token;
+        if (socket !== active || stopped) return;
+        activeSession.token = data.session.access_token;
       }
-      if (active.readyState === WebSocket.OPEN)
+      if (socket === active && !stopped && active.readyState === WebSocket.OPEN)
         active.send(
           JSON.stringify({
             v: 2,
             type: 'JOIN_ROOM',
             actionId: crypto.randomUUID(),
-            roomId: config!.roomId,
-            inviteCode: config!.inviteCode,
-            token: session!.token,
+            roomId: activeConfig.roomId,
+            inviteCode: activeConfig.inviteCode,
+            role: activeConfig.role,
+            token: activeSession.token,
           }),
         );
     } catch (error) {
+      if (socket !== active || stopped) return;
       notify(error instanceof Error ? error.message : 'Sign-in failed.');
       disconnect();
       useTable.getState().set({ dialog: 'launch' });
     }
   };
   socket.onmessage = (event) => {
+    if (socket !== active || stopped) return;
     const message = JSON.parse(event.data) as ServerMessage,
       store = useTable.getState();
     if (message.v !== 2) {
@@ -271,19 +318,30 @@ function open() {
       }
     }
     switch (message.type) {
-      case 'ROOM_SNAPSHOT':
+      case 'ROOM_SNAPSHOT': {
         attempts = 0;
+        activeConfig.role = message.self.role;
         clearTimeout(watchdog);
+        const contextChanged =
+          store.room.id !== message.state.id ||
+          store.self?.id !== message.self.id ||
+          store.self?.role !== message.self.role;
         store.set({
           room: message.state,
           self: message.self,
+          canGM: message.canGM ?? message.self.role === 'gm',
           presence: message.presence,
           status: 'live',
           inviteCode: message.inviteCode,
           previews: {},
-          ...(store.room.id !== message.state.id
+          ...(contextChanged
             ? {
                 deliveries: {},
+                presentation: null,
+                rollQueue: [],
+                pings: [],
+                tool: 'select' as const,
+                dialog: null,
                 discord: {
                   configured: false,
                   enabled: false,
@@ -326,6 +384,7 @@ function open() {
               : 0),
         });
         break;
+      }
       case 'STATE_PATCH': {
         if (message.revision <= store.room.revision) return;
         if (message.revision !== store.room.revision + 1) {
@@ -377,6 +436,8 @@ function open() {
                 fitNonce: store.fitNonce + 1,
                 selected: null,
                 selectedIds: [],
+                previews: {},
+                pings: [],
                 sceneTransition: Date.now(),
               }
             : {}),
@@ -476,7 +537,10 @@ function open() {
   };
   socket.onclose = () => {
     clearTimeout(watchdog);
-    if (stopped) return;
+    if (socket !== active || stopped) return;
+    rejectPendingActions(
+      'The connection closed before confirmation. Check the table before retrying.',
+    );
     useTable.getState().set({ status: 'reconnecting', previews: {} });
     reconnect = setTimeout(
       open,
@@ -489,6 +553,7 @@ function open() {
 }
 export function disconnect() {
   stopped = true;
+  rejectPendingActions('Disconnected before this action was confirmed.');
   if (reconnect) clearTimeout(reconnect);
   if (socket) socket.close();
   useTable.getState().set({ status: 'offline' });
@@ -499,4 +564,14 @@ export function inviteUrl() {
   url.searchParams.set('room', s.room.id);
   if (s.inviteCode) url.searchParams.set('invite', s.inviteCode);
   return url.toString();
+}
+
+export function launchDemo(role: 'gm' | 'player' = 'gm') {
+  disconnect();
+  config = null;
+  const url = new URL(location.href);
+  url.searchParams.delete('room');
+  url.searchParams.delete('invite');
+  history.replaceState({}, '', url);
+  startDemo(role);
 }

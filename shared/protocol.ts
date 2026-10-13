@@ -22,8 +22,10 @@ export const clientMessageSchema = z.discriminatedUnion('type', [
     roomId: z.string().regex(/^[a-zA-Z0-9_-]{6,64}$/),
     token: z.string().min(1).max(4096),
     inviteCode: z.string().max(64).optional(),
+    role: z.enum(['gm', 'player']).optional(),
   }),
   z.object({ ...base, type: z.literal('STATE_RESYNC') }),
+  z.object({ ...base, type: z.literal('SESSION_ROLE'), role: z.enum(['gm', 'player']) }),
   z.object({
     ...base,
     type: z.literal('TOKEN_MOVE_PREVIEW'),
@@ -158,6 +160,7 @@ export type ServerMessage =
       self: Presence;
       presence: Presence[];
       inviteCode?: string;
+      canGM?: boolean;
     }
   | { v: 2; type: 'STATE_PATCH'; revision: number; actionId: string; changes: StateChange[] }
   | { v: 2; type: 'PRESENCE_UPDATE'; presence: Presence[] }

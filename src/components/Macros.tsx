@@ -103,7 +103,7 @@ export function MacroLibraryDialog() {
             {(m.ownerId === s.self?.id || s.self?.role === 'gm') && (
               <button
                 aria-label={`Delete macro ${m.name}`}
-                disabled={busy || s.status !== 'live'}
+                disabled={busy || (s.status !== 'live' && s.status !== 'demo')}
                 onClick={() => void act({ type: 'MACRO_DELETE', id: m.id })}
               >
                 <Trash2 size={14} />
@@ -169,7 +169,10 @@ export function MacroLibraryDialog() {
             />
             Private result · you & GM
           </label>
-          <button className="primary-button" disabled={busy || s.status !== 'live'}>
+          <button
+            className="primary-button"
+            disabled={busy || (s.status !== 'live' && s.status !== 'demo')}
+          >
             <Play size={15} />
             {busy ? 'Rolling…' : 'Roll macro'}
           </button>
@@ -262,7 +265,10 @@ export function MacroLibraryDialog() {
         <button
           className="primary-button"
           disabled={
-            busy || s.status !== 'live' || !preview?.macros.length || !!preview.errors.length
+            busy ||
+            (s.status !== 'live' && s.status !== 'demo') ||
+            !preview?.macros.length ||
+            !!preview.errors.length
           }
           onClick={() => void act({ type: 'MACRO_IMPORT', text, visibility }, () => setText(''))}
         >
@@ -276,7 +282,7 @@ export function MacroLibraryDialog() {
           {error}
         </p>
       )}
-      {s.status !== 'live' && (
+      {s.status !== 'live' && s.status !== 'demo' && (
         <p className="muted">Open a live campaign to save and roll macros.</p>
       )}
     </div>

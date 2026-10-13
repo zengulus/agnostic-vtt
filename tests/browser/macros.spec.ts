@@ -5,7 +5,7 @@ import type { RoomState } from '../../shared/model.js';
 const example = String.raw`[Attack Name]\([Attack Roll(1d20 + X)],[Damage Roll(1d6 + [Fire(1d6)] + [Akashic(12)])`;
 async function create(page: Page) {
   await page.goto('/');
-  await page.getByRole('button', { name: 'Open a demo table' }).click();
+  await page.getByRole('button', { name: 'Open a live table' }).click();
   await page.getByRole('button', { name: 'Begin your adventure' }).click();
   await expect(page.getByText('LIVE SESSION', { exact: true })).toBeVisible();
 }

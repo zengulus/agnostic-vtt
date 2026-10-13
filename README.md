@@ -2,7 +2,24 @@
 
 A playable, system-agnostic fantasy tabletop with Milestones 1–3 implemented. React + strict TypeScript, Canvas 2D, deterministic Three.js/Cannon dice physics, and an authoritative Node WebSocket server. No gameplay database polling or Supabase Realtime.
 
-## Play locally
+## GitHub Pages demo — no backend needed
+
+The static frontend includes a playable, browser-only demo. Choose **Open a demo table** for GM tools or **Try the player demo** for the player experience. Neither requires an account, Render, Supabase, HTTP API calls, or a WebSocket. Supabase authentication initializes only when opening live campaigns. Built-in maps, portraits, fonts and dice assets ship with the site. Fonts retain their bundled SIL Open Font License notices in `public/fonts/`.
+
+Try token movement, scene/grid/fog tools, drawing, turns, undo/redo, dice, macro import/rolls and chat. **Play as player** hides GM controls and projects the table through the same visibility rules as live campaigns; **Return to GM** restores GM access. **Reset demo** starts fresh. Demo changes live only in the current tab and reset on reload. Multiplayer invitations, uploaded image storage and Discord delivery require a live campaign. External image URLs still require their image host.
+
+To deploy the demo alone, set the repository's **Settings → Pages → Source** to **GitHub Actions** and push to `main`. No Render or Supabase variables are required. The existing workflow builds, tests the production demo with cloud requests blocked, and uploads `dist` to Pages. It uses `/repository-name/`; set repository variable `VITE_BASE_PATH=/` for a root site or custom domain. See [GitHub's custom workflow instructions](https://docs.github.com/en/pages/getting-started-with-github-pages/using-custom-workflows-with-github-pages).
+
+For a frontend-only local preview:
+
+```bash
+npm ci
+npm run dev:web
+```
+
+For a static production build, run `VITE_BASE_PATH=/agnostic-vtt/ npm run build:web`. Serve `dist` with a static web server; the demo does not use the Vite API proxy.
+
+## Play live locally
 
 Requires Node 24 and npm. No cloud credentials needed.
 
@@ -11,11 +28,19 @@ npm ci
 npm run dev
 ```
 
-Open **http://localhost:5173**, choose **Open a demo table**, and begin your adventure. Use **Invite party** to copy the invitation. Open it in a separate browser or private window for a second player. Ordinary tabs in the same browser share the same local identity.
+Open **http://localhost:5173**, choose **Open a live table**, and begin your adventure. Use **Invite party** to copy the invitation. Open it in a separate browser or private window for a second player. Ordinary tabs in the same browser share the same local identity.
 
 Drag tokens, scroll to zoom, hold Space to pan, and roll `1d20 + 5 - 2`. Maps and tokens accept both local image uploads and external image URLs. The included artwork is original, local SVG art. `M` measures, `P` pings, `Z` draws a region, `F` reveals/conceals fog, `D` draws freehand, and `T` places text. The eye button covers or clears the scene. The in-app guide documents controls.
 
 Local sessions are server-signed guest identities stored in your browser. They expire after 24 hours; clearing browser storage loses that identity. Local mode binds to loopback and is for demonstrations. Use Supabase for hosted campaigns and durable account identity.
+
+## GM and player access
+
+Accounts have campaign-specific membership, not a global GM/player type. The same account can GM one campaign and join another as a player. New invitees always receive player membership, regardless of the launch selection.
+
+In the live launch dialog, choose **Enter table as → Player** to join or resume a campaign as a player, including a campaign you own or GM. A GM can also select **Play as player** during play and **Return to GM** afterward. The server applies the selected role to that connection's snapshots, patches, movement permissions, editing, undo, and membership controls. Switching clears private presentations, selection and image caches. Reconnecting preserves the selected role; other tabs keep their own roles. The owner's durable membership remains GM, so player mode cannot strand the campaign without its owner. Only existing GMs can switch back to GM.
+
+Player mode does not revoke account-level ownership or erase previously received information. Live HTTP account administration still checks campaign membership/ownership; this is a play mode, not a security boundary against the GM account itself. Players without GM membership cannot elevate themselves through either the launch selector or a role-switch message.
 
 ## Tabletop tools
 
@@ -83,11 +108,13 @@ npx playwright install chromium
 npm run test:e2e
 ```
 
-To smoke-check a production build under a repository subpath, build with `VITE_BASE_PATH=/agnostic-vtt/` and run `node scripts/verify-pages.mjs`. This verifies static startup and asset loading, without signing in to cloud services.
+To smoke-check a production build under a repository subpath, build with `VITE_BASE_PATH=/agnostic-vtt/` and run `node scripts/verify-pages.mjs`. This exercises demo GM/player switching, fog filtering, undo, dice, chat, macros, reset and repository-subpath assets with all cloud/API requests blocked and WebSocket creation treated as a failure. It also works when the build contains unavailable live-service URLs.
 
-The 108 unit/server checks include real HTTP/WebSocket clients, permissions, private uploads, grouped fog history, atomic batches, membership changes, restart recovery, macro parsing/imports, separate result totals and webhook delivery. Eleven Chromium scenarios cover independent users, uploads/templates/statuses/group movement, drawing privacy, fog geometry, hidden turns, persistent preferences, tablet controls, actual forced physical dice faces, multiline macro imports and webhook settings. A large-map check exercises a 10,000-pixel hex scene with 100 tokens and verifies viewport-bounded grid work. For an existing browser binary, set `PLAYWRIGHT_CHROMIUM_EXECUTABLE` to its absolute path.
+The unit/server checks include real HTTP/WebSocket clients, permissions, private uploads, grouped fog history, atomic batches, membership changes, restart recovery, macro parsing/imports, separate result totals and webhook delivery. Additional regressions cover simultaneous joins, failed membership saves, idle eviction, room capacity during pending saves/loads, stale socket messages, pending confirmations and private presentation cleanup after role changes. Chromium scenarios cover independent users, uploads/templates/statuses/group movement, drawing privacy, fog geometry, hidden turns, persistent and damaged preferences, keyboard activation, disconnected chat drafts, tablet controls, actual forced physical dice faces, multiline macro imports and webhook settings. A large-map check exercises a 10,000-pixel hex scene with 100 tokens and verifies viewport-bounded grid work. For an existing browser binary, set `PLAYWRIGHT_CHROMIUM_EXECUTABLE` to its absolute path.
 
-## Deployment
+## Optional live-service deployment
+
+The Pages demo above works independently. Add these services only for authenticated, persistent multiplayer.
 
 1. Create a Supabase project and apply [001_tabletop.sql](supabase/migrations/001_tabletop.sql), then [002_assets_and_membership.sql](supabase/migrations/002_assets_and_membership.sql). Migration 002 creates the private image bucket and removes revoked memberships during snapshot saves. Existing Milestone 1 installations only need 002. Enable email/password authentication; configure the Site URL and allowed redirect URL to your Pages address, including the repository subpath. This implementation uses password sign-in and email-confirmation redirects.
 2. Deploy the backend using [render.yaml](render.yaml). Set `SUPABASE_URL`, `SUPABASE_SERVICE_ROLE_KEY`, and `ALLOWED_ORIGINS` (your Pages **origin**, e.g. `https://yourname.github.io`; comma-separated for multiple origins). Keep the service role key on Render only. Render supplies `PORT`. Production refuses local guest authentication.
@@ -108,7 +135,7 @@ Persistence writes dirty snapshots at a default 90-second interval, with a 5-sec
 
 The Supabase adapter uses one transactional RPC per snapshot. Raw snapshots contain GM information and have no client read policies. Snapshots and incremental updates are projected: GM tokens/notes/drawings/templates, private rolls, concealed tokens and hidden tracker entries are withheld. Unused or exclusively private uploaded images are inaccessible to players. **Fog does not protect the underlying shared background image**: a map referenced by a scene is available to campaign players. Keep map secrets in separate private content until protected tiling exists. Visibility conservatively requires a token's whole footprint to be revealed; overlapping partial reveals can leave it withheld. Already received content cannot be made secret retroactively.
 
-See [.env.example](.env.example) for settings. `/api/health` is public; bearer-authenticated `/api/metrics` reports aggregate persistence/connection metrics. Limits: 10 members, 20 connections, 10 scenes, 100 tokens/regions/annotations per scene, 500 fog operations, 100 templates and 50 tracker entries. Empty rooms are evicted after 15 minutes.
+See [.env.example](.env.example) for settings. `/api/health` is public; bearer-authenticated `/api/metrics` reports aggregate persistence/connection metrics. Limits: 100 rooms per server (including pending creation/hydration), 10 members, 20 connections, 10 scenes, 100 tokens/regions/annotations per scene, 500 fog operations, 100 templates and 50 tracker entries. Empty rooms are evicted after 15 minutes, including campaigns created or loaded without a player connection. Failed saves retain dirty rooms until persistence recovers.
 
 ## Uploaded images
 

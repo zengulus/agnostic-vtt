@@ -15,7 +15,7 @@ function observe(page: Page) {
 }
 async function create(page: Page) {
   await page.goto('/');
-  await page.getByRole('button', { name: 'Open a demo table' }).click();
+  await page.getByRole('button', { name: 'Open a live table' }).click();
   await page.getByRole('button', { name: 'Begin your adventure' }).click();
   await expect(page.getByText('LIVE SESSION', { exact: true })).toBeVisible();
 }
@@ -89,12 +89,75 @@ test('independent browser clients move tokens, share dice/chat, and reconnect', 
   await expect(gm.getByText('The crossing looks safe.', { exact: true })).toBeVisible();
   await b.setOffline(true);
   await expect(pc.getByText('RECONNECTING', { exact: true })).toBeVisible({ timeout: 15000 });
+  const draft = pc.getByRole('textbox', { name: 'Message your party' });
+  await draft.fill('Keep this draft until we reconnect.');
+  await pc.getByRole('button', { name: 'Send message' }).click();
+  await expect(draft).toHaveValue('Keep this draft until we reconnect.');
   await b.setOffline(false);
   await expect(pc.getByText('LIVE SESSION', { exact: true })).toBeVisible({ timeout: 20000 });
+  await pc.getByRole('button', { name: 'Send message' }).click();
+  await expect(draft).toHaveValue('');
+  await expect(gm.getByText('Keep this draft until we reconnect.', { exact: true })).toBeVisible();
   expect(errors).toEqual([]);
   await a.close();
   await b.close();
 });
+test('keyboard activation works alongside tabletop shortcuts', async ({ page }) => {
+  await page.addInitScript(() =>
+    localStorage.setItem('aether-settings', JSON.stringify({ reducedMotion: true })),
+  );
+  await page.goto('/');
+  const launch = page.getByRole('button', { name: 'Open a live table' });
+  await launch.focus();
+  await page.keyboard.press('Space');
+  await expect(page.getByRole('dialog')).toBeVisible();
+  await page.keyboard.press('Escape');
+  await expect(launch).toBeFocused();
+  await page.keyboard.press('Enter');
+  await page.getByRole('button', { name: 'Begin your adventure' }).click();
+  await expect(page.getByText('LIVE SESSION', { exact: true })).toBeVisible();
+  await page.getByRole('button', { name: 'Roll the dice' }).focus();
+  await page.keyboard.press('Enter');
+  await expect(page.getByTestId('roll-total')).toBeVisible();
+  await page.getByRole('button', { name: 'Dismiss roll' }).focus();
+  await page.keyboard.press('Space');
+  await expect(page.getByTestId('roll-total')).toHaveCount(0);
+  await page.evaluate(() => (document.activeElement as HTMLElement).blur());
+  await page.keyboard.press('m');
+  await expect(page.getByRole('button', { name: 'Measure', exact: true })).toHaveClass(/active/);
+  await page.keyboard.press('Control+f');
+  await expect(page.getByRole('button', { name: 'Measure', exact: true })).toHaveClass(/active/);
+});
+for (const [name, settings, presets, rolls] of [
+  ['null settings and object presets', null, { invalid: true }, ['1d20 + 5', '2d6', '1d100']],
+  ['array settings and null presets', [], null, ['1d20 + 5', '2d6', '1d100']],
+  [
+    'invalid fields and mixed presets',
+    { sound: 'false', reducedMotion: 'false', dice: { speed: 0 } },
+    ['d20', null, 'bad', 'd20', '1d6'],
+    ['d20', '1d6'],
+  ],
+] as const) {
+  test(`startup recovers from ${name}`, async ({ page }) => {
+    const errors: string[] = [];
+    page.on('pageerror', (error) => errors.push(error.message));
+    await page.emulateMedia({ reducedMotion: 'reduce' });
+    await page.addInitScript(
+      ({ settings, presets }) => {
+        localStorage.setItem('aether-settings', JSON.stringify(settings));
+        localStorage.setItem('aether-presets', JSON.stringify(presets));
+      },
+      { settings, presets },
+    );
+    await page.goto('/');
+    await expect(page.getByRole('button', { name: 'Open a live table' })).toBeVisible();
+    await expect(page.locator('.presets button')).toHaveText([...rolls]);
+    await page.getByRole('button', { name: 'Settings', exact: true }).click();
+    await expect(page.getByLabel('Reduced motion')).toBeChecked();
+    await expect(page.getByRole('checkbox', { name: /Roll sound/ })).not.toBeChecked();
+    expect(errors).toEqual([]);
+  });
+}
 test('map/token URL preview, errors, resizing, and accessible preferences work', async ({
   page,
 }) => {
@@ -203,11 +266,39 @@ test('desktop and tablet render without errors or overflowing the viewport', asy
   ).toBeVisible();
   await page.screenshot({ path: 'test-results/tabletop-desktop.png' });
   await page.setViewportSize({ width: 820, height: 1180 });
-  await expect(page.getByRole('button', { name: 'Open a demo table' })).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Open a live table' })).toBeVisible();
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
   await page.setViewportSize({ width: 390, height: 844 });
-  await expect(page.getByRole('button', { name: 'Open a demo table' })).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Open a live table' })).toBeVisible();
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
   await page.screenshot({ path: 'test-results/tabletop-mobile.png' });
   expect(errors).toEqual([]);
+});
+
+test('a campaign owner can sign in as a player and keep that role on reconnect', async ({
+  page,
+  context,
+}) => {
+  await page.goto('/');
+  await page.getByRole('button', { name: 'Open a live table', exact: true }).click();
+  await page.getByLabel('Enter table as').selectOption('player');
+  await page.getByRole('button', { name: 'Begin your adventure', exact: true }).click();
+  await expect(page.getByText('LIVE SESSION', { exact: true })).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Return to GM', exact: true })).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Fog reveal / conceal', exact: true })).toHaveCount(
+    0,
+  );
+  await page.getByRole('button', { name: 'Return to GM', exact: true }).click();
+  await page.getByRole('button', { name: 'Cover scene with fog', exact: true }).click();
+  await page.getByRole('button', { name: 'Play as player', exact: true }).click();
+  await expect(page.locator('.scene-meta')).toContainText('0 tokens');
+  await context.setOffline(true);
+  await expect(page.getByText('RECONNECTING', { exact: true })).toBeVisible();
+  await context.setOffline(false);
+  await expect(page.getByText('LIVE SESSION', { exact: true })).toBeVisible({ timeout: 20000 });
+  await expect(page.getByRole('button', { name: 'Return to GM', exact: true })).toBeVisible();
+  await expect(page.locator('.scene-meta')).toContainText('0 tokens');
+  await page.getByRole('button', { name: 'Return to GM', exact: true }).click();
+  await expect(page.getByRole('button', { name: 'Clear all fog', exact: true })).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Invite party', exact: true })).toBeVisible();
 });

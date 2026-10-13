@@ -305,7 +305,12 @@ export function createApp(
           try {
             const identity = await auth.verify(message.token);
             if (ws.readyState !== WebSocket.OPEN) return;
-            const candidate = { identity, send, close: (reason: string) => ws.close(1008, reason) };
+            const candidate = {
+              identity,
+              role: message.role,
+              send,
+              close: (reason: string) => ws.close(1008, reason),
+            };
             await manager.join(candidate, message.roomId, message.inviteCode);
             if (ws.readyState !== WebSocket.OPEN) {
               await manager.leave(candidate, message.roomId);

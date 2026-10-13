@@ -20,6 +20,7 @@ import type { DiscordStatus } from '../shared/protocol.js';
 
 export interface Peer {
   identity: Identity;
+  role?: 'gm' | 'player';
   send(message: ServerMessage): void;
   close?(reason: string): void;
 }
@@ -42,12 +43,15 @@ interface LiveRoom {
   lastSaved: number;
   savePromise?: Promise<void>;
   configPromise?: Promise<void>;
+  joinPromise?: Promise<void>;
   timer?: ReturnType<typeof setTimeout>;
   idleTimer?: ReturnType<typeof setTimeout>;
 }
 export class RoomManager {
   private rooms = new Map<string, LiveRoom>();
   private hydration = new Map<string, Promise<LiveRoom>>();
+  private creating = 0;
+  private closing = false;
   constructor(
     readonly storage: Persistence,
     readonly interval = 90000,
@@ -58,14 +62,26 @@ export class RoomManager {
     return this.rooms.size;
   }
   async create(identity: Identity, name: string) {
-    if (this.rooms.size >= 100) throw new Error('The table server is full. Try again later.');
-    const id = randomBytes(8).toString('hex'),
-      inviteCode = randomBytes(18).toString('base64url');
-    const data = newRoom(id, identity.id, identity.name, name, inviteCode);
-    data.state.savedAt = new Date().toISOString();
-    await this.storage.save(data);
-    this.rooms.set(id, this.live(data));
-    return { id, inviteCode };
+    this.checkCapacity();
+    this.creating++;
+    try {
+      const id = randomBytes(8).toString('hex'),
+        inviteCode = randomBytes(18).toString('base64url');
+      const data = newRoom(id, identity.id, identity.name, name, inviteCode);
+      data.state.savedAt = new Date().toISOString();
+      await this.storage.save(data);
+      const room = this.live(data);
+      this.rooms.set(id, room);
+      this.scheduleIdle(room);
+      return { id, inviteCode };
+    } finally {
+      this.creating--;
+    }
+  }
+  private checkCapacity() {
+    if (this.closing) throw new Error('The table server is shutting down. Try again shortly.');
+    if (this.rooms.size + this.hydration.size + this.creating >= 100)
+      throw new Error('The table server is full. Try again later.');
   }
   private live(data: DurableRoom): LiveRoom {
     return {
@@ -86,12 +102,13 @@ export class RoomManager {
     let pending = this.hydration.get(id);
     if (!pending) {
       pending = (async () => {
-        if (this.rooms.size >= 100) throw new Error('The table server is full.');
+        this.checkCapacity();
         const data = await this.storage.load(id);
         if (!data || data.state.version !== 1)
           throw new Error('Campaign not found. Check your invitation link.');
         const room = this.live(data);
         this.rooms.set(id, room);
+        this.scheduleIdle(room);
         return room;
       })();
       this.hydration.set(id, pending);
@@ -99,31 +116,58 @@ export class RoomManager {
     try {
       return await pending;
     } finally {
-      this.hydration.delete(id);
+      if (this.hydration.get(id) === pending) this.hydration.delete(id);
     }
   }
   async join(peer: Peer, id: string, inviteCode?: string): Promise<void> {
     const room = await this.load(id);
+    // A second connection must not observe an unpersisted provisional membership.
+    const pending = (room.joinPromise || Promise.resolve())
+      .catch(() => {})
+      .then(() => this.acceptJoin(room, peer, inviteCode));
+    room.joinPromise = pending;
+    try {
+      await pending;
+    } finally {
+      if (room.joinPromise === pending) room.joinPromise = undefined;
+    }
+  }
+  private async acceptJoin(room: LiveRoom, peer: Peer, inviteCode?: string) {
+    if (this.closing) throw new Error('The table server is shutting down. Try again shortly.');
     if (room.data.revokedMembers?.includes(peer.identity.id))
       throw new Error('Your membership was removed. Ask the campaign owner for access.');
-    if (room.idleTimer) clearTimeout(room.idleTimer);
+    if (room.peers.size >= 20) throw new Error('Too many open connections at this table.');
     if (!room.data.members[peer.identity.id]) {
       if (!inviteCode || inviteCode !== room.data.inviteCode)
         throw new Error('An invitation is required to join this campaign.');
       if (Object.keys(room.data.members).length >= 10)
         throw new Error('This table already has ten members.');
-      room.data.members[peer.identity.id] = { name: peer.identity.name, role: 'player' };
+      const member = { name: peer.identity.name, role: 'player' as const };
+      room.data.members[peer.identity.id] = member;
       room.dirty = true;
       room.generation++;
       // Membership is durable on acceptance; gameplay still batches writes.
       try {
         await this.flush(room);
       } catch (error) {
-        delete room.data.members[peer.identity.id];
+        if (room.data.members[peer.identity.id] === member)
+          delete room.data.members[peer.identity.id];
+        room.generation++;
+        room.dirty = true;
+        this.retry(room);
         throw error;
       }
+      if (
+        !room.data.members[peer.identity.id] ||
+        room.data.revokedMembers?.includes(peer.identity.id)
+      )
+        throw new Error('Your membership was removed. Ask the campaign owner for access.');
+      room.undo = [];
+      room.redo = [];
+      for (const p of room.peers) this.history(room, p);
     }
-    if (room.peers.size >= 20) throw new Error('Too many open connections at this table.');
+    if (room.idleTimer) clearTimeout(room.idleTimer);
+    room.idleTimer = undefined;
     room.peers.add(peer);
     this.snapshot(room, peer);
     this.broadcastPresence(room);
@@ -206,7 +250,7 @@ export class RoomManager {
         configured: !!room.data.discord,
         enabled: room.data.discord?.enabled || false,
         mode: room.data.discord?.mode || 'automatic',
-        canManage: room.data.ownerId === peer.identity.id,
+        canManage: room.data.ownerId === peer.identity.id && this.role(room, peer) === 'gm',
       },
     });
   }
@@ -302,11 +346,16 @@ export class RoomManager {
     for (const peer of room.peers) map.set(peer.identity.id, this.self(room, peer));
     return [...map.values()];
   }
+  private role(room: LiveRoom, peer: Peer) {
+    return room.data.members[peer.identity.id]?.role === 'gm' && peer.role !== 'player'
+      ? 'gm'
+      : 'player';
+  }
   private self(room: LiveRoom, peer: Peer): Presence {
     return {
       id: peer.identity.id,
       name: peer.identity.name,
-      role: room.data.members[peer.identity.id].role,
+      role: this.role(room, peer),
       color: peer.identity.id === room.data.ownerId ? '#d8b46c' : '#89b8c9',
     };
   }
@@ -314,17 +363,20 @@ export class RoomManager {
     peer.send({
       v: 2,
       type: 'ROOM_SNAPSHOT',
-      state: projectRoom(room.data, peer.identity.id),
+      state: projectRoom(room.data, peer.identity.id, this.role(room, peer)),
+      canGM: room.data.members[peer.identity.id]?.role === 'gm',
       self: this.self(room, peer),
       presence: this.presence(room),
-      ...(peer.identity.id === room.data.ownerId ? { inviteCode: room.data.inviteCode } : {}),
+      ...(peer.identity.id === room.data.ownerId && this.role(room, peer) === 'gm'
+        ? { inviteCode: room.data.inviteCode }
+        : {}),
     });
     this.history(room, peer);
     this.memberList(room, peer);
     this.discordStatusMessage(room, peer);
   }
   private history(room: LiveRoom, peer: Peer) {
-    if (room.data.members[peer.identity.id]?.role === 'gm')
+    if (this.role(room, peer) === 'gm')
       peer.send({
         v: 2,
         type: 'HISTORY_STATUS',
@@ -337,7 +389,7 @@ export class RoomManager {
       });
   }
   private memberList(room: LiveRoom, peer: Peer) {
-    if (room.data.members[peer.identity.id]?.role === 'gm')
+    if (this.role(room, peer) === 'gm')
       peer.send({
         v: 2,
         type: 'MEMBERS_UPDATE',
@@ -356,33 +408,49 @@ export class RoomManager {
   async leave(peer: Peer, id: string) {
     const room = this.rooms.get(id);
     if (!room) return;
-    room.peers.delete(peer);
+    if (!room.peers.delete(peer)) return;
     this.broadcastPresence(room);
     if (!room.peers.size) {
       if (room.timer) clearTimeout(room.timer);
-      room.timer = setTimeout(
-        () => void this.flush(room).catch(() => this.retry(room)),
-        this.debounce,
-      );
-      room.idleTimer = setTimeout(async () => {
-        try {
-          await this.flush(room);
-          if (!room.peers.size) {
-            if (room.timer) clearTimeout(room.timer);
-            this.rooms.delete(id);
-          }
-        } catch {
-          this.retry(room);
-        }
-      }, 15 * 60000);
+      room.timer = setTimeout(() => {
+        room.timer = undefined;
+        void this.flush(room).catch(() => this.retry(room));
+      }, this.debounce);
+      this.scheduleIdle(room);
     }
+  }
+  private scheduleIdle(room: LiveRoom) {
+    if (room.idleTimer) clearTimeout(room.idleTimer);
+    if (this.closing || room.peers.size) return;
+    room.idleTimer = setTimeout(async () => {
+      room.idleTimer = undefined;
+      try {
+        await this.flush(room);
+        if (!room.peers.size && !room.dirty && !room.joinPromise) {
+          if (room.timer) clearTimeout(room.timer);
+          this.rooms.delete(room.data.state.id);
+        } else this.scheduleIdle(room);
+      } catch {
+        this.retry(room);
+        this.scheduleIdle(room);
+      }
+    }, 15 * 60000);
+    room.idleTimer.unref();
   }
   handle(peer: Peer, id: string, message: ClientMessage) {
     const room = this.rooms.get(id);
     if (!room || !room.peers.has(peer)) throw new Error('Join a campaign first.');
     const data = room.data,
-      role = data.members[peer.identity.id].role;
+      role = this.role(room, peer);
     if (message.type === 'JOIN_ROOM') throw new Error('Already connected to a campaign.');
+    if (message.type === 'SESSION_ROLE') {
+      if (message.role === 'gm' && data.members[peer.identity.id]?.role !== 'gm')
+        throw new Error('Only a campaign GM can enter GM mode.');
+      peer.role = message.role;
+      this.snapshot(room, peer);
+      this.broadcastPresence(room);
+      return;
+    }
     if (message.type === 'STATE_RESYNC') {
       this.snapshot(room, peer);
       return;
@@ -420,7 +488,7 @@ export class RoomManager {
       });
       for (const p of room.peers) {
         if (p === peer) continue;
-        const pRole = data.members[p.identity.id].role;
+        const pRole = this.role(room, p);
         const visible = validated.filter(
           (x) => pRole === 'gm' || (s.tokens[x.tokenId].visibility === 'public' && !s.fog.enabled),
         );
@@ -446,7 +514,7 @@ export class RoomManager {
       return;
     }
     if (message.type === 'MEMBER_UPDATE' || message.type === 'INVITE_ROTATE') {
-      if (peer.identity.id !== data.ownerId)
+      if (peer.identity.id !== data.ownerId || role !== 'gm')
         throw new Error('Only the campaign owner manages membership and invitations.');
       if (message.type === 'INVITE_ROTATE') data.inviteCode = randomBytes(18).toString('base64url');
       else {
@@ -485,7 +553,7 @@ export class RoomManager {
       changes = message.type === 'UNDO' ? entry.inverse : entry.forward;
       target.push(entry);
     } else {
-      changes = prepareAction(data, peer.identity, message);
+      changes = prepareAction(data, peer.identity, message, role);
       if (!['DICE_ROLL_REQUEST', 'MACRO_ROLL_REQUEST', 'CHAT_SEND'].includes(message.type)) {
         const inverse = inverseChanges(before, changes);
         const groupId = message.type === 'FOG_APPEND' ? message.groupId : undefined,
@@ -515,7 +583,7 @@ export class RoomManager {
         changes,
         before,
         data.state,
-        data.members[p.identity.id].role,
+        this.role(room, p),
         p.identity.id,
       );
       p.send({
@@ -548,7 +616,7 @@ export class RoomManager {
     if (message.type === 'SCENE_CHANGE') void this.flush(room).catch(() => this.retry(room));
   }
   private schedule(room: LiveRoom) {
-    if (!room.timer)
+    if (!this.closing && !room.timer)
       room.timer = setTimeout(
         () => {
           room.timer = undefined;
@@ -566,6 +634,7 @@ export class RoomManager {
         message: 'Snapshot storage is unavailable. Your table is still live; saving will retry.',
       });
     if (room.timer) clearTimeout(room.timer);
+    if (this.closing) return;
     room.timer = setTimeout(() => {
       room.timer = undefined;
       void this.flush(room).catch(() => this.retry(room));
@@ -602,6 +671,7 @@ export class RoomManager {
     await Promise.all([...this.rooms.values()].map((r) => this.flush(r)));
   }
   async close() {
+    this.closing = true;
     this.discordDelivery.close();
     for (const r of this.rooms.values()) {
       if (r.timer) clearTimeout(r.timer);

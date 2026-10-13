@@ -83,6 +83,63 @@ describe('real authoritative WebSocket server', () => {
     await app.close();
     await rm(dir, { recursive: true, force: true });
   });
+  it('lets one GM account enter as a player without demotion and enforces that connection role', async () => {
+    const gm = await client(owner);
+    const initial = await gm.wait('ROOM_SNAPSHOT');
+    const playerMode = await new Client(url).open();
+    clients.push(playerMode);
+    playerMode.send({ type: 'JOIN_ROOM', roomId: room.id, token: owner.token, role: 'player' });
+    expect(await playerMode.wait('ROOM_SNAPSHOT')).toMatchObject({
+      self: { role: 'player' },
+      canGM: true,
+    });
+    const secret = {
+      ...initial.state.scenes.hollow.tokens.sentinel,
+      visibility: 'gm' as const,
+      note: 'Hidden clue',
+    };
+    const edit = gm.send({ type: 'TOKEN_UPDATE', sceneId: 'hollow', token: secret });
+    await gm.wait('STATE_PATCH', (m) => m.actionId === edit);
+    const hiddenPatch = await playerMode.wait('STATE_PATCH', (m) => m.actionId === edit);
+    expect(JSON.stringify(hiddenPatch)).not.toContain('Hidden clue');
+    const denied = playerMode.send({
+      type: 'FOG_UPDATE',
+      sceneId: 'hollow',
+      fog: { enabled: true, revealed: [] },
+    });
+    expect((await playerMode.wait('ERROR', (m) => m.actionId === denied)).message).toContain(
+      'game master',
+    );
+    const deniedInvite = playerMode.send({ type: 'INVITE_ROTATE' });
+    await playerMode.wait('ERROR', (m) => m.actionId === deniedInvite);
+    const move = playerMode.send({
+      type: 'TOKEN_MOVE_COMMIT',
+      sceneId: 'hollow',
+      tokenId: 'ranger',
+      position: { x: 400, y: 400 },
+    });
+    await playerMode.wait('STATE_PATCH', (m) => m.actionId === move);
+    playerMode.send({ type: 'STATE_RESYNC' });
+    const projected = await playerMode.wait('ROOM_SNAPSHOT');
+    expect(projected.state.scenes.hollow.tokens.sentinel).toBeUndefined();
+    expect(projected.inviteCode).toBeUndefined();
+    playerMode.send({ type: 'SESSION_ROLE', role: 'gm' });
+    expect(await playerMode.wait('ROOM_SNAPSHOT')).toMatchObject({
+      self: { role: 'gm' },
+      canGM: true,
+      state: { scenes: { hollow: { tokens: { sentinel: { note: 'Hidden clue' } } } } },
+    });
+    playerMode.send({ type: 'SESSION_ROLE', role: 'player' });
+    await playerMode.wait('ROOM_SNAPSHOT');
+    gm.send({ type: 'STATE_RESYNC' });
+    expect(await gm.wait('ROOM_SNAPSHOT')).toMatchObject({ self: { role: 'gm' } });
+    const pc = await client(player);
+    await pc.wait('ROOM_SNAPSHOT');
+    const escalate = pc.send({ type: 'SESSION_ROLE', role: 'gm' });
+    expect((await pc.wait('ERROR', (m) => m.actionId === escalate)).message).toContain(
+      'campaign GM',
+    );
+  });
   it('two independent clients move tokens, receive identical rolls, and gameplay does not write snapshots', async () => {
     const gm = await client(owner);
     await gm.wait('ROOM_SNAPSHOT');

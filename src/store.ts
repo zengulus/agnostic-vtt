@@ -1,4 +1,5 @@
 import { create } from 'zustand';
+import { z } from 'zod';
 import type { Point, Presence, Roll, RoomState } from '../shared/model.js';
 import { sampleScene } from '../shared/sample.js';
 import type { Camera } from '../shared/geometry.js';
@@ -34,7 +35,8 @@ interface UIState {
   room: RoomState;
   self: Presence | null;
   presence: Presence[];
-  status: 'offline' | 'connecting' | 'live' | 'reconnecting';
+  status: 'offline' | 'demo' | 'connecting' | 'live' | 'reconnecting';
+  canGM: boolean;
   inviteCode?: string;
   tool: Tool;
   selected: string | null;
@@ -71,23 +73,27 @@ interface UIState {
   set: (value: Partial<UIState>) => void;
   finishRoll: () => void;
 }
-let settings: {
-  reducedMotion?: boolean;
-  sound?: boolean;
-  diceTheme?: 'gold' | 'moon';
-  dice?: DicePreferences;
-} = {};
+const settingsSchema = z.object({
+  reducedMotion: z.boolean().optional().catch(undefined),
+  sound: z.boolean().optional().catch(undefined),
+  diceTheme: z.enum(['gold', 'moon']).optional().catch(undefined),
+  dice: dicePreferencesSchema.optional().catch(undefined),
+});
+let settings: z.infer<typeof settingsSchema> = {};
 try {
-  settings = JSON.parse(localStorage.getItem('aether-settings') || '{}');
+  const parsed = settingsSchema.safeParse(
+    JSON.parse(localStorage.getItem('aether-settings') || '{}'),
+  );
+  if (parsed.success) settings = parsed.data;
 } catch {
   /* Recover from damaged preferences. */
 }
-const dice = dicePreferencesSchema.safeParse(settings.dice || {});
 export const useTable = create<UIState>((set, get) => ({
   room: demoState,
   self: null,
   presence: [],
   status: 'offline',
+  canGM: false,
   tool: 'select',
   selected: null,
   selectedIds: [],
@@ -103,7 +109,7 @@ export const useTable = create<UIState>((set, get) => ({
   reducedMotion: settings.reducedMotion ?? matchMedia('(prefers-reduced-motion: reduce)').matches,
   sound: settings.sound ?? false,
   diceTheme: settings.diceTheme ?? 'gold',
-  dice: dice.success ? dice.data : dicePreferencesSchema.parse({}),
+  dice: settings.dice || dicePreferencesSchema.parse({}),
   history: { canUndo: false, canRedo: false, undoLabel: '', redoLabel: '' },
   members: [],
   ownerId: null,

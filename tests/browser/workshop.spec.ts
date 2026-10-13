@@ -18,7 +18,7 @@ function observe(page: Page) {
 }
 async function create(page: Page) {
   await page.goto('/');
-  await page.getByRole('button', { name: 'Open a demo table' }).click();
+  await page.getByRole('button', { name: 'Open a live table' }).click();
   await page.getByRole('button', { name: 'Begin your adventure' }).click();
   await expect(page.getByText('LIVE SESSION', { exact: true })).toBeVisible();
 }

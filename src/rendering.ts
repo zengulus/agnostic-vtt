@@ -139,6 +139,7 @@ interface RenderOptions {
 }
 export class SceneRenderer {
   private positions = new Map<string, Point>();
+  private context = '';
   private fog: {
     canvas: HTMLCanvasElement;
     source: Scene['fog'];
@@ -150,6 +151,12 @@ export class SceneRenderer {
   } | null = null;
   draw(ctx: CanvasRenderingContext2D, o: RenderOptions): boolean {
     const { scene: s, camera: c, width: w, height: h, dpr } = o;
+    const context = `${o.roomId}/${s.id}/${o.gm}`;
+    if (this.context !== context) {
+      this.context = context;
+      this.positions.clear();
+      this.fog = null;
+    }
     let animating = false;
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
     ctx.clearRect(0, 0, w, h);

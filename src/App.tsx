@@ -37,7 +37,7 @@ import {
   Image as ImageIcon,
 } from 'lucide-react';
 import { useTable } from './store.js';
-import { inviteUrl, send } from './connection.js';
+import { inviteUrl, launchDemo, send } from './connection.js';
 import { AssetImage } from './assets.js';
 import { HistoryControls, TrackerPanel } from './components/Workshop.js';
 import { parseDice } from '../shared/dice.js';
@@ -123,8 +123,19 @@ export function App() {
                 ? 'RECONNECTING'
                 : s.status === 'connecting'
                   ? 'CONNECTING'
-                  : 'DEMO PREVIEW'}
+                  : s.status === 'demo'
+                    ? 'OFFLINE DEMO'
+                    : 'DEMO PREVIEW'}
           </span>
+          {s.canGM && s.self && (
+            <button
+              className="subtle-button"
+              disabled={s.status !== 'live' && s.status !== 'demo'}
+              onClick={() => send({ type: 'SESSION_ROLE', role: gm ? 'player' : 'gm' })}
+            >
+              {gm ? 'Play as player' : 'Return to GM'}
+            </button>
+          )}
           {s.self && (
             <div className="party-avatars">
               {s.presence.slice(0, 4).map((p) => (
@@ -136,10 +147,22 @@ export function App() {
           )}
           <button
             className="invite-button"
-            onClick={() => s.set({ dialog: s.self ? 'invite' : 'launch' })}
+            onClick={() =>
+              s.status === 'demo'
+                ? launchDemo(s.self?.role)
+                : s.set({ dialog: s.self ? 'invite' : 'launch' })
+            }
           >
             <Users size={15} />
-            <span>{gm ? 'Invite party' : s.self ? 'Your party' : 'Gather your party'}</span>
+            <span>
+              {s.status === 'demo'
+                ? 'Reset demo'
+                : gm
+                  ? 'Invite party'
+                  : s.self
+                    ? 'Your party'
+                    : 'Gather your party'}
+            </span>
             <ArrowUpRight size={14} />
           </button>
           <HistoryControls />
@@ -393,9 +416,11 @@ export function App() {
                   minute: '2-digit',
                 })
               : 'Waiting for snapshot'
-            : s.status === 'offline'
-              ? 'Local demo · start a table to play'
-              : 'Reconnecting to your table'}
+            : s.status === 'demo'
+              ? 'Demo · changes stay in this tab until reload'
+              : s.status === 'offline'
+                ? 'Explore the demo or open a live table'
+                : 'Reconnecting to your table'}
           <i />
           Rev {s.room.revision}
         </span>
@@ -424,10 +449,25 @@ function Chronicle() {
     [chat, setChat] = useState(''),
     [pending, setPending] = useState(false),
     [presets, setPresets] = useState<string[]>(() => {
+      const defaults = ['1d20 + 5', '2d6', '1d100'];
       try {
-        return JSON.parse(localStorage.getItem('aether-presets') || '["1d20 + 5","2d6","1d100"]');
+        const stored: unknown = JSON.parse(localStorage.getItem('aether-presets') || 'null');
+        if (!Array.isArray(stored)) return defaults;
+        return [
+          ...new Set(
+            stored.filter((value): value is string => {
+              if (typeof value !== 'string' || value.length > 120) return false;
+              try {
+                parseDice(value);
+                return true;
+              } catch {
+                return false;
+              }
+            }),
+          ),
+        ].slice(-6);
       } catch {
-        return [];
+        return defaults;
       }
     });
   useEffect(() => {
@@ -589,8 +629,7 @@ function Chronicle() {
                   return;
                 }
                 if (chat.trim()) {
-                  send({ type: 'CHAT_SEND', text: chat });
-                  setChat('');
+                  if (send({ type: 'CHAT_SEND', text: chat })) setChat('');
                 }
               }}
             >

@@ -1,4 +1,18 @@
-@import url('https://fonts.googleapis.com/css2?family=Cormorant+Garamond:wght@400;500;600;700&family=DM+Sans:wght@400;450;500;550;600;650;700&display=swap');
+/* Locally served Google Fonts Latin subsets; licenses in public/fonts. */
+@font-face {
+  font-family: 'DM Sans';
+  font-style: normal;
+  font-weight: 400 700;
+  font-display: swap;
+  src: url('/fonts/dmsans.woff2') format('woff2');
+}
+@font-face {
+  font-family: 'Cormorant Garamond';
+  font-style: normal;
+  font-weight: 400 700;
+  font-display: swap;
+  src: url('/fonts/cormorantgaramond.woff2') format('woff2');
+}
 :root {
   font-family: 'DM Sans', sans-serif;
   color: #deded1;
@@ -728,6 +742,12 @@ i {
   margin: 26px 0 15px;
   width: 100%;
   justify-content: space-between;
+}
+.table-welcome .subtle-button {
+  display: flex;
+  justify-content: center;
+  width: 100%;
+  margin-bottom: 10px;
 }
 .table-welcome small {
   font-size: 9px;

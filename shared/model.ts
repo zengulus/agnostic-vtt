@@ -267,8 +267,11 @@ export function projectScene(scene: Scene, role: 'gm' | 'player'): Scene {
     ),
   };
 }
-export function projectRoom(room: DurableRoom, userId: string): RoomState {
-  const role = room.members[userId]?.role || 'player';
+export function projectRoom(
+  room: DurableRoom,
+  userId: string,
+  role = room.members[userId]?.role || 'player',
+): RoomState {
   return {
     ...room.state,
     scenes: Object.fromEntries(
@@ -283,7 +286,7 @@ export function projectRoom(room: DurableRoom, userId: string): RoomState {
         .map(([id, t]) => [id, role === 'gm' ? t : { ...t, note: undefined }]),
     ),
     tracker: projectTracker(room.state.tracker || emptyTracker(), role),
-    assets: projectAssets(room.state, userId === room.ownerId || role === 'gm', role),
+    assets: projectAssets(room.state, role === 'gm', role),
     macros: Object.fromEntries(
       Object.entries(room.state.macros || {}).filter(([, m]) => macroVisible(m, userId, role)),
     ),

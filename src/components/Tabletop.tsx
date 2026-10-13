@@ -13,7 +13,7 @@ import {
   Save,
 } from 'lucide-react';
 import { useTable } from '../store.js';
-import { send } from '../connection.js';
+import { launchDemo, liveAvailable, send } from '../connection.js';
 import { clampPoint, screenToWorld, snapPoint, type Camera } from '../../shared/geometry.js';
 import { canControl, type Point, type Token, type FogOperation } from '../../shared/model.js';
 import { SceneRenderer, conePoints, type Draft } from '../rendering.js';
@@ -218,7 +218,15 @@ export function Tabletop() {
     element.addEventListener('wheel', wheel, { passive: false });
     const down = (e: KeyboardEvent) => {
       const st = useTable.getState();
-      if ((e.target as HTMLElement).matches('input,textarea,select') || st.dialog) return;
+      if (
+        e.isComposing ||
+        st.dialog ||
+        (e.target instanceof Element &&
+          e.target.closest(
+            'input,textarea,select,button,a[href],[contenteditable]:not([contenteditable="false"]),[role="button"]',
+          ))
+      )
+        return;
       const key = e.key.toLowerCase();
       if ((e.ctrlKey || e.metaKey) && (key === 'z' || key === 'y')) {
         e.preventDefault();
@@ -230,12 +238,13 @@ export function Tabletop() {
         duplicateSelection();
         return;
       }
+      if (e.ctrlKey || e.metaKey || e.altKey) return;
       if (e.code === 'Space') {
         e.preventDefault();
         space.current = true;
         return;
       }
-      if (key === 'enter') {
+      if (key === 'enter' && draft.current && !draft.current.completed) {
         e.preventDefault();
         finishPolygon();
         return;
@@ -265,8 +274,16 @@ export function Tabletop() {
     const up = (e: KeyboardEvent) => {
       if (e.code === 'Space') space.current = false;
     };
+    const blur = () => {
+      space.current = false;
+      pointers.current.clear();
+      pinch.current = null;
+      clearDraft();
+      useTable.getState().set({ previews: {} });
+    };
     window.addEventListener('keydown', down);
     window.addEventListener('keyup', up);
+    window.addEventListener('blur', blur);
     return () => {
       observer.disconnect();
       unsubscribe();
@@ -274,6 +291,7 @@ export function Tabletop() {
       element.removeEventListener('wheel', wheel);
       window.removeEventListener('keydown', down);
       window.removeEventListener('keyup', up);
+      window.removeEventListener('blur', blur);
     };
   }, []);
   function pointer(e: React.PointerEvent): Point {
@@ -319,7 +337,7 @@ export function Tabletop() {
       drag.current = { ...base, kind: 'pan' };
       return;
     }
-    if (st.status !== 'live') {
+    if (st.status !== 'live' && st.status !== 'demo') {
       st.set({ dialog: 'launch' });
       return;
     }
@@ -655,12 +673,20 @@ export function Tabletop() {
           <span className="eyebrow">YOUR NEXT CHAPTER STARTS HERE</span>
           <h2>A place for extraordinary stories.</h2>
           <p>Gather your party. Unfold a world. Let the dice decide.</p>
-          <button className="primary" onClick={() => store.set({ dialog: 'launch' })}>
+          <button className="primary" onClick={() => launchDemo()}>
             <MousePointer2 size={16} />
-            {supabaseLabel()}
+            Open a demo table
             <span>↗</span>
           </button>
-          <small>A shared tabletop. Any system. Your story.</small>
+          <button className="subtle-button" onClick={() => launchDemo('player')}>
+            Try the player demo
+          </button>
+          {liveAvailable && (
+            <button className="subtle-button" onClick={() => store.set({ dialog: 'launch' })}>
+              Open a live table
+            </button>
+          )}
+          <small>No account needed. Demo changes last until you reload.</small>
         </div>
       )}
       {selected && (
@@ -761,7 +787,4 @@ export function Tabletop() {
       </div>
     </div>
   );
-}
-function supabaseLabel() {
-  return import.meta.env.VITE_SUPABASE_URL ? 'Open your table' : 'Open a demo table';
 }

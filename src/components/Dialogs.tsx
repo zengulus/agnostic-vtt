@@ -4,6 +4,8 @@ import { useTable } from '../store.js';
 import {
   inviteUrl,
   launch,
+  launchDemo,
+  liveAvailable,
   send,
   supabase,
   uploadImage,
@@ -26,16 +28,26 @@ export function Dialogs() {
     if (!s.dialog) return;
     const previous = document.activeElement as HTMLElement;
     const el = ref.current;
-    el?.querySelector<HTMLElement>('input,button')?.focus();
+    (el?.querySelector<HTMLElement>('input,button') || el)?.focus();
     const key = (e: KeyboardEvent) => {
       if (e.key === 'Escape') s.set({ dialog: null });
       if (e.key === 'Tab' && el) {
-        const items = [...el.querySelectorAll<HTMLElement>('button,input,select,textarea')].filter(
-          (n) => !n.hasAttribute('disabled'),
+        const items = [
+          ...el.querySelectorAll<HTMLElement>(
+            'a[href],button,input,select,textarea,[tabindex],[contenteditable="true"]',
+          ),
+        ].filter(
+          (n) => !n.matches(':disabled') && n.tabIndex >= 0 && n.getClientRects().length > 0,
         );
         const first = items[0],
           last = items.at(-1);
-        if (e.shiftKey && document.activeElement === first) {
+        if (!items.length) {
+          e.preventDefault();
+          el.focus();
+        } else if (!el.contains(document.activeElement)) {
+          e.preventDefault();
+          (e.shiftKey ? last : first)?.focus();
+        } else if (e.shiftKey && document.activeElement === first) {
           e.preventDefault();
           last?.focus();
         } else if (!e.shiftKey && document.activeElement === last) {
@@ -47,7 +59,7 @@ export function Dialogs() {
     document.addEventListener('keydown', key);
     return () => {
       document.removeEventListener('keydown', key);
-      previous?.focus();
+      if (previous?.isConnected) previous.focus();
     };
   }, [s.dialog, s.set]);
   if (!s.dialog) return null;
@@ -78,6 +90,7 @@ export function Dialogs() {
         role="dialog"
         aria-modal="true"
         aria-labelledby="modal-title"
+        tabIndex={-1}
       >
         <div className="modal-header">
           <span className="eyebrow">AETHER TABLE</span>
@@ -125,6 +138,7 @@ function Launch() {
     [email, setEmail] = useState(''),
     [password, setPassword] = useState(''),
     [signup, setSignup] = useState(false),
+    [role, setRole] = useState<'gm' | 'player'>('gm'),
     [busy, setBusy] = useState(false),
     [error, setError] = useState('');
   const [campaigns, setCampaigns] = useState<Array<{ id: string; name: string; role: string }>>([]);
@@ -133,6 +147,22 @@ function Launch() {
       .then(setCampaigns)
       .catch(() => {});
   }, []);
+  if (!liveAvailable)
+    return (
+      <div className="demo-options">
+        <p className="modal-description">
+          Explore a complete sample table in this browser. No account or cloud services needed.
+          Changes reset on reload.
+        </p>
+        <button className="primary modal-submit" onClick={() => launchDemo()}>
+          Try the GM demo
+        </button>
+        <button className="subtle-button" onClick={() => launchDemo('player')}>
+          Try the player demo
+        </button>
+        <p className="field-note">Live multiplayer is not configured on this site.</p>
+      </div>
+    );
   return (
     <form
       onSubmit={async (e) => {
@@ -148,7 +178,7 @@ function Launch() {
             if (!roomId)
               throw new Error('Paste the full invitation link shared by your game master.');
           }
-          await launch(name, campaign, roomId, invite, email, password, signup);
+          await launch(name, campaign, roomId, invite, email, password, signup, role);
         } catch (error) {
           setError(error instanceof Error ? error.message : 'Could not open your table.');
         } finally {
@@ -159,13 +189,13 @@ function Launch() {
       <p className="modal-description">
         {supabase
           ? 'One account. Endless adventures. Sign in to create or join your party’s table.'
-          : 'The local demo uses a real multiplayer server. Open an invitation in another browser to play together.'}
+          : 'Live multiplayer uses the local server. Open an invitation in another browser to play together.'}
       </p>
       {campaigns.length > 0 && (
         <div className="resume-campaigns">
           <span className="eyebrow">YOUR SAVED TABLES</span>
           {campaigns.map((c) => (
-            <button key={c.id} type="button" onClick={() => resumeCampaign(c.id)}>
+            <button key={c.id} type="button" onClick={() => resumeCampaign(c.id, role)}>
               <span>
                 {c.name}
                 <small>{c.role === 'gm' ? 'Game master' : 'Player'}</small>
@@ -175,6 +205,17 @@ function Launch() {
           ))}
         </div>
       )}
+      <label>
+        Enter table as
+        <select value={role} onChange={(e) => setRole(e.target.value as 'gm' | 'player')}>
+          <option value="gm">Game master (requires campaign permission)</option>
+          <option value="player">Player</option>
+        </select>
+      </label>
+      <p className="field-note">
+        One account can GM some campaigns and play in others. Invitations always grant player
+        access. GMs can return to GM mode at any time.
+      </p>
       <div className="segmented">
         <button type="button" className={!join ? 'active' : ''} onClick={() => setJoin(false)}>
           Create a campaign
@@ -241,8 +282,13 @@ function Launch() {
         {busy ? 'Opening the table…' : join ? 'Join your party' : 'Begin your adventure'}
         <ArrowUpRight size={16} />
       </button>
+      <button type="button" className="subtle-button" onClick={() => launchDemo()}>
+        Try the offline demo instead
+      </button>
       {s.self && (
-        <p className="field-note">Your current campaign stays saved when you open another table.</p>
+        <p className="field-note">
+          Live campaigns save to the server. Demo changes last only in this tab.
+        </p>
       )}
     </form>
   );
@@ -272,7 +318,8 @@ function AssetPicker({
     [],
   );
   const roomId = useTable((state) => state.room.id),
-    gm = useTable((state) => state.self?.role === 'gm');
+    gm = useTable((state) => state.self?.role === 'gm'),
+    demo = useTable((state) => state.status === 'demo');
   useEffect(() => {
     let current = true;
     void resolveAsset(asset, roomId)
@@ -348,7 +395,7 @@ function AssetPicker({
   }
   return (
     <div className="asset-picker">
-      {gm && (
+      {gm && !demo && (
         <label className="upload-control">
           Upload image
           <input
@@ -368,6 +415,11 @@ function AssetPicker({
               : 'PNG, JPEG, WebP · up to 10 MiB · stored with the campaign'}
           </small>
         </label>
+      )}
+      {demo && (
+        <p className="field-note">
+          Uploads need a live campaign. Try the included artwork or a public image URL.
+        </p>
       )}
       <div className="asset-preview">
         <img
