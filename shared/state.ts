@@ -235,7 +235,7 @@ export function projectChanges(
       continue;
     }
     if (c.kind === 'tracker') {
-      projected.push({ ...c, tracker: projectTracker(c.tracker, role) });
+      projected.push({ ...c, tracker: projectTracker(c.tracker, role, after) });
       continue;
     }
     if (
@@ -282,6 +282,13 @@ export function projectChanges(
       JSON.stringify(Object.keys(newAssets).sort())
     )
       projected.push({ kind: 'assets', assets: newAssets });
+  }
+  // Fog, token visibility and scene changes can alter linked tracker visibility without a tracker edit.
+  if (role === 'player' && !changes.some((c) => c.kind === 'tracker')) {
+    const oldTracker = projectTracker(before.tracker || emptyTracker(), role, before);
+    const tracker = projectTracker(after.tracker || emptyTracker(), role, after);
+    if (JSON.stringify(oldTracker) !== JSON.stringify(tracker))
+      projected.push({ kind: 'tracker', tracker });
   }
   return projected;
 }

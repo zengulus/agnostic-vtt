@@ -218,6 +218,8 @@ export type ServerMessage =
       presence: Presence[];
       inviteCode?: string;
       canGM?: boolean;
+      savedRevision?: number;
+      savePending?: boolean;
     }
   | { v: 2; type: 'STATE_PATCH'; revision: number; actionId: string; changes: StateChange[] }
   | { v: 2; type: 'PRESENCE_UPDATE'; presence: Presence[] }
@@ -231,7 +233,7 @@ export type ServerMessage =
     }
   | { v: 2; type: 'DICE_ROLL_RESULT'; roll: Roll }
   | { v: 2; type: 'PING'; position: Point; userId: string }
-  | { v: 2; type: 'SAVED'; savedAt: string; revision: number }
+  | { v: 2; type: 'SAVED'; savedAt: string; revision: number; pending?: boolean }
   | { v: 2; type: 'ERROR'; message: string; actionId?: string };
 export type HistoryStatus = {
   canUndo: boolean;

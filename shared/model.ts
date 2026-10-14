@@ -120,7 +120,7 @@ export const trackerSchema = z.object({
   round: z.number().int().min(1).max(10000),
   order: z.enum(['manual', 'ascending', 'descending']),
 });
-export type Tracker = z.infer<typeof trackerSchema>;
+export type Tracker = z.infer<typeof trackerSchema> & { nextId?: string | null };
 export const emptyTracker = (): Tracker => ({
   entries: [],
   activeId: null,
@@ -294,7 +294,7 @@ export function projectRoom(
         .filter(([, t]) => role === 'gm' || t.visibility === 'public')
         .map(([id, t]) => [id, role === 'gm' ? t : { ...t, note: undefined }]),
     ),
-    tracker: projectTracker(room.state.tracker || emptyTracker(), role),
+    tracker: projectTracker(room.state.tracker || emptyTracker(), role, room.state),
     assets: projectAssets(room.state, role === 'gm', role),
     macros: Object.fromEntries(
       Object.entries(room.state.macros || {}).filter(([, m]) => macroVisible(m, userId, role)),
@@ -304,12 +304,31 @@ export function projectRoom(
 export function macroVisible(macro: Macro, userId: string, role: 'gm' | 'player') {
   return macro.visibility === 'public' || macro.ownerId === userId || role === 'gm';
 }
-export function projectTracker(tracker: Tracker, role: 'gm' | 'player'): Tracker {
-  const entries = tracker.entries.filter((e) => role === 'gm' || !e.hidden);
+/** Only the immediate visible successor is projected; hidden turns are never skipped in Up next. */
+export function projectTracker(
+  tracker: Tracker,
+  role: 'gm' | 'player',
+  state?: RoomState,
+): Tracker {
+  const scene = state?.scenes[state.activeSceneId];
+  const entries = tracker.entries.filter(
+    (e) =>
+      role === 'gm' ||
+      (!e.hidden &&
+        (!e.tokenId ||
+          (!!scene?.tokens[e.tokenId] && tokenVisible(scene.tokens[e.tokenId], scene, role)))),
+  );
+  const activeId = entries.some((e) => e.id === tracker.activeId) ? tracker.activeId : null;
+  const index = tracker.entries.findIndex((e) => e.id === activeId);
+  const next =
+    index >= 0 && tracker.entries.length > 1
+      ? tracker.entries[(index + 1) % tracker.entries.length]
+      : undefined;
   return {
     ...tracker,
     entries,
-    activeId: entries.some((e) => e.id === tracker.activeId) ? tracker.activeId : null,
+    activeId,
+    nextId: next && entries.some((e) => e.id === next.id) ? next.id : null,
   };
 }
 export function projectAssets(state: RoomState, gm: boolean, role: 'gm' | 'player') {

@@ -337,6 +337,7 @@ describe('campaign workshop over real HTTP and WebSockets', () => {
     expect(pc.state.tracker).toEqual({
       round: 3,
       activeId: null,
+      nextId: null,
       order: 'manual',
       entries: [{ id: 'public', name: 'Guide', value: 8, hidden: false }],
     });
