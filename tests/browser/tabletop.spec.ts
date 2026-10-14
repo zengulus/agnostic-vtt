@@ -109,6 +109,7 @@ test('independent browser clients move tokens, share dice/chat, and reconnect', 
   await b.close();
 });
 test('keyboard activation works alongside tabletop shortcuts', async ({ page }) => {
+  await page.clock.install();
   await page.addInitScript(() =>
     localStorage.setItem('aether-settings', JSON.stringify({ reducedMotion: true })),
   );
@@ -120,14 +121,20 @@ test('keyboard activation works alongside tabletop shortcuts', async ({ page }) 
   await page.keyboard.press('Escape');
   await expect(launch).toBeFocused();
   await page.keyboard.press('Enter');
-  await page.getByRole('button', { name: 'Create campaign' }).click();
-  await expect(page.getByText('Live', { exact: true })).toBeVisible();
+  // Keyboard behavior does not depend on live campaign creation or socket readiness.
+  await page.getByRole('dialog').getByRole('button', { name: 'Demo', exact: true }).focus();
+  await page.keyboard.press('Enter');
+  await expect(page.getByRole('dialog')).toHaveCount(0);
+  await expect(page.getByText('Demo', { exact: true })).toBeVisible();
+  // Test keyboard dismissal without racing the minimal result's 2.8s auto-dismiss.
+  await page.clock.pauseAt(await page.evaluate(() => Date.now() + 1000));
   await page.getByRole('button', { name: 'Roll the dice' }).focus();
   await page.keyboard.press('Enter');
   await expect(page.getByTestId('roll-total')).toBeVisible();
   await page.getByRole('button', { name: 'Dismiss roll' }).focus();
   await page.keyboard.press('Space');
   await expect(page.getByTestId('roll-total')).toHaveCount(0);
+  await page.clock.resume();
   await page.evaluate(() => (document.activeElement as HTMLElement).blur());
   await page.keyboard.press('m');
   await expect(page.getByRole('button', { name: 'Measure', exact: true })).toHaveClass(/active/);
@@ -268,14 +275,12 @@ test('desktop and tablet render without errors or overflowing the viewport', asy
   page.on('pageerror', (e) => errors.push(e.message));
   await page.goto('/');
   await expect(page.getByRole('heading', { name: 'The next chapter.' })).toBeVisible();
-  await page.screenshot({ path: 'test-results/tabletop-desktop.png' });
   await page.setViewportSize({ width: 820, height: 1180 });
   await expect(page.getByRole('button', { name: 'Log in' })).toBeVisible();
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
   await page.setViewportSize({ width: 390, height: 844 });
   await expect(page.getByRole('button', { name: 'Log in' })).toBeVisible();
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
-  await page.screenshot({ path: 'test-results/tabletop-mobile.png' });
   expect(errors).toEqual([]);
 });
 

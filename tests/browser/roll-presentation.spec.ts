@@ -15,11 +15,15 @@ test('minimal totals advance queued rolls only after their full display interval
   await expression.fill('1d20');
   await page.getByRole('button', { name: 'Roll the dice' }).click();
   await expect(page.getByTestId('roll-total')).toBeVisible();
+  // The roll button has a separate 900ms repeat-click guard. Release it without
+  // consuming the first presentation's complete 2800ms display interval.
+  await page.clock.runFor(900);
+  await expect(page.getByRole('button', { name: 'Roll the dice' })).toBeEnabled();
   await expression.fill('1d4+100');
   await page.getByRole('button', { name: 'Roll the dice' }).click();
   await expect(page.locator('.history-card')).toHaveCount(2);
   await expect(page.locator('.roll-topline strong')).toContainText('rolls 1d20');
-  await page.clock.runFor(2799);
+  await page.clock.runFor(1899);
   await expect(page.locator('.roll-topline strong')).toContainText('rolls 1d20');
   await page.clock.runFor(1);
   await expect(page.locator('.roll-topline strong')).toContainText('rolls 1d4+100');

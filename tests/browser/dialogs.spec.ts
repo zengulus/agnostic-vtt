@@ -240,31 +240,30 @@ test('an upload completing after another form edit preserves both the edit and i
   expect(uploadResponse.status(), uploadBody).toBe(201);
   expect(JSON.parse(uploadBody).asset.kind).toBe('uploaded');
   const imageResponse = await downloaded;
-  const imageBody = await imageResponse.body();
-  await info.attach('asset-download.json', {
-    body: JSON.stringify({
-      status: imageResponse.status(),
-      contentType: imageResponse.headers()['content-type'],
-      bytes: imageBody.length,
-      ...(imageResponse.ok()
-        ? {
-            decoded: await sharp(imageBody)
-              .metadata()
-              .catch((error) => ({ error: String(error) })),
-          }
-        : { body: imageBody.toString() }),
-    }),
-    contentType: 'application/json',
-  });
   expect(imageResponse.status()).toBe(200);
   await expect(page.getByAltText('Image preview')).toHaveAttribute('src', /^blob:/);
+  // Assert the bytes consumed by the browser and its actual image decoder. CDP's
+  // response-body diagnostics may be empty even when transfer sizes are present.
+  const preview = page.getByAltText('Image preview');
   await expect
-    .poll(() =>
-      page
-        .getByAltText('Image preview')
-        .evaluate((image) => (image as HTMLImageElement).naturalWidth),
-    )
-    .toBeGreaterThan(0);
+    .poll(() => preview.evaluate((image) => (image as HTMLImageElement).naturalWidth))
+    .toBe(96);
+  const decoded = await preview.evaluate(async (element) => {
+    const image = element as HTMLImageElement;
+    const blob = await (await fetch(image.src)).blob();
+    return {
+      width: image.naturalWidth,
+      height: image.naturalHeight,
+      bytes: blob.size,
+      type: blob.type,
+    };
+  });
+  await info.attach('asset-download.json', {
+    body: JSON.stringify({ status: imageResponse.status(), decoded }),
+    contentType: 'application/json',
+  });
+  expect(decoded).toMatchObject({ width: 96, height: 96, type: 'image/webp' });
+  expect(decoded.bytes).toBe(JSON.parse(uploadBody).bytes);
   await expect(page.getByLabel('Name', { exact: true })).toHaveValue('Edited while uploading');
   await page.getByRole('button', { name: 'Add to the table', exact: true }).click();
   await expect(page.getByRole('dialog')).toHaveCount(0);

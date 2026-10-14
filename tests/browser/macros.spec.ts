@@ -47,7 +47,6 @@ test('newline file import, generic results, numeric inputs, privacy and recovery
     ),
   });
   await expect(gm.getByText('Final closing delimiters added.', { exact: false })).toBeVisible();
-  await gm.screenshot({ path: '/tmp/aether-macro-import.png' });
   await gm.getByRole('button', { name: 'Import 2 macros', exact: true }).click();
   await expect(gm.getByRole('button', { name: 'Prepare Attack Name', exact: true })).toBeVisible();
   await expect.poll(async () => Object.keys((await roomState(pc)).macros || {}).length).toBe(2);
@@ -55,8 +54,8 @@ test('newline file import, generic results, numeric inputs, privacy and recovery
   await pc.getByRole('button', { name: 'Macros · import .txt' }).click();
   await pc.getByRole('button', { name: 'Prepare Attack Name', exact: true }).click();
   await pc.getByLabel('Numeric input X').fill('5');
-  // Macro totals auto-dismiss. Pause browser time during review so screenshots
-  // and assertions in one client cannot consume the other's review window.
+  // Macro totals auto-dismiss. Pause browser time during review so assertions
+  // in one client cannot consume the other's review window.
   for (const page of [gm, pc])
     await page.clock.pauseAt(await page.evaluate(() => Date.now() + 1000));
   await pc.getByRole('button', { name: 'Roll macro', exact: true }).click();
@@ -66,7 +65,6 @@ test('newline file import, generic results, numeric inputs, privacy and recovery
   expect((await roomState(gm)).rolls[0].macro).toEqual(result);
   const text = macroText(result);
   expect(text).toContain('Fire damage + 12 Akashic damage');
-  await pc.screenshot({ path: '/tmp/aether-macro-result.png' });
   for (const page of [gm, pc]) {
     await expect(page.locator('.roll-overlay .macro-results')).toContainText(
       `Attack Roll:${result.groups[0].total}`,
@@ -125,9 +123,7 @@ test('newline file import, generic results, numeric inputs, privacy and recovery
   await pc.locator('.roll-overlay .macro-results dt').last().scrollIntoViewIfNeeded();
   await expect(pc.locator('.roll-overlay .macro-results dt').last()).toHaveText('Result8:');
   await expect(pc.locator('.roll-overlay .macro-results dd').last()).toBeVisible();
-  await pc.screenshot({ path: '/tmp/aether-macro-mobile.png' });
   await pc.getByRole('button', { name: 'Continue' }).click();
-  await gm.screenshot({ path: 'test-results/macro-history.png' });
   expect(errors).toEqual([]);
   await a.close();
   await b.close();

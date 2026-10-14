@@ -138,7 +138,6 @@ test('local uploads, statuses, independent template placement, group edits and u
   state = await roomState(page);
   expect(state.scenes[state.activeSceneId].map.kind).toBe('uploaded');
   expect(state.scenes[state.activeSceneId].tokens).toEqual({});
-  await page.screenshot({ path: 'test-results/workshop-table.png' });
   expect(errors).toEqual([]);
 });
 
@@ -238,7 +237,6 @@ test('geometry, drawing layers, hidden turns, hex settings and scene changes syn
     .toBe('0');
   await gm.getByRole('button', { name: 'Kael Wanderer', exact: true }).click();
   await expect(gm.getByRole('button', { name: 'Edit token', exact: true })).toBeVisible();
-  await gm.screenshot({ path: 'test-results/workshop-tracker.png' });
   expect(errors).toEqual([]);
   await a.close();
   await b.close();
@@ -288,7 +286,6 @@ test('dice themes persist, minimal arithmetic remains authoritative, and tablet 
   await page.getByRole('button', { name: 'Grid settings', exact: true }).click();
   await expect(page.getByLabel('Grid type')).toBeVisible();
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
-  await page.screenshot({ path: 'test-results/workshop-tablet.png' });
 });
 
 test('custom tosses, slower/faster physics and transparent gemstone d4s retain forced faces', async ({

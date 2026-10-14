@@ -18,7 +18,8 @@ insert into auth.users values
   ('00000000-0000-4000-8000-000000000002'),
   ('00000000-0000-4000-8000-000000000003');
 
-create function pg_temp.snapshot(p_name text, p_player boolean) returns jsonb language sql as $$
+create schema test_helpers;
+create function test_helpers.snapshot(p_name text, p_player boolean) returns jsonb language sql as $$
   select jsonb_build_object(
     'state', jsonb_build_object('id','migration-room','name',p_name,'revision',5),
     'members', jsonb_build_object(
@@ -28,12 +29,12 @@ create function pg_temp.snapshot(p_name text, p_player boolean) returns jsonb la
     ) else '{}'::jsonb end
   )
 $$;
-grant usage on schema pg_temp to service_role;
-grant execute on function pg_temp.snapshot(text,boolean) to service_role;
+grant usage on schema test_helpers to service_role;
+grant execute on function test_helpers.snapshot(text,boolean) to service_role;
 -- Simulate a real pre-migration snapshot and memberships.
 set role service_role;
 select public.save_room_snapshot('migration-room', '00000000-0000-4000-8000-000000000001',
-  'Legacy room', 5, pg_temp.snapshot('Legacy room', true));
+  'Legacy room', 5, test_helpers.snapshot('Legacy room', true));
 reset role;
 \ir ../supabase/migrations/003_snapshot_save_version.sql
 set role service_role;
@@ -46,11 +47,11 @@ begin
   end if;
   -- Same gameplay revision, changed membership: durable save version must advance.
   v := public.save_room_snapshot('migration-room', '00000000-0000-4000-8000-000000000001',
-    'Winner', 5, pg_temp.snapshot('Winner', false), 0);
+    'Winner', 5, test_helpers.snapshot('Winner', false), 0);
   if v <> 1 then raise exception 'Expected first version 1, got %', v; end if;
   begin
     perform public.save_room_snapshot('migration-room', '00000000-0000-4000-8000-000000000001',
-      'Stale overwrite', 999, pg_temp.snapshot('Stale overwrite', true), 0);
+      'Stale overwrite', 999, test_helpers.snapshot('Stale overwrite', true), 0);
     raise exception 'Stale version unexpectedly accepted';
   exception when sqlstate 'PT409' then null;
   end;
@@ -64,23 +65,23 @@ begin
   -- The former RPC must fail closed for an old process in a rolling deploy.
   begin
     perform public.save_room_snapshot('migration-room', '00000000-0000-4000-8000-000000000001',
-      'Legacy overwrite', 999, pg_temp.snapshot('Legacy overwrite', true));
+      'Legacy overwrite', 999, test_helpers.snapshot('Legacy overwrite', true));
     raise exception 'Legacy RPC unexpectedly accepted';
   exception when sqlstate 'PT409' then null;
   end;
   v := public.save_room_snapshot('migration-room', '00000000-0000-4000-8000-000000000001',
-    'Second save', 5, pg_temp.snapshot('Second save', false), 1);
+    'Second save', 5, test_helpers.snapshot('Second save', false), 1);
   if v <> 2 then raise exception 'Positive version update failed'; end if;
   begin
     perform public.save_room_snapshot('migration-room', '00000000-0000-4000-8000-000000000003',
-      'Wrong owner', 5, pg_temp.snapshot('Wrong owner', false), 2);
+      'Wrong owner', 5, test_helpers.snapshot('Wrong owner', false), 2);
     raise exception 'Changed owner unexpectedly accepted';
   exception when sqlstate 'PT409' then null;
   end;
   -- A failed membership insert must roll back the new version and snapshot too.
   begin
     perform public.save_room_snapshot('migration-room', '00000000-0000-4000-8000-000000000001',
-      'Bad membership', 5, pg_temp.snapshot('Bad membership', false) ||
+      'Bad membership', 5, test_helpers.snapshot('Bad membership', false) ||
         '{"members":{"00000000-0000-4000-8000-000000000001":{"name":"Owner","role":"invalid"}}}'::jsonb, 2);
     raise exception 'Invalid membership unexpectedly accepted';
   exception when check_violation then null;
@@ -96,7 +97,7 @@ begin
   end if;
   begin
     perform public.save_room_snapshot('missing-room', '00000000-0000-4000-8000-000000000001',
-      'Missing room', 1, pg_temp.snapshot('Missing room', true), 9);
+      'Missing room', 1, test_helpers.snapshot('Missing room', true), 9);
     raise exception 'Nonexistent expected version unexpectedly accepted';
   exception when sqlstate 'PT409' then null;
   end;
@@ -104,7 +105,7 @@ begin
     raise exception 'Failed creation left campaign metadata behind';
   end if;
   v := public.save_room_snapshot('race-room', '00000000-0000-4000-8000-000000000001',
-    'Race initial', 1, pg_temp.snapshot('Race initial', true), 0);
+    'Race initial', 1, test_helpers.snapshot('Race initial', true), 0);
   if v <> 1 then raise exception 'New campaign first save failed'; end if;
 end $$;
 reset role;
