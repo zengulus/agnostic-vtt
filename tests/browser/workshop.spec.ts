@@ -22,6 +22,8 @@ async function create(page: Page) {
   await page.getByRole('button', { name: 'Log in' }).click();
   await page.getByRole('button', { name: 'Create campaign' }).click();
   await expect(page.getByText('Live', { exact: true })).toBeVisible();
+  const guide = page.getByRole('button', { name: 'Dismiss getting started' });
+  if (await guide.count()) await guide.click();
 }
 async function roomState(page: Page): Promise<RoomState> {
   return page.evaluate(async () => {
@@ -233,7 +235,10 @@ test('geometry, drawing layers, hidden turns, hex settings and scene changes syn
       Object.values((await roomState(pc)).scenes.hollow.zones).some((z) => z.shape === 'polygon'),
     )
     .toBe(true);
-  await gm.getByRole('button', { name: 'Cover scene with fog', exact: true }).click();
+  await gm.locator('.scene-options').getByText('Scene fog', { exact: true }).click();
+  gm.once('dialog', (dialog) => void dialog.accept());
+  await gm.getByRole('button', { name: 'Cover entire scene', exact: true }).click();
+  await gm.locator('.scene-options').getByText('Scene fog', { exact: true }).click();
   await expect
     .poll(async () => Object.keys((await roomState(pc)).scenes.hollow.tokens).length)
     .toBe(0);
@@ -258,7 +263,9 @@ test('geometry, drawing layers, hidden turns, hex settings and scene changes syn
   await gm.getByRole('button', { name: 'Add participant', exact: true }).click();
   await gm.getByLabel('Participant name').fill('Party member');
   await gm.getByRole('button', { name: 'Add participant', exact: true }).click();
-  await expect(pc.getByText('Party member', { exact: true })).toBeVisible();
+  await expect(
+    pc.locator('.tracker-entries').getByText('Party member', { exact: true }),
+  ).toBeVisible();
   await expect(pc.getByText('Hidden guide', { exact: true })).toHaveCount(0);
   await gm.getByRole('button', { name: 'Next turn', exact: true }).click();
   await expect(pc.getByText('Current participant', { exact: true })).toBeVisible();

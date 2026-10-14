@@ -39,6 +39,9 @@ interface UIState {
   presence: Presence[];
   status: 'offline' | 'demo' | 'connecting' | 'live' | 'reconnecting';
   canGM: boolean;
+  savedRevision: number | null;
+  savePending: boolean;
+  pendingDurableActions: number;
   inviteCode?: string;
   tool: Tool;
   selected: string | null;
@@ -98,6 +101,9 @@ export const useTable = create<UIState>((set, get) => ({
   presence: [],
   status: 'offline',
   canGM: false,
+  savedRevision: null,
+  savePending: false,
+  pendingDurableActions: 0,
   tool: 'select',
   selected: null,
   selectedIds: [],

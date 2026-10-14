@@ -1,3 +1,5 @@
+import { FogActions } from './FogActions.js';
+import { CharacterList, focusCharacter } from './TableAwareness.js';
 import { useState } from 'react';
 import {
   ArrowDown,
@@ -249,21 +251,12 @@ export function TokenLibraryDialog() {
             <button className="subtle-button" onClick={() => s.set({ dialog: 'objects' })}>
               Regions & annotations
             </button>
-            <button
-              className="subtle-button"
-              onClick={() =>
-                send({
-                  type: 'FOG_UPDATE',
-                  sceneId: scene.id,
-                  fog: { enabled: !scene.fog.enabled, revealed: [] },
-                })
-              }
-            >
-              {scene.fog.enabled ? 'Clear all fog' : 'Cover scene with fog'}
-            </button>
+            <FogActions />
           </>
         )}
       </div>
+      <h3>My characters & scene characters</h3>
+      <CharacterList />
       <div className="scene-switcher">
         {Object.values(s.room.scenes).map((sc) => (
           <button
@@ -583,7 +576,10 @@ export function TrackerPanel() {
     [name, setName] = useState(''),
     [value, setValue] = useState(0),
     [hidden, setHidden] = useState(false),
-    [editing, setEditing] = useState<string | null>(null);
+    [editing, setEditing] = useState<string | null>(null),
+    [tokenId, setTokenId] = useState<string | undefined>();
+  const scene = s.room.scenes[s.room.activeSceneId],
+    selected = s.selected ? scene.tokens[s.selected] : undefined;
   const update = (next: Tracker) => send({ type: 'TRACKER_UPDATE', tracker: next });
   const shift = (id: string, delta: number) => {
     const entries = [...tracker.entries],
@@ -653,6 +649,14 @@ export function TrackerPanel() {
                     : ''}
               </small>
             </span>
+            {entry.tokenId && scene.tokens[entry.tokenId] && (
+              <button
+                aria-label={`Focus ${entry.name}`}
+                onClick={() => focusCharacter(entry.tokenId!)}
+              >
+                ◎
+              </button>
+            )}
             {gm && (
               <div>
                 <button aria-label={`Move ${entry.name} up`} onClick={() => shift(entry.id, -1)}>
@@ -668,6 +672,7 @@ export function TrackerPanel() {
                     setName(entry.name);
                     setValue(entry.value);
                     setHidden(entry.hidden);
+                    setTokenId(entry.tokenId);
                   }}
                 >
                   <Copy size={11} />
@@ -697,7 +702,13 @@ export function TrackerPanel() {
           onSubmit={(e) => {
             e.preventDefault();
             const id = editing || crypto.randomUUID(),
-              entry = { id, name, value, hidden },
+              entry = {
+                id,
+                name,
+                value,
+                hidden: hidden || (!!tokenId && scene.tokens[tokenId]?.visibility === 'gm'),
+                tokenId,
+              },
               entries = editing
                 ? tracker.entries.map((t) => (t.id === id ? entry : t))
                 : [...tracker.entries, entry];
@@ -710,6 +721,7 @@ export function TrackerPanel() {
             setName('');
             setValue(0);
             setHidden(false);
+            setTokenId(undefined);
           }}
         >
           <label>
@@ -747,18 +759,71 @@ export function TrackerPanel() {
             <Plus size={14} />
             {editing ? 'Save participant' : 'Add participant'}
           </button>
-          {s.selected && (
+          {tokenId && (
+            <p className="field-note">
+              Linked to {scene.tokens[tokenId]?.name || 'removed character'}.{' '}
+              {hidden || scene.tokens[tokenId]?.visibility === 'gm'
+                ? 'GM only · hidden from players'
+                : 'Visible only while the character is visible to players.'}
+            </p>
+          )}
+          {selected && (
             <button
               type="button"
               className="subtle-button"
-              onClick={() =>
-                setName(
-                  s.room.scenes[s.room.activeSceneId].tokens[s.selected!].name.split(' · ')[0],
-                )
-              }
+              onClick={() => {
+                setName(selected.name.split(' · ')[0]);
+                setTokenId(selected.id);
+                setHidden((wasHidden) => wasHidden || selected.visibility === 'gm');
+              }}
             >
               Use selected token
             </button>
+          )}
+          {!!s.selectedIds.length && (
+            <details className="tracker-add-selected">
+              <summary>Add selected characters to turns</summary>
+              <ul>
+                {s.selectedIds
+                  .flatMap((id) => (scene.tokens[id] ? [scene.tokens[id]] : []))
+                  .map((t) => (
+                    <li key={t.id}>
+                      {t.name} ·{' '}
+                      {t.visibility === 'gm' ? 'GM only' : 'Visible when character is visible'}
+                    </li>
+                  ))}
+              </ul>
+              <button
+                type="button"
+                onClick={() => {
+                  const additions = s.selectedIds.flatMap((id) =>
+                    scene.tokens[id] && !tracker.entries.some((e) => e.tokenId === id)
+                      ? [
+                          {
+                            id: crypto.randomUUID(),
+                            tokenId: id,
+                            name: scene.tokens[id].name.split(' · ')[0],
+                            value: 0,
+                            hidden: scene.tokens[id].visibility === 'gm',
+                          },
+                        ]
+                      : [],
+                  );
+                  const entries = [...tracker.entries, ...additions];
+                  if (tracker.order !== 'manual')
+                    entries.sort((a, b) =>
+                      tracker.order === 'descending' ? b.value - a.value : a.value - b.value,
+                    );
+                  update({
+                    ...tracker,
+                    entries,
+                    activeId: tracker.activeId || entries[0]?.id || null,
+                  });
+                }}
+              >
+                Add selected to tracker
+              </button>
+            </details>
           )}
         </form>
       )}

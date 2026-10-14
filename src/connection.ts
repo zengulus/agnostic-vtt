@@ -47,6 +47,7 @@ function assertCurrent(generation: number, signal?: AbortSignal) {
   if (generation !== navigationGeneration)
     throw new DOMException('The table launch was cancelled.', 'AbortError');
 }
+const durableActions = new Set<string>();
 const actionWaiters = new Map<string, { resolve: () => void; reject: (error: Error) => void }>();
 function rejectPendingActions(message: string) {
   for (const waiter of actionWaiters.values()) waiter.reject(new Error(message));
@@ -413,6 +414,19 @@ export function send(action: Action) {
   const actionId = crypto.randomUUID();
   try {
     socket.send(serializeClientAction(action, actionId));
+    if (
+      ![
+        'JOIN_ROOM',
+        'STATE_RESYNC',
+        'SESSION_ROLE',
+        'PING',
+        'TOKEN_MOVE_PREVIEW',
+        'TOKEN_MOVE_PREVIEW_BATCH',
+      ].includes(action.type)
+    ) {
+      durableActions.add(actionId);
+      useTable.getState().set({ pendingDurableActions: durableActions.size });
+    }
     return actionId;
   } catch (error) {
     notify(error instanceof Error ? error.message : 'Could not send this action.');
@@ -483,6 +497,8 @@ function open() {
       return;
     }
     if ((message.type === 'STATE_PATCH' || message.type === 'ERROR') && message.actionId) {
+      durableActions.delete(message.actionId);
+      store.set({ pendingDurableActions: durableActions.size });
       const waiter = actionWaiters.get(message.actionId);
       if (waiter) {
         actionWaiters.delete(message.actionId);
@@ -492,6 +508,7 @@ function open() {
     }
     switch (message.type) {
       case 'ROOM_SNAPSHOT': {
+        durableActions.clear();
         attempts = 0;
         activeConfig.role = message.self.role;
         clearTimeout(watchdog);
@@ -501,6 +518,9 @@ function open() {
           store.self?.role !== message.self.role;
         store.set({
           room: message.state,
+          savedRevision: message.savedRevision ?? null,
+          savePending: message.savePending ?? false,
+          pendingDurableActions: 0,
           self: message.self,
           canGM: message.canGM ?? message.self.role === 'gm',
           presence: message.presence,
@@ -706,7 +726,12 @@ function open() {
         });
         break;
       case 'SAVED':
-        store.set({ room: { ...store.room, savedAt: message.savedAt } });
+        if (!store.room.savedAt || message.savedAt >= store.room.savedAt)
+          store.set({
+            room: { ...store.room, savedAt: message.savedAt },
+            savedRevision: message.revision,
+            savePending: message.pending ?? false,
+          });
         break;
       case 'ERROR':
         notify(message.message);

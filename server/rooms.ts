@@ -545,6 +545,8 @@ export class RoomManager {
     peer.send({
       v: 2,
       type: 'ROOM_SNAPSHOT',
+      savedRevision: room.persistedRevision,
+      savePending: room.dirty,
       state: projectRoom(room.data, peer.identity.id, this.role(room, peer)),
       canGM: room.data.members[peer.identity.id]?.role === 'gm',
       self: this.self(room, peer),
@@ -882,7 +884,13 @@ export class RoomManager {
       room.data.state.savedAt = savedAt;
       room.dirty = room.generation !== generation;
       for (const p of room.peers)
-        p.send({ v: 2, type: 'SAVED', savedAt, revision: snapshot.state.revision });
+        p.send({
+          v: 2,
+          type: 'SAVED',
+          savedAt,
+          revision: snapshot.state.revision,
+          pending: room.dirty,
+        });
     })();
     try {
       await room.savePromise;

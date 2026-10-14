@@ -1,3 +1,5 @@
+import { GridPreview } from './GridPreview.js';
+import { AssetImage } from '../assets.js';
 import { useEffect, useRef, useState } from 'react';
 import { ArrowUpRight, Check, Copy, Image, Link2, Lock, Plus, Sparkles, X } from 'lucide-react';
 import { useTable } from '../store.js';
@@ -516,6 +518,26 @@ function AssetPicker({
   onChange: (a: Asset, width?: number, height?: number) => void;
   onBusyChange?: (busy: boolean) => void;
 }) {
+  const table = useTable(),
+    [campaignOpen, setCampaignOpen] = useState(false),
+    [imageLimit, setImageLimit] = useState(12);
+  const images = new Map<string, { asset: Asset; name: string; width?: number; height?: number }>();
+  for (const a of Object.values(table.room.assets || {}))
+    images.set(`uploaded:${a.id}`, {
+      asset: { kind: 'uploaded', url: a.id },
+      name: a.name,
+      width: a.width,
+      height: a.height,
+    });
+  const addImage = (a: Asset, name: string, width?: number, height?: number) => {
+    if (a.kind !== 'uploaded' && !images.has(`${a.kind}:${a.url}`))
+      images.set(`${a.kind}:${a.url}`, { asset: a, name, width, height });
+  };
+  for (const sc of Object.values(table.room.scenes)) {
+    addImage(sc.map, sc.name, sc.width, sc.height);
+    for (const t of Object.values(sc.tokens)) addImage(t.image, t.name);
+  }
+  for (const t of Object.values(table.room.tokenLibrary || {})) addImage(t.image, t.name);
   const [url, setUrl] = useState(asset.kind === 'external' ? asset.url : ''),
     [preview, setPreview] = useState<string | undefined>(
       asset.kind === 'uploaded' ? undefined : assetUrl(asset, import.meta.env.BASE_URL),
@@ -617,6 +639,42 @@ function AssetPicker({
   }
   return (
     <div className="asset-picker">
+      <button
+        type="button"
+        disabled={busy}
+        aria-expanded={campaignOpen}
+        onClick={() => setCampaignOpen(!campaignOpen)}
+      >
+        Campaign images
+      </button>
+      {campaignOpen && (
+        <div className="campaign-image-picker" aria-label="Campaign images">
+          {[...images].slice(0, imageLimit).map(([key, item]) => (
+            <button
+              type="button"
+              key={key}
+              disabled={busy}
+              aria-label={`Choose image ${item.name}`}
+              onClick={() => {
+                setError('');
+                onChange(item.asset, item.width, item.height);
+                setCampaignOpen(false);
+              }}
+            >
+              <AssetImage asset={item.asset} alt="" />
+              <span>{item.name}</span>
+            </button>
+          ))}
+          {images.size > imageLimit && (
+            <button type="button" onClick={() => setImageLimit((limit) => limit + 12)}>
+              Show more campaign images
+            </button>
+          )}
+          {!images.size && (
+            <p className="field-note">No images available yet. Upload an image or preview a URL.</p>
+          )}
+        </div>
+      )}
       {gm && !demo && (
         <label className="upload-control">
           Upload image
@@ -1103,7 +1161,7 @@ function GridDialog() {
     [grid, setGrid] = useState(scene.grid),
     [saving, setSaving] = useState(false),
     [error, setError] = useState('');
-  const update = (v: Partial<typeof grid>) => setGrid({ ...grid, ...v });
+  const update = (v: Partial<typeof grid>) => setGrid((current) => ({ ...current, ...v }));
   return (
     <form
       onSubmit={async (e) => {
@@ -1137,10 +1195,17 @@ function GridDialog() {
           Choose square or hex geometry, or a world without lines. Measurements can follow real
           distance or count grid steps.
         </p>
+        <GridPreview
+          scene={scene}
+          grid={grid}
+          onChange={update}
+          disabled={saving || (!!s.self && !gm)}
+        />
         <div className="form-row">
           <label>
             Grid type
             <select
+              aria-label="Grid type"
               value={grid.type || 'square'}
               onChange={(e) => update({ type: e.target.value as 'square' | 'hex' })}
               disabled={!!s.self && !gm}
@@ -1184,6 +1249,7 @@ function GridDialog() {
             Cell size (pixels)
             <input
               type="number"
+              step={0.01}
               min={16}
               max={200}
               value={grid.size}
@@ -1257,6 +1323,14 @@ function GridDialog() {
             {error}
           </p>
         )}
+        <button
+          type="button"
+          className="subtle-button"
+          disabled={saving}
+          onClick={() => s.set({ dialog: null })}
+        >
+          Cancel grid changes
+        </button>
         {(gm || !s.self) && (
           <button className="primary modal-submit" disabled={saving}>
             {saving ? 'Saving…' : 'Save grid'}

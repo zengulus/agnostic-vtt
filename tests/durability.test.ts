@@ -139,6 +139,49 @@ describe('snapshot ownership and durable image cleanup', () => {
     expect(persisted.members.loser).toBeUndefined();
     expect(persisted.discord).toBeUndefined();
   });
+  it('reports newer configuration changes during a save even when gameplay revision is unchanged', async () => {
+    const m = manager(),
+      room = await m.create(owner, 'Save status'),
+      gm = peer(owner.id);
+    await m.join(gm, room.id);
+    const first = deferred(),
+      second = deferred(),
+      secondStarted = deferred(),
+      save = storage.save.bind(storage);
+    vi.spyOn(storage, 'save')
+      .mockImplementationOnce(async (snapshot, version) => {
+        await first.promise;
+        return save(snapshot, version);
+      })
+      .mockImplementationOnce(async (snapshot, version) => {
+        secondStarted.resolve();
+        await second.promise;
+        return save(snapshot, version);
+      });
+    m.handle(gm, room.id, { v: 2, type: 'INVITE_ROTATE', actionId: 'first' });
+    expect(gm.messages.filter((message) => message.type === 'ROOM_SNAPSHOT').at(-1)).toMatchObject({
+      savedRevision: 0,
+      savePending: true,
+    });
+    m.handle(gm, room.id, { v: 2, type: 'INVITE_ROTATE', actionId: 'second' });
+    first.resolve();
+    await secondStarted.promise;
+    expect(gm.messages.filter((message) => message.type === 'SAVED').at(-1)).toMatchObject({
+      revision: 0,
+      pending: true,
+    });
+    m.handle(gm, room.id, { v: 2, type: 'STATE_RESYNC', actionId: 'resync' });
+    expect(gm.messages.filter((message) => message.type === 'ROOM_SNAPSHOT').at(-1)).toMatchObject({
+      savedRevision: 0,
+      savePending: true,
+    });
+    second.resolve();
+    await m.flushAll();
+    expect(gm.messages.filter((message) => message.type === 'SAVED').at(-1)).toMatchObject({
+      revision: 0,
+      pending: false,
+    });
+  });
   it('keeps deletion cleanup durable on Storage failure and accepts an idempotent DELETE retry', async () => {
     const blobs = assets(),
       m = manager(blobs),

@@ -1,3 +1,4 @@
+import { macroDigest } from '../../shared/macroDigest.js';
 import { useMemo, useState } from 'react';
 import { Lock, Play, Star, Trash2, Upload } from 'lucide-react';
 import { useTable } from '../store.js';
@@ -72,7 +73,7 @@ export function MacroLibraryDialog() {
   const preferencesKey = macroPreferencesKey(s.room.id, s.self?.id);
   const [preferences, setPreferences] = useState(() => readMacroPreferences(preferencesKey)),
     [filter, setFilter] = useState<'all' | 'favorites' | 'recent'>('all'),
-    [replacements, setReplacements] = useState<Record<number, { id: string; version: number }>>({});
+    [replacements, setReplacements] = useState<Record<number, { id: string; digest: string }>>({});
   const remember = (next: MacroPreferences) => {
     setPreferences(next);
     writeMacroPreferences(preferencesKey, next);
@@ -104,7 +105,7 @@ export function MacroLibraryDialog() {
     const chosen = replacements[p.definition.line];
     return p.status === 'changed' &&
       chosen &&
-      p.matches.some((m) => m.id === chosen.id && (m.version ?? 0) === chosen.version)
+      p.matches.some((m) => m.id === chosen.id && macroDigest(m) === chosen.digest)
       ? [{ line: p.definition.line, ...chosen }]
       : [];
   });
@@ -353,8 +354,7 @@ export function MacroLibraryDialog() {
                         onChange={(e) => {
                           const target = matches.find((existing) => existing.id === e.target.value);
                           const next = { ...replacements };
-                          if (target)
-                            next[m.line] = { id: target.id, version: target.version ?? 0 };
+                          if (target) next[m.line] = { id: target.id, digest: macroDigest(target) };
                           else delete next[m.line];
                           setReplacements(next);
                         }}

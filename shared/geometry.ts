@@ -67,3 +67,19 @@ export function roundHex(q: number, r: number) {
   else z = -x - y;
   return { q: x, r: y };
 }
+
+/** Arrow movement follows cell centres when snapping, otherwise uses ten map pixels. */
+export function nudgePoint(point: Point, key: string, grid: Grid): Point {
+  const dx = key === 'ArrowLeft' ? -1 : key === 'ArrowRight' ? 1 : 0;
+  const dy = key === 'ArrowUp' ? -1 : key === 'ArrowDown' ? 1 : 0;
+  if (grid.enabled && grid.snap) {
+    if (grid.type === 'hex') {
+      const hex = worldToHex(point, grid),
+        rounded = roundHex(hex.q, hex.r);
+      return hexToWorld(rounded.q + dx, rounded.r + dy, grid);
+    }
+    const snapped = snapPoint(point, grid);
+    return { x: snapped.x + dx * grid.size, y: snapped.y + dy * grid.size };
+  }
+  return { x: point.x + dx * 10, y: point.y + dy * 10 };
+}

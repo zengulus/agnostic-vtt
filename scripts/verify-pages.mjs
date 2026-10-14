@@ -78,7 +78,10 @@ try {
   await page.screenshot({ path: '/tmp/aether-demo-welcome.png' });
   await page.getByRole('button', { name: 'Open a demo table' }).click();
   await expect(page.getByText('Demo', { exact: true })).toBeVisible();
-  await page.getByRole('button', { name: 'Cover scene with fog', exact: true }).click();
+  await page.locator('.scene-options').getByText('Scene fog', { exact: true }).click();
+  page.once('dialog', (dialog) => void dialog.accept());
+  await page.getByRole('button', { name: 'Cover entire scene', exact: true }).click();
+  await page.locator('.scene-options').getByText('Scene fog', { exact: true }).click();
   await page.getByRole('button', { name: 'Play as player', exact: true }).click();
   await expect(page.getByRole('button', { name: 'Fog reveal / conceal', exact: true })).toHaveCount(
     0,
@@ -86,9 +89,9 @@ try {
   await expect(page.locator('.scene-meta')).toContainText('0 tokens');
   await page.getByRole('button', { name: 'Return to GM', exact: true }).click();
   await page.getByRole('button', { name: 'Undo', exact: true }).click();
-  await expect(
-    page.getByRole('button', { name: 'Cover scene with fog', exact: true }),
-  ).toBeVisible();
+  await page.locator('.scene-options').getByText('Scene fog', { exact: true }).click();
+  await expect(page.getByRole('button', { name: 'Cover entire scene', exact: true })).toBeVisible();
+  await page.locator('.scene-options').getByText('Scene fog', { exact: true }).click();
   await page.getByRole('button', { name: 'Roll the dice' }).click();
   await expect(page.getByTestId('roll-total')).toBeVisible();
   await page.getByRole('button', { name: 'Dismiss roll', exact: true }).click();

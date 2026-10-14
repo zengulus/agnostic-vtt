@@ -1,3 +1,5 @@
+import { useEffect, useState } from 'react';
+import { useTable } from './store.js';
 import { z } from 'zod';
 const schema = z.object({
   favorites: z.array(z.string()).max(200).default([]),
@@ -17,7 +19,31 @@ export function readMacroPreferences(key: string): MacroPreferences {
 export function writeMacroPreferences(key: string, preferences: MacroPreferences) {
   try {
     localStorage.setItem(key, JSON.stringify(preferences));
+    window.dispatchEvent(new Event('aether-macro-preferences'));
   } catch {
     /* Preferences are optional when browser storage is full. */
   }
+}
+
+export function useMacroPreferences() {
+  const roomId = useTable((s) => s.room.id),
+    userId = useTable((s) => s.self?.id);
+  const key = macroPreferencesKey(roomId, userId);
+  const [preferences, setPreferences] = useState(() => readMacroPreferences(key));
+  useEffect(() => {
+    const refresh = () => setPreferences(readMacroPreferences(key));
+    refresh();
+    window.addEventListener('aether-macro-preferences', refresh);
+    window.addEventListener('storage', refresh);
+    return () => {
+      window.removeEventListener('aether-macro-preferences', refresh);
+      window.removeEventListener('storage', refresh);
+    };
+  }, [key]);
+  const remember = (update: (p: MacroPreferences) => MacroPreferences) => {
+    const next = update(readMacroPreferences(key));
+    writeMacroPreferences(key, next);
+    setPreferences(next);
+  };
+  return [preferences, remember] as const;
 }
