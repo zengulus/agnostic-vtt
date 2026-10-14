@@ -29,7 +29,11 @@ compiled at build time; changing them requires another build. See the README's
 live-play setup for the separate Render and Supabase requirements.
 
 Failed browser runs retain screenshots and Playwright traces in the
-`browser-failure-evidence` Actions artifact for seven days. These use test
+`browser-failure-evidence-*` Actions artifacts for seven days. Each browser suite
+runs against a fresh backend and browser in its own CI job, so campaign data and
+rate-limit buckets do not leak between suites. Traces retain DOM, action, network,
+and source diagnostics without continuous video capture; failure screenshots
+remain enabled. These use test
 campaigns and mocked credentials. Inspect the trace before changing timeouts or
 retry settings; a green result must still exercise the real behavior.
 

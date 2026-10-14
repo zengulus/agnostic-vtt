@@ -8,10 +8,12 @@ export default defineConfig({
     viewport: { width: 1440, height: 960 },
     headless: true,
     screenshot: 'only-on-failure',
-    trace: 'retain-on-failure',
+    // Avoid continuous frame capture alongside expensive canvas rendering on CI.
+    // Keep action/DOM/network evidence and the separate failure-only screenshot.
+    trace: { mode: 'retain-on-failure', screenshots: false, snapshots: true, sources: true },
     launchOptions: {
       executablePath: process.env.PLAYWRIGHT_CHROMIUM_EXECUTABLE,
-      args: ['--enable-unsafe-swiftshader', '--use-gl=angle', '--use-angle=swiftshader'],
+      args: ['--enable-unsafe-swiftshader'],
     },
   },
   webServer: {
