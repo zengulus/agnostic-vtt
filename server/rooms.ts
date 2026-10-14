@@ -14,7 +14,8 @@ import { applyChanges, inverseChanges, projectChanges } from '../shared/state.js
 import { prepareAction } from './actions.js';
 import { newRoom } from '../shared/sample.js';
 import type { Identity } from './auth.js';
-import { metrics, type Persistence } from './persistence.js';
+import { metrics, SnapshotConflictError, type Persistence } from './persistence.js';
+import type { AssetStorage } from './assets.js';
 import { DiscordDelivery, normalizeWebhook } from './discord.js';
 import type { DiscordStatus } from '../shared/protocol.js';
 
@@ -38,6 +39,10 @@ interface LiveRoom {
   peers: Set<Peer>;
   seen: Map<string, boolean>;
   dirty: boolean;
+  stopped: boolean;
+  saveVersion: number;
+  assetPromise?: Promise<void>;
+  cleanupTimer?: ReturnType<typeof setTimeout>;
   generation: number;
   persistedRevision: number;
   lastSaved: number;
@@ -52,6 +57,7 @@ export class RoomManager {
   private hydration = new Map<string, Promise<LiveRoom>>();
   private creating = 0;
   private closing = false;
+  private assets?: AssetStorage;
   constructor(
     readonly storage: Persistence,
     readonly interval = 90000,
@@ -69,7 +75,7 @@ export class RoomManager {
         inviteCode = randomBytes(18).toString('base64url');
       const data = newRoom(id, identity.id, identity.name, name, inviteCode);
       data.state.savedAt = new Date().toISOString();
-      await this.storage.save(data);
+      data.saveVersion = await this.storage.save(data, 0);
       const room = this.live(data);
       this.rooms.set(id, room);
       this.scheduleIdle(room);
@@ -91,10 +97,29 @@ export class RoomManager {
       peers: new Set(),
       seen: new Map(),
       dirty: false,
+      stopped: false,
+      saveVersion: data.saveVersion || 0,
       generation: 0,
       persistedRevision: data.state.revision,
       lastSaved: Date.now(),
     };
+  }
+  private assertActive(room: LiveRoom) {
+    if (room.stopped) throw new SnapshotConflictError();
+  }
+  private stopConflictedRoom(room: LiveRoom) {
+    room.stopped = true;
+    room.dirty = false;
+    if (room.timer) clearTimeout(room.timer);
+    if (room.idleTimer) clearTimeout(room.idleTimer);
+    if (room.cleanupTimer) clearTimeout(room.cleanupTimer);
+    this.discordDelivery.cancelRoom(room.data.state.id);
+    if (this.rooms.get(room.data.state.id) === room) this.rooms.delete(room.data.state.id);
+    for (const peer of room.peers) {
+      peer.send({ v: 2, type: 'ERROR', message: new SnapshotConflictError().message });
+      peer.close?.('Saved table changed; reconnect');
+    }
+    room.peers.clear();
   }
   private async load(id: string): Promise<LiveRoom> {
     const loaded = this.rooms.get(id);
@@ -109,6 +134,7 @@ export class RoomManager {
         const room = this.live(data);
         this.rooms.set(id, room);
         this.scheduleIdle(room);
+        this.scheduleCleanup(room);
         return room;
       })();
       this.hydration.set(id, pending);
@@ -133,6 +159,7 @@ export class RoomManager {
     }
   }
   private async acceptJoin(room: LiveRoom, peer: Peer, inviteCode?: string) {
+    this.assertActive(room);
     if (this.closing) throw new Error('The table server is shutting down. Try again shortly.');
     if (room.data.revokedMembers?.includes(peer.identity.id))
       throw new Error('Your membership was removed. Ask the campaign owner for access.');
@@ -150,6 +177,7 @@ export class RoomManager {
       try {
         await this.flush(room);
       } catch (error) {
+        this.assertActive(room);
         if (room.data.members[peer.identity.id] === member)
           delete room.data.members[peer.identity.id];
         room.generation++;
@@ -178,6 +206,7 @@ export class RoomManager {
   }
   async authorize(roomId: string, userId: string, gm = false) {
     const room = await this.load(roomId);
+    this.assertActive(room);
     const member = room.data.members[userId];
     if (!member || room.data.revokedMembers?.includes(userId))
       throw new Error('Campaign access denied.');
@@ -205,6 +234,7 @@ export class RoomManager {
     const pending = (room.configPromise || Promise.resolve())
       .catch(() => {})
       .then(async () => {
+        this.assertActive(room);
         const previous = data.discord;
         if (settings) {
           const url = settings.url?.trim() ? normalizeWebhook(settings.url) : previous?.url;
@@ -216,6 +246,7 @@ export class RoomManager {
         try {
           await this.flush(room);
         } catch (error) {
+          this.assertActive(room);
           data.discord = previous;
           room.generation++;
           room.dirty = true;
@@ -279,10 +310,134 @@ export class RoomManager {
     if (!state.assets || !Object.hasOwn(state.assets, id)) throw new Error('Image access denied.');
     return state.assets[id];
   }
+  setAssetStorage(assets: AssetStorage) {
+    this.assets = assets;
+    for (const room of this.rooms.values()) this.scheduleCleanup(room);
+  }
+  private async withAssets(room: LiveRoom, action: () => Promise<void>) {
+    const pending = (room.assetPromise || Promise.resolve())
+      .catch(() => {})
+      .then(async () => {
+        this.assertActive(room);
+        await action();
+      });
+    room.assetPromise = pending;
+    try {
+      await pending;
+    } finally {
+      if (room.assetPromise === pending) room.assetPromise = undefined;
+    }
+  }
+  private scheduleCleanup(room: LiveRoom, retry = false) {
+    if (room.cleanupTimer) clearTimeout(room.cleanupTimer);
+    room.cleanupTimer = undefined;
+    const intents = Object.values(room.data.assetCleanup || {});
+    if (!this.assets || this.closing || room.stopped || !intents.length) return;
+    const delay = retry
+      ? 60000
+      : Math.max(0, Math.min(...intents.map((i) => Date.parse(i.after))) - Date.now());
+    room.cleanupTimer = setTimeout(() => {
+      room.cleanupTimer = undefined;
+      void this.withAssets(room, () => this.cleanupRoomAssets(room)).catch(() => {
+        this.scheduleCleanup(room, true);
+      });
+    }, delay);
+    room.cleanupTimer.unref();
+  }
+  private async cleanupRoomAssets(room: LiveRoom) {
+    this.assertActive(room);
+    const due = Object.entries(room.data.assetCleanup || {}).filter(
+      ([id, intent]) =>
+        Date.parse(intent.after) <= Date.now() && !Object.hasOwn(room.data.state.assets || {}, id),
+    );
+    if (!this.assets || !due.length) {
+      this.scheduleCleanup(room);
+      return;
+    }
+    // Fence stale processes and uncertain preceding writes BEFORE deleting bytes.
+    // This shares the snapshot RPC; no extra read/polling or per-gameplay writes.
+    room.generation++;
+    room.dirty = true;
+    await this.flush(room);
+    for (const [id, intent] of due) {
+      this.assertActive(room);
+      try {
+        await this.assets.remove(room.data.state.id, id);
+        if (room.data.assetCleanup?.[id] === intent) {
+          delete room.data.assetCleanup[id];
+          room.generation++;
+          room.dirty = true;
+        }
+      } catch {
+        // Keep the durable intent: repeated removes (including absent objects)
+        // are safe, and hydration resumes the same work after a restart.
+      }
+    }
+    if (room.dirty) this.schedule(room);
+    this.scheduleCleanup(room, true);
+  }
+  async uploadAsset(roomId: string, userId: string, asset: UploadedAsset, bytes: Buffer) {
+    await this.authorize(roomId, userId, true);
+    const room = this.rooms.get(roomId)!;
+    await this.withAssets(room, async () => {
+      await this.authorize(roomId, userId, true);
+      if (!this.assets) throw new Error('Image storage is unavailable.');
+      if (
+        Object.keys(room.data.assetCleanup || {}).length +
+          Object.keys(room.data.state.assets || {}).length >=
+        64
+      )
+        throw new Error(
+          'Campaign image limit reached, including pending cleanup. Remove unused images or wait for storage recovery.',
+        );
+      // Save the rollback intent before starting Storage. The grace period is
+      // longer than the bounded upload request, allowing a new process to avoid
+      // racing an upload still winding down on the previous process.
+      const intent = { after: new Date(Date.now() + 15 * 60000).toISOString() };
+      room.data.assetCleanup = { ...room.data.assetCleanup, [asset.id]: intent };
+      room.generation++;
+      room.dirty = true;
+      try {
+        await this.flush(room);
+      } catch (error) {
+        this.retry(room);
+        this.scheduleCleanup(room, true);
+        throw error;
+      }
+      let uploaded = false;
+      try {
+        await this.assets.put(roomId, asset.id, bytes, AbortSignal.timeout(30000));
+        uploaded = true;
+        this.assertActive(room);
+        await this.registerAsset(roomId, userId, asset);
+      } catch (error) {
+        if (!room.stopped) {
+          // A successful put has finished. A failed/aborted put may be uncertain,
+          // so retain its grace period rather than deleting too early.
+          room.data.assetCleanup = {
+            ...room.data.assetCleanup,
+            [asset.id]: uploaded ? { after: new Date().toISOString() } : intent,
+          };
+          room.generation++;
+          room.dirty = true;
+          try {
+            await this.flush(room);
+            if (uploaded) await this.cleanupRoomAssets(room);
+          } catch {
+            this.retry(room);
+          }
+          this.scheduleCleanup(room, true);
+        }
+        throw error;
+      }
+      this.scheduleCleanup(room);
+    });
+  }
   async registerAsset(roomId: string, userId: string, asset: UploadedAsset) {
     await this.authorize(roomId, userId, true);
     const room = this.rooms.get(roomId)!;
     if (
+      Object.hasOwn(room.data.state.assets || {}, asset.id) ||
       Object.keys(room.data.state.assets || {}).length >= 64 ||
       Object.values(room.data.state.assets || {}).reduce((n, a) => n + a.bytes, 0) + asset.bytes >
         64 * 1024 * 1024
@@ -290,16 +445,20 @@ export class RoomManager {
       throw new Error(
         'Campaign image limit reached (64 images / 64 MiB). Remove unused images first.',
       );
+    const cleanup = room.data.assetCleanup?.[asset.id];
     const assets = { ...room.data.state.assets, [asset.id]: asset };
     room.data.state = { ...room.data.state, assets };
+    if (room.data.assetCleanup) delete room.data.assetCleanup[asset.id];
     room.generation++;
     room.dirty = true;
     try {
       await this.flush(room);
     } catch (error) {
+      this.assertActive(room);
       const remaining = { ...room.data.state.assets };
       delete remaining[asset.id];
       room.data.state = { ...room.data.state, assets: remaining };
+      if (cleanup) room.data.assetCleanup = { ...room.data.assetCleanup, [asset.id]: cleanup };
       room.generation++;
       room.dirty = true;
       this.retry(room);
@@ -309,37 +468,59 @@ export class RoomManager {
   }
   async removeAsset(roomId: string, id: string, userId: string) {
     await this.authorize(roomId, userId, true);
-    const room = this.rooms.get(roomId)!,
-      state = room.data.state;
-    const referenced = (a: { kind: string; url: string }) => a.kind === 'uploaded' && a.url === id;
-    for (const s of Object.values(state.scenes))
-      if (referenced(s.map) || Object.values(s.tokens).some((t) => referenced(t.image)))
-        throw new Error(
-          'This image is still used in a scene. Replace or remove its objects first.',
-        );
-    if (Object.values(state.tokenLibrary || {}).some((t) => referenced(t.image)))
-      throw new Error('This image is still used in your saved token library.');
-    if (!state.assets || !Object.hasOwn(state.assets, id)) throw new Error('Image not found.');
-    const assets = { ...state.assets };
-    delete assets[id];
-    room.data.state = { ...state, assets };
-    room.undo = [];
-    room.redo = [];
-    room.generation++;
-    room.dirty = true;
-    try {
-      await this.flush(room);
-    } catch (error) {
-      room.data.state = {
-        ...room.data.state,
-        assets: { ...room.data.state.assets, [id]: state.assets[id] },
-      };
-      room.generation++;
-      room.dirty = true;
-      this.retry(room);
-      throw error;
-    }
-    for (const p of room.peers) this.snapshot(room, p);
+    const room = this.rooms.get(roomId)!;
+    await this.withAssets(room, async () => {
+      await this.authorize(roomId, userId, true);
+      const state = room.data.state;
+      const referenced = (a: { kind: string; url: string }) =>
+        a.kind === 'uploaded' && a.url === id;
+      for (const scene of Object.values(state.scenes))
+        if (
+          referenced(scene.map) ||
+          Object.values(scene.tokens).some((token) => referenced(token.image))
+        )
+          throw new Error(
+            'This image is still used in a scene. Replace or remove its objects first.',
+          );
+      if (Object.values(state.tokenLibrary || {}).some((token) => referenced(token.image)))
+        throw new Error('This image is still used in your saved token library.');
+      const asset = state.assets?.[id];
+      if (asset && Object.hasOwn(state.assets!, id)) {
+        const assets = { ...state.assets };
+        delete assets[id];
+        room.data.state = { ...state, assets };
+        room.data.assetCleanup = {
+          ...room.data.assetCleanup,
+          [id]: { after: new Date().toISOString() },
+        };
+        room.undo = [];
+        room.redo = [];
+        room.generation++;
+        room.dirty = true;
+        try {
+          await this.flush(room);
+        } catch (error) {
+          this.assertActive(room);
+          room.data.state = {
+            ...room.data.state,
+            assets: { ...room.data.state.assets, [id]: asset },
+          };
+          delete room.data.assetCleanup[id];
+          room.generation++;
+          room.dirty = true;
+          this.retry(room);
+          throw error;
+        }
+        for (const peer of room.peers) this.snapshot(room, peer);
+      }
+      // Repeated DELETEs resume cleanup even if the manifest is already absent.
+      try {
+        await this.cleanupRoomAssets(room);
+      } catch (error) {
+        this.scheduleCleanup(room, true);
+        throw error;
+      }
+    });
   }
   private presence(room: LiveRoom): Presence[] {
     const map = new Map<string, Presence>();
@@ -421,14 +602,21 @@ export class RoomManager {
   }
   private scheduleIdle(room: LiveRoom) {
     if (room.idleTimer) clearTimeout(room.idleTimer);
-    if (this.closing || room.peers.size) return;
+    if (this.closing || room.stopped || room.peers.size) return;
     room.idleTimer = setTimeout(async () => {
       room.idleTimer = undefined;
       try {
         await this.flush(room);
-        if (!room.peers.size && !room.dirty && !room.joinPromise) {
+        if (
+          !room.peers.size &&
+          !room.dirty &&
+          !room.joinPromise &&
+          !room.assetPromise &&
+          !Object.keys(room.data.assetCleanup || {}).length
+        ) {
           if (room.timer) clearTimeout(room.timer);
-          this.rooms.delete(room.data.state.id);
+          if (room.cleanupTimer) clearTimeout(room.cleanupTimer);
+          if (this.rooms.get(room.data.state.id) === room) this.rooms.delete(room.data.state.id);
         } else this.scheduleIdle(room);
       } catch {
         this.retry(room);
@@ -616,7 +804,7 @@ export class RoomManager {
     if (message.type === 'SCENE_CHANGE') void this.flush(room).catch(() => this.retry(room));
   }
   private schedule(room: LiveRoom) {
-    if (!this.closing && !room.timer)
+    if (!this.closing && !room.stopped && !room.timer)
       room.timer = setTimeout(
         () => {
           room.timer = undefined;
@@ -626,6 +814,7 @@ export class RoomManager {
       );
   }
   private retry(room: LiveRoom) {
+    if (room.stopped) return;
     console.error('Snapshot failed; retaining dirty room and retrying.');
     for (const p of room.peers)
       p.send({
@@ -641,6 +830,7 @@ export class RoomManager {
     }, 10000);
   }
   private async flush(room: LiveRoom): Promise<void> {
+    this.assertActive(room);
     if (room.savePromise) {
       await room.savePromise;
       if (room.dirty) return this.flush(room);
@@ -652,7 +842,13 @@ export class RoomManager {
     const savedAt = new Date().toISOString();
     snapshot.state.savedAt = savedAt;
     room.savePromise = (async () => {
-      await this.storage.save(snapshot);
+      try {
+        room.saveVersion = await this.storage.save(snapshot, room.saveVersion);
+      } catch (error) {
+        if (error instanceof SnapshotConflictError) this.stopConflictedRoom(room);
+        throw error;
+      }
+      room.data.saveVersion = room.saveVersion;
       room.persistedRevision = snapshot.state.revision;
       room.lastSaved = Date.now();
       room.data.state.savedAt = savedAt;
@@ -676,7 +872,9 @@ export class RoomManager {
     for (const r of this.rooms.values()) {
       if (r.timer) clearTimeout(r.timer);
       if (r.idleTimer) clearTimeout(r.idleTimer);
+      if (r.cleanupTimer) clearTimeout(r.cleanupTimer);
     }
+    await Promise.allSettled([...this.rooms.values()].map((r) => r.assetPromise));
     await this.flushAll();
   }
   get stats() {

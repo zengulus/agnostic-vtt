@@ -138,5 +138,42 @@ export function createDiceEngine(
       if (sound && lifecycle.animstate === 'throw') playTone(appearance.volume, true);
     };
   }
+  // Upstream checks the run token only after stepping and rendering. An already
+  // queued callback can therefore touch a disposed renderer, or a newer throw.
+  const frames = engine as unknown as {
+    running: number | boolean;
+    animateThrow: (run: number | boolean, ...args: unknown[]) => void;
+    animateAfterThrow: (run: number | boolean, ...args: unknown[]) => void;
+  };
+  for (const method of ['animateThrow', 'animateAfterThrow'] as const) {
+    const animate = frames[method].bind(engine);
+    frames[method] = (run, ...args) => {
+      if (frames.running !== run) return;
+      animate(run, ...args);
+    };
+  }
+  const initialize = engine.initialize.bind(engine);
+  engine.initialize = async () => {
+    // Upstream creates the renderer synchronously before awaiting theme assets.
+    // Guard that renderer instance, rather than patching timers globally:
+    // clearDice() also schedules an untracked render 100ms after every roll.
+    const initialization = initialize();
+    const renderer = engine.renderer as unknown as
+      { render: (...args: unknown[]) => void; dispose: () => void } | undefined;
+    if (renderer) {
+      let disposed = false;
+      const render = renderer.render.bind(renderer),
+        dispose = renderer.dispose.bind(renderer);
+      renderer.render = (...args) => {
+        if (!disposed) render(...args);
+      };
+      renderer.dispose = () => {
+        if (disposed) return;
+        disposed = true;
+        dispose();
+      };
+    }
+    await initialization;
+  };
   return engine;
 }

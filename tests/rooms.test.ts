@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { RoomManager, type Peer } from '../server/rooms.js';
-import type { Persistence } from '../server/persistence.js';
+import { SnapshotConflictError, type Persistence } from '../server/persistence.js';
 import type { DurableRoom } from '../shared/model.js';
 import type { ServerMessage } from '../shared/protocol.js';
 import { newRoom } from '../shared/sample.js';
@@ -10,8 +10,12 @@ class MemoryPersistence implements Persistence {
   async load(id: string) {
     return structuredClone(this.rooms.get(id) || null);
   }
-  async save(room: DurableRoom) {
-    this.rooms.set(room.state.id, structuredClone(room));
+  async save(room: DurableRoom, expectedSaveVersion = room.saveVersion || 0) {
+    if ((this.rooms.get(room.state.id)?.saveVersion || 0) !== expectedSaveVersion)
+      throw new SnapshotConflictError();
+    const saveVersion = expectedSaveVersion + 1;
+    this.rooms.set(room.state.id, structuredClone({ ...room, saveVersion }));
+    return saveVersion;
   }
 }
 function deferred() {
@@ -97,9 +101,9 @@ describe('room admission and lifecycle', () => {
   it('reserves capacity while simultaneous campaign creations are saving', async () => {
     const gate = deferred(),
       save = storage.save.bind(storage);
-    vi.spyOn(storage, 'save').mockImplementation(async (room) => {
+    vi.spyOn(storage, 'save').mockImplementation(async (room, version) => {
       await gate.promise;
-      await save(room);
+      return save(room, version);
     });
     const pending = Array.from({ length: 100 }, (_, i) => manager.create(owner, `Room ${i}`));
     await expect(manager.create(owner, 'Overflow')).rejects.toThrow('server is full');
@@ -131,10 +135,10 @@ describe('room admission and lifecycle', () => {
     const started = deferred(),
       gate = deferred(),
       save = storage.save.bind(storage);
-    vi.spyOn(storage, 'save').mockImplementationOnce(async (snapshot) => {
+    vi.spyOn(storage, 'save').mockImplementationOnce(async (snapshot, version) => {
       started.resolve();
       await gate.promise;
-      await save(snapshot);
+      return save(snapshot, version);
     });
     const firstJoin = manager.join(first, room.id, room.inviteCode);
     await started.promise;

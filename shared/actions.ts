@@ -14,6 +14,7 @@ import { clampPoint, snapPoint } from './geometry.js';
 import { evaluateDice } from './dice.js';
 import { sampleScene } from './sample.js';
 import { importMacros, parseMacro, evaluateMacro } from './macros.js';
+import { applyTokenEdits } from './tokenEdits.js';
 export function assertAsset(room: DurableRoom, asset: Token['image']) {
   validateAsset(asset);
   if (asset.kind === 'uploaded' && !room.state.assets?.[asset.url])
@@ -137,7 +138,17 @@ export function prepareAction(
         throw new Error('Duplicate token identifiers in batch.');
       return m.positions.map((p) => move(m.sceneId, p.tokenId, p.position));
     case 'TOKEN_UPDATE':
+      gm();
+      if (m.createOnly && scene(m.sceneId).tokens[m.token.id])
+        throw new Error('This token already exists. Reload the latest token values before saving.');
       return update(m.sceneId, [m.token]);
+    case 'TOKEN_PATCH': {
+      gm();
+      const current = scene(m.sceneId).tokens[m.tokenId];
+      if (!current)
+        throw new Error('This token was removed. Close this dialog and select another token.');
+      return update(m.sceneId, [applyTokenEdits(current, m.edits)]);
+    }
     case 'TOKENS_UPDATE':
       return update(m.sceneId, m.tokens);
     case 'TOKENS_DELETE':

@@ -1,5 +1,5 @@
 import { demoAction, startDemo } from './demo.js';
-import { createClient } from '@supabase/supabase-js';
+import { authClient, commitAuthSession, isolatedAuthClient } from './auth.js';
 import type { Action, DiscordStatus, ServerMessage } from '../shared/protocol.js';
 import { useTable, notify } from './store.js';
 import { demoState } from './store.js';
@@ -10,13 +10,6 @@ export const supabase = !!(
   import.meta.env.VITE_SUPABASE_URL && import.meta.env.VITE_SUPABASE_ANON_KEY
 );
 export const liveAvailable = import.meta.env.DEV || (!!serverUrl && supabase);
-let client: ReturnType<typeof createClient> | undefined;
-function authClient() {
-  return (client ||= createClient(
-    import.meta.env.VITE_SUPABASE_URL,
-    import.meta.env.VITE_SUPABASE_ANON_KEY,
-  ));
-}
 interface Session {
   token: string;
   id: string;
@@ -28,6 +21,27 @@ let session: Session | null = null,
   attempts = 0,
   stopped = false;
 let config: { roomId: string; inviteCode?: string; role?: 'gm' | 'player' } | null = null;
+// An abandoned launch must never commit credentials, navigation, or table state.
+let navigationGeneration = 0;
+let pendingLaunch: { controller: AbortController; restoreDemo: boolean } | null = null;
+export function cancelLaunch() {
+  navigationGeneration++;
+  const pending = pendingLaunch;
+  pendingLaunch = null;
+  pending?.controller.abort();
+  if (pending?.restoreDemo && useTable.getState().status === 'offline')
+    useTable.getState().set({ status: 'demo' });
+}
+useTable.subscribe((state, previous) => {
+  if (previous.dialog === 'launch' && state.dialog !== 'launch') cancelLaunch();
+});
+window.addEventListener('popstate', cancelLaunch);
+window.addEventListener('pagehide', cancelLaunch);
+function assertCurrent(generation: number, signal?: AbortSignal) {
+  signal?.throwIfAborted();
+  if (generation !== navigationGeneration)
+    throw new DOMException('The table launch was cancelled.', 'AbortError');
+}
 const actionWaiters = new Map<string, { resolve: () => void; reject: (error: Error) => void }>();
 function rejectPendingActions(message: string) {
   for (const waiter of actionWaiters.values()) waiter.reject(new Error(message));
@@ -47,7 +61,7 @@ export function sendAndWait(action: Action): Promise<void> {
   return new Promise((resolve, reject) => {
     const timer = setTimeout(() => {
       actionWaiters.delete(id);
-      reject(new Error('No confirmation received. Check the macro library before trying again.'));
+      reject(new Error('No confirmation received. Check the table before trying again.'));
     }, 10000);
     actionWaiters.set(id, {
       resolve: () => {
@@ -97,21 +111,33 @@ export async function authorizedFetch(path: string, init: RequestInit = {}) {
   const listingCampaigns = path === '/api/campaigns' && (init.method || 'GET') === 'GET';
   if (useTable.getState().status === 'demo' && !listingCampaigns)
     throw new Error('This feature needs a live campaign. The demo stays in this tab.');
+  return fetchWithSession(path, init, session);
+}
+async function fetchWithSession(path: string, init: RequestInit, identity: Session | null) {
+  const generation = navigationGeneration;
+  init.signal?.throwIfAborted();
   if (supabase) {
     const { data } = await authClient().auth.getSession();
-    if (data.session && session) session.token = data.session.access_token;
+    assertCurrent(generation, init.signal || undefined);
+    if (data.session && identity) {
+      if (data.session.user.id !== identity.id)
+        throw new Error('Your account changed. Sign in again to open this table.');
+      identity.token = data.session.access_token;
+    }
   }
   const headers = new Headers(init.headers);
-  if (session) headers.set('Authorization', `Bearer ${session.token}`);
+  if (identity) headers.set('Authorization', `Bearer ${identity.token}`);
   const response = await fetch(`${serverUrl}${path}`, {
     ...init,
     headers,
   });
+  init.signal?.throwIfAborted();
   if (!response.ok) {
     let message = 'Request failed.';
     try {
       message = (await response.json()).error || message;
     } catch {}
+    init.signal?.throwIfAborted();
     throw new Error(message);
   }
   return response;
@@ -135,7 +161,9 @@ export async function deleteImage(id: string) {
 }
 export async function currentAccount() {
   if (!liveAvailable || !supabase) return null;
+  const generation = navigationGeneration;
   const { data, error } = await authClient().auth.getSession();
+  if (generation !== navigationGeneration) return null;
   if (error) throw error;
   if (!data.session) {
     session = null;
@@ -153,8 +181,11 @@ export async function currentAccount() {
   return { name: session.name, email: user.email || '' };
 }
 export async function signOut() {
+  cancelLaunch();
+  const generation = navigationGeneration;
   if (supabase) {
     const { error } = await authClient().auth.signOut();
+    assertCurrent(generation);
     if (error) throw error;
   }
   session = null;
@@ -165,9 +196,11 @@ export async function signOut() {
 }
 export async function savedCampaigns() {
   if (!liveAvailable) return [];
+  const generation = navigationGeneration;
   if (!session) {
     if (supabase) {
       const { data } = await authClient().auth.getSession();
+      if (generation !== navigationGeneration) return [];
       if (data.session)
         session = {
           token: data.session.access_token,
@@ -184,6 +217,7 @@ export async function savedCampaigns() {
   return request<Array<{ id: string; name: string; role: 'gm' | 'player' }>>('/api/campaigns');
 }
 export function resumeCampaign(id: string, role?: 'gm' | 'player') {
+  cancelLaunch();
   if (useTable.getState().status === 'demo') disconnect();
   const url = new URL(location.href);
   url.searchParams.set('room', id);
@@ -192,7 +226,14 @@ export function resumeCampaign(id: string, role?: 'gm' | 'player') {
   connect(id, undefined, role);
   useTable.getState().set({ dialog: null });
 }
-export async function signIn(name: string, email?: string, password?: string, signUp = false) {
+async function authenticate(
+  name: string,
+  email: string | undefined,
+  password: string | undefined,
+  signUp: boolean,
+  generation: number,
+  signal?: AbortSignal,
+): Promise<Session> {
   if (supabase) {
     if (email && password) {
       const confirmationUrl = new URL(import.meta.env.BASE_URL, location.origin);
@@ -201,45 +242,81 @@ export async function signIn(name: string, email?: string, password?: string, si
         const value = params.get(key);
         if (value) confirmationUrl.searchParams.set(key, value);
       }
-      const { data, error } = signUp
-        ? await authClient().auth.signUp({
-            email,
-            password,
-            options: {
-              data: { name },
-              emailRedirectTo: confirmationUrl.toString(),
-            },
-          })
-        : await authClient().auth.signInWithPassword({ email, password });
-      if (error) throw error;
-      if (!data.session) throw new Error('Check your email to confirm your account, then sign in.');
+      // The SDK saves and broadcasts before signIn resolves. Keep those effects
+      // in an isolated client until this intent is still current at commit time.
+      const isolated = isolatedAuthClient();
+      try {
+        const { data, error } = signUp
+          ? await isolated.auth.signUp({
+              email,
+              password,
+              options: {
+                data: { name },
+                emailRedirectTo: confirmationUrl.toString(),
+              },
+            })
+          : await isolated.auth.signInWithPassword({ email, password });
+        assertCurrent(generation, signal);
+        if (error) throw error;
+        if (!data.session)
+          throw new Error('Check your email to confirm your account, then sign in.');
+        commitAuthSession(data.session);
+      } finally {
+        void isolated.auth.dispose();
+      }
     }
     const { data } = await authClient().auth.getSession();
+    assertCurrent(generation, signal);
     if (!data.session) throw new Error('Sign in to open a table.');
-    session = {
+    return {
       id: data.session.user.id,
       name: String(data.session.user.user_metadata?.name || name).slice(0, 32),
       token: data.session.access_token,
     };
-  } else {
-    try {
-      session = JSON.parse(localStorage.getItem('aether-guest') || 'null') as Session | null;
-    } catch {
-      session = null;
-    }
-    // Session validation is server-side, never trust the browser's stored identity.
-    if (session) {
-      try {
-        await request('/api/metrics');
-      } catch {
-        session = null;
-      }
-    }
-    if (!session) {
-      session = await request<Session>('/api/guest', { name });
-      localStorage.setItem('aether-guest', JSON.stringify(session));
-    }
   }
+  let identity: Session | null = null;
+  try {
+    identity = JSON.parse(localStorage.getItem('aether-guest') || 'null') as Session | null;
+  } catch {
+    /* Recover from a damaged guest session. */
+  }
+  // Session validation is server-side, never trust the browser's stored identity.
+  if (identity) {
+    try {
+      await fetchWithSession('/api/metrics', { signal }, identity);
+    } catch {
+      assertCurrent(generation, signal);
+      identity = null;
+    }
+    assertCurrent(generation, signal);
+  }
+  if (!identity) {
+    const response = await fetchWithSession(
+      '/api/guest',
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ name }),
+        signal,
+      },
+      null,
+    );
+    assertCurrent(generation, signal);
+    identity = (await response.json()) as Session;
+    assertCurrent(generation, signal);
+  }
+  return identity;
+}
+function rememberSession(identity: Session) {
+  session = identity;
+  if (!supabase) localStorage.setItem('aether-guest', JSON.stringify(identity));
+}
+export async function signIn(name: string, email?: string, password?: string, signUp = false) {
+  cancelLaunch();
+  const generation = navigationGeneration;
+  const identity = await authenticate(name, email, password, signUp, generation);
+  assertCurrent(generation);
+  rememberSession(identity);
 }
 export async function launch(
   name: string,
@@ -251,14 +328,49 @@ export async function launch(
   signUp = false,
   role?: 'gm' | 'player',
 ) {
-  const wasDemo = useTable.getState().status === 'demo';
-  if (wasDemo) useTable.getState().set({ status: 'offline' });
+  cancelLaunch();
+  const generation = navigationGeneration;
+  const attempt = {
+    controller: new AbortController(),
+    restoreDemo: useTable.getState().status === 'demo',
+  };
+  pendingLaunch = attempt;
+  const initialUrl = location.href;
+  const check = () => {
+    assertCurrent(generation, attempt.controller.signal);
+    if (location.href !== initialUrl) {
+      cancelLaunch();
+      assertCurrent(generation);
+    }
+  };
+  if (attempt.restoreDemo) useTable.getState().set({ status: 'offline' });
+  let committing = false;
   try {
-    await signIn(name, email, password, signUp);
+    const identity = await authenticate(
+      name,
+      email,
+      password,
+      signUp,
+      generation,
+      attempt.controller.signal,
+    );
+    check();
+    // Preserve valid credentials before creation so a server-committed campaign remains recoverable.
+    rememberSession(identity);
     if (!roomId) {
-      const created = await request<{ id: string; inviteCode: string }>('/api/campaigns', {
-        name: campaignName,
-      });
+      const response = await fetchWithSession(
+        '/api/campaigns',
+        {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ name: campaignName }),
+          signal: attempt.controller.signal,
+        },
+        identity,
+      );
+      check();
+      const created = (await response.json()) as { id: string; inviteCode: string };
+      check();
       roomId = created.id;
       inviteCode = created.inviteCode;
     }
@@ -266,11 +378,16 @@ export async function launch(
     url.searchParams.set('room', roomId);
     if (inviteCode) url.searchParams.set('invite', inviteCode);
     else url.searchParams.delete('invite');
+    committing = true;
+    pendingLaunch = null;
     history.replaceState({}, '', url);
     connect(roomId, inviteCode, role);
     useTable.getState().set({ dialog: null });
   } catch (error) {
-    if (wasDemo) useTable.getState().set({ status: 'demo' });
+    // Cancellation includes rejected requests that ignore AbortSignal or finish late.
+    if (!committing && pendingLaunch !== attempt) return;
+    pendingLaunch = null;
+    if (attempt.restoreDemo) useTable.getState().set({ status: 'demo' });
     throw error;
   }
 }
@@ -292,6 +409,7 @@ export function send(action: Action) {
   return actionId;
 }
 export function connect(roomId: string, inviteCode?: string, role?: 'gm' | 'player') {
+  cancelLaunch();
   rejectPendingActions('The campaign changed before this action was confirmed.');
   stopped = false;
   config = { roomId, inviteCode, role };
@@ -322,6 +440,8 @@ function open() {
         const { data } = await authClient().auth.getSession();
         if (!data.session) throw new Error('Your session expired. Sign in again.');
         if (socket !== active || stopped) return;
+        if (data.session.user.id !== activeSession.id)
+          throw new Error('Your account changed. Sign in again to open this table.');
         activeSession.token = data.session.access_token;
       }
       if (socket === active && !stopped && active.readyState === WebSocket.OPEN)
@@ -594,6 +714,7 @@ function open() {
   };
 }
 export function disconnect() {
+  cancelLaunch();
   stopped = true;
   rejectPendingActions('Disconnected before this action was confirmed.');
   if (reconnect) clearTimeout(reconnect);

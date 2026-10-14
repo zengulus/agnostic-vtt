@@ -24,8 +24,13 @@ test('independent browser clients move tokens, share dice/chat, and reconnect', 
 }) => {
   const a = await browser.newContext(),
     b = await browser.newContext();
+  for (const context of [a, b])
+    await context.addInitScript(() =>
+      localStorage.setItem('aether-settings', JSON.stringify({ reducedMotion: true })),
+    );
   const gm = await a.newPage(),
     pc = await b.newPage();
+  await Promise.all([gm.clock.install(), pc.clock.install()]);
   const gmMessages = observe(gm),
     pcMessages = observe(pc),
     errors: string[] = [];
@@ -65,6 +70,10 @@ test('independent browser clients move tokens, share dice/chat, and reconnect', 
       ),
     )
     .toBeTruthy();
+  // This checks shared authoritative results; the physical-face scenario below
+  // exercises the real renderer. Hold auto-dismiss while inspecting both clients.
+  for (const page of [gm, pc])
+    await page.clock.pauseAt(await page.evaluate(() => Date.now() + 1000));
   await gm.getByRole('textbox', { name: 'DICE EXPRESSION' }).fill('1d20 + 5 - 2');
   await gm.getByRole('button', { name: 'Roll the dice' }).click();
   await expect.poll(() => gmMessages.find((m) => m.type === 'DICE_ROLL_RESULT')).toBeTruthy();
@@ -73,15 +82,12 @@ test('independent browser clients move tokens, share dice/chat, and reconnect', 
     pcRoll = pcMessages.find((m) => m.type === 'DICE_ROLL_RESULT')!;
   expect(gmRoll).toEqual(pcRoll);
   if (gmRoll.type === 'DICE_ROLL_RESULT') {
-    await expect(gm.getByTestId('roll-total')).toContainText(String(gmRoll.roll.total), {
-      timeout: 16000,
-    });
-    await expect(pc.getByTestId('roll-total')).toContainText(String(gmRoll.roll.total), {
-      timeout: 16000,
-    });
+    await expect(gm.getByTestId('roll-total')).toContainText(String(gmRoll.roll.total));
+    await expect(pc.getByTestId('roll-total')).toContainText(String(gmRoll.roll.total));
   }
   await gm.getByRole('button', { name: 'Dismiss roll' }).click();
   await pc.getByRole('button', { name: 'Dismiss roll' }).click();
+  await Promise.all([gm.clock.resume(), pc.clock.resume()]);
   await pc.getByRole('button', { name: 'Party chat', exact: true }).click();
   await pc.getByRole('textbox', { name: 'Message your party' }).fill('The crossing looks safe.');
   await pc.getByRole('button', { name: 'Send message' }).click();

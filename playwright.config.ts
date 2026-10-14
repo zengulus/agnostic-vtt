@@ -7,6 +7,8 @@ export default defineConfig({
     baseURL: 'http://localhost:5173',
     viewport: { width: 1440, height: 960 },
     headless: true,
+    screenshot: 'only-on-failure',
+    trace: 'retain-on-failure',
     launchOptions: {
       executablePath: process.env.PLAYWRIGHT_CHROMIUM_EXECUTABLE,
       args: ['--enable-unsafe-swiftshader', '--use-gl=angle', '--use-angle=swiftshader'],

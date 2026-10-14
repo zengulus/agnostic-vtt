@@ -224,7 +224,11 @@ describe('campaign workshop over real HTTP and WebSockets', () => {
   it('rolls back the image manifest and stored file when persistence fails', async () => {
     const gm = await client(owner);
     await gm.wait('ROOM_SNAPSHOT');
-    const save = vi.spyOn(storage, 'save').mockRejectedValueOnce(new Error('Offline storage'));
+    const originalSave = storage.save.bind(storage);
+    const save = vi
+      .spyOn(storage, 'save')
+      .mockImplementationOnce(originalSave) // durable pre-upload cleanup intent
+      .mockRejectedValueOnce(new Error('Offline storage'));
     const png = await sharp({
       create: { width: 32, height: 32, channels: 3, background: '#338844' },
     })

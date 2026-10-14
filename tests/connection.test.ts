@@ -2,6 +2,25 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { ServerMessage } from '../shared/protocol.js';
 import type { Roll } from '../shared/model.js';
 
+const { auth } = vi.hoisted(() => ({
+  auth: {
+    getSession: vi.fn(),
+    signInWithPassword: vi.fn(),
+    signUp: vi.fn(),
+    signOut: vi.fn(),
+    dispose: vi.fn().mockResolvedValue(undefined),
+  },
+}));
+vi.mock('@supabase/supabase-js', () => ({
+  AuthClient: class {
+    getSession = auth.getSession;
+    signInWithPassword = auth.signInWithPassword;
+    signUp = auth.signUp;
+    signOut = auth.signOut;
+    dispose = auth.dispose;
+  },
+}));
+
 class Socket {
   static OPEN = 1;
   static instances: Socket[] = [];
@@ -65,8 +84,13 @@ describe('client connection transitions', () => {
     vi.stubEnv('VITE_SUPABASE_URL', '');
     vi.stubEnv('VITE_SUPABASE_ANON_KEY', '');
     vi.stubGlobal('WebSocket', Socket);
-    vi.stubGlobal('window', { addEventListener: vi.fn() });
-    vi.stubGlobal('location', { protocol: 'http:', host: 'localhost:5173' });
+    vi.stubGlobal('window', new EventTarget());
+    vi.stubGlobal('location', new URL('http://localhost:5173/'));
+    vi.stubGlobal('history', {
+      replaceState: vi.fn((_state: unknown, _title: string, url: string | URL) => {
+        location.href = String(url);
+      }),
+    });
     vi.stubGlobal('localStorage', { getItem: vi.fn(() => null), setItem: vi.fn() });
     vi.stubGlobal('matchMedia', () => ({ matches: false }));
     vi.stubGlobal(
@@ -153,5 +177,240 @@ describe('client connection transitions', () => {
     expect(headers.get('Content-Type')).toBe('application/json');
     expect(headers.get('X-Image-Purpose')).toBe('token');
     expect(headers.get('Authorization')).toBe('Bearer test-session');
+  });
+  function deferred<T>() {
+    let resolve!: (value: T) => void;
+    let reject!: (reason: Error) => void;
+    const promise = new Promise<T>((yes, no) => {
+      resolve = yes;
+      reject = no;
+    });
+    return { promise, resolve, reject };
+  }
+  const response = (value: unknown) => new Response(JSON.stringify(value));
+  async function pendingLaunch(stage: 'authentication' | 'campaign') {
+    connection.launchDemo();
+    table.useTable.getState().set({ dialog: 'launch' });
+    vi.mocked(fetch).mockClear();
+    vi.mocked(localStorage.setItem).mockClear();
+    vi.mocked(history.replaceState).mockClear();
+    const pending = deferred<Response>();
+    if (stage === 'campaign')
+      vi.mocked(fetch).mockResolvedValueOnce(
+        response({ id: 'new-user', name: 'New', token: 'new-token' }),
+      );
+    vi.mocked(fetch).mockImplementationOnce(() => pending.promise);
+    const launched = connection.launch('New', 'Stale campaign');
+    await vi.waitFor(() => expect(fetch).toHaveBeenCalledTimes(stage === 'campaign' ? 2 : 1));
+    return { pending, launched, signal: vi.mocked(fetch).mock.calls.at(-1)![1]!.signal! };
+  }
+  for (const stage of ['authentication', 'campaign'] as const) {
+    for (const settle of ['resolve', 'reject'] as const) {
+      it(`ignores ${stage} ${settle} after closing the launch dialog`, async () => {
+        const { pending, launched, signal } = await pendingLaunch(stage);
+        table.useTable.getState().set({ dialog: null });
+        const screen = table.useTable.getState();
+        expect(screen.status).toBe('demo');
+        expect(signal.aborted).toBe(true);
+        if (settle === 'resolve') pending.resolve(response({ id: 'stale', token: 'stale-token' }));
+        else pending.reject(new Error('Late failure'));
+        await launched;
+        expect(table.useTable.getState()).toBe(screen);
+        expect(location.href).toBe('http://localhost:5173/');
+        expect(history.replaceState).not.toHaveBeenCalled();
+        expect(Socket.instances).toHaveLength(0);
+        expect(localStorage.setItem).toHaveBeenCalledTimes(stage === 'campaign' ? 1 : 0);
+        expect(fetch).toHaveBeenCalledTimes(stage === 'campaign' ? 2 : 1);
+      });
+    }
+  }
+  it('keeps a newly selected player demo after an abandoned campaign completes', async () => {
+    const { pending, launched } = await pendingLaunch('campaign');
+    connection.launchDemo('player');
+    const screen = table.useTable.getState();
+    const historyCalls = vi.mocked(history.replaceState).mock.calls.length;
+    pending.resolve(response({ id: 'stale-campaign', inviteCode: 'stale-invite' }));
+    await launched;
+    expect(table.useTable.getState()).toBe(screen);
+    expect(screen.self?.role).toBe('player');
+    expect(location.search).toBe('');
+    expect(history.replaceState).toHaveBeenCalledTimes(historyCalls);
+    expect(Socket.instances).toHaveLength(0);
+    expect(localStorage.setItem).toHaveBeenCalledTimes(1);
+  });
+  it('does not let an older authentication replace a superseding launch or its session', async () => {
+    const { pending, launched, signal } = await pendingLaunch('authentication');
+    vi.mocked(fetch).mockResolvedValueOnce(
+      response({ id: 'latest-user', name: 'Latest', token: 'latest-token' }),
+    );
+    const latest = connection.launch('Latest', 'Latest campaign', 'latest-room', 'latest-invite');
+    await latest;
+    expect(signal.aborted).toBe(true);
+    const screen = table.useTable.getState();
+    pending.resolve(response({ id: 'stale-user', name: 'Stale', token: 'stale-token' }));
+    await launched;
+    expect(table.useTable.getState()).toBe(screen);
+    expect(location.search).toBe('?room=latest-room&invite=latest-invite');
+    expect(Socket.instances).toHaveLength(1);
+    expect(localStorage.setItem).toHaveBeenCalledTimes(1);
+    const socket = Socket.instances[0];
+    socket.readyState = Socket.OPEN;
+    await socket.onopen?.();
+    expect(socket.sent[0]).toMatchObject({ roomId: 'latest-room', token: 'latest-token' });
+  });
+  it('keeps a resumed campaign when an older creation request rejects', async () => {
+    const { pending, launched } = await pendingLaunch('campaign');
+    connection.resumeCampaign('resumed-room', 'player');
+    const screen = table.useTable.getState();
+    pending.reject(new Error('Old campaign creation failed'));
+    await launched;
+    expect(table.useTable.getState()).toBe(screen);
+    expect(location.search).toBe('?room=resumed-room');
+    expect(Socket.instances).toHaveLength(1);
+    expect(history.replaceState).toHaveBeenCalledTimes(1);
+    const socket = Socket.instances[0];
+    socket.readyState = Socket.OPEN;
+    await socket.onopen?.();
+    expect(socket.sent[0]).toMatchObject({
+      roomId: 'resumed-room',
+      role: 'player',
+      token: 'new-token',
+    });
+  });
+  for (const event of ['popstate', 'pagehide']) {
+    it(`cancels pending launch on ${event} without rewriting navigation`, async () => {
+      const { pending, launched, signal } = await pendingLaunch('campaign');
+      location.href = 'http://localhost:5173/?room=back-forward-target';
+      window.dispatchEvent(new Event(event));
+      const screen = table.useTable.getState();
+      pending.resolve(response({ id: 'stale-room' }));
+      await launched;
+      expect(signal.aborted).toBe(true);
+      expect(table.useTable.getState()).toBe(screen);
+      expect(location.search).toBe('?room=back-forward-target');
+      expect(history.replaceState).not.toHaveBeenCalled();
+      expect(Socket.instances).toHaveLength(0);
+    });
+  }
+  it('detects history navigation even without a popstate event', async () => {
+    const { pending, launched } = await pendingLaunch('campaign');
+    location.href = 'http://localhost:5173/?room=newer-navigation';
+    pending.resolve(response({ id: 'stale-room' }));
+    await launched;
+    expect(location.search).toBe('?room=newer-navigation');
+    expect(table.useTable.getState().status).toBe('demo');
+    expect(history.replaceState).not.toHaveBeenCalled();
+    expect(Socket.instances).toHaveLength(0);
+  });
+  it('restores the demo and reports a current launch failure', async () => {
+    const { pending, launched } = await pendingLaunch('campaign');
+    const rejected = expect(launched).rejects.toThrow('Current failure');
+    pending.reject(new Error('Current failure'));
+    await rejected;
+    expect(table.useTable.getState()).toMatchObject({ status: 'demo', dialog: 'launch' });
+    expect(history.replaceState).not.toHaveBeenCalled();
+    expect(Socket.instances).toHaveLength(0);
+  });
+  it('ignores deferred response JSON after closing the launch dialog', async () => {
+    connection.launchDemo();
+    table.useTable.getState().set({ dialog: 'launch' });
+    const body = deferred<{ id: string; inviteCode: string }>();
+    const json = vi.fn(() => body.promise);
+    vi.mocked(fetch).mockResolvedValueOnce(
+      response({ id: 'new-user', name: 'New', token: 'new-token' }),
+    );
+    vi.mocked(fetch).mockResolvedValueOnce({ ok: true, json } as unknown as Response);
+    const launched = connection.launch('New', 'Stale campaign');
+    await vi.waitFor(() => expect(json).toHaveBeenCalled());
+    table.useTable.getState().set({ dialog: null });
+    const screen = table.useTable.getState();
+    body.resolve({ id: 'stale-room', inviteCode: 'stale-code' });
+    await launched;
+    expect(table.useTable.getState()).toBe(screen);
+    expect(location.search).toBe('');
+    expect(Socket.instances).toHaveLength(0);
+  });
+
+  describe('hosted authentication cancellation', () => {
+    const signedIn = {
+      data: {
+        session: {
+          access_token: 'hosted-token',
+          user: {
+            id: 'hosted-user',
+            email: 'user@example.test',
+            user_metadata: { name: 'Hosted' },
+          },
+        },
+      },
+      error: null,
+    };
+    beforeEach(async () => {
+      vi.resetModules();
+      vi.stubEnv('VITE_SUPABASE_URL', 'https://supabase.example.test');
+      vi.stubEnv('VITE_SUPABASE_ANON_KEY', 'public-key');
+      auth.getSession.mockReset().mockResolvedValue(signedIn);
+      auth.signInWithPassword.mockReset();
+      connection = await import('../src/connection.js');
+      table = await import('../src/store.js');
+      await connection.currentAccount();
+      table.useTable.getState().set({ dialog: 'launch' });
+      vi.mocked(fetch).mockClear();
+      vi.mocked(localStorage.setItem).mockClear();
+    });
+    for (const settle of ['resolve', 'reject'] as const) {
+      it(`ignores a hosted sign-in ${settle} after cancellation`, async () => {
+        const pending = deferred<typeof signedIn>();
+        auth.signInWithPassword.mockReturnValueOnce(pending.promise);
+        const launched = connection.launch(
+          'New',
+          'Cancelled campaign',
+          undefined,
+          undefined,
+          'user@example.test',
+          'password',
+        );
+        table.useTable.getState().set({ dialog: null });
+        const screen = table.useTable.getState();
+        if (settle === 'resolve') pending.resolve(signedIn);
+        else pending.reject(new Error('Late hosted failure'));
+        await launched;
+        expect(table.useTable.getState()).toBe(screen);
+        expect(fetch).not.toHaveBeenCalled();
+        expect(history.replaceState).not.toHaveBeenCalled();
+        expect(Socket.instances).toHaveLength(0);
+        expect(auth.getSession).toHaveBeenCalledTimes(1);
+      });
+    }
+    it('does not restore a late account into a dismissed flow', async () => {
+      const pending = deferred<typeof signedIn>();
+      auth.getSession.mockReturnValueOnce(pending.promise);
+      const account = connection.currentAccount();
+      table.useTable.getState().set({ dialog: null });
+      pending.resolve({
+        data: { session: { ...signedIn.data.session, access_token: 'stale-token' } },
+        error: null,
+      });
+      expect(await account).toBeNull();
+      auth.getSession.mockResolvedValueOnce({ data: { session: null }, error: null });
+      await connection.authorizedFetch('/api/test');
+      expect(new Headers(vi.mocked(fetch).mock.calls[0][1]?.headers).get('Authorization')).toBe(
+        'Bearer hosted-token',
+      );
+    });
+    it('does not refresh a launch token after navigation while preparing campaign creation', async () => {
+      const pending = deferred<typeof signedIn>();
+      auth.getSession.mockResolvedValueOnce(signedIn).mockReturnValueOnce(pending.promise);
+      const launched = connection.launch('New', 'Cancelled campaign');
+      await vi.waitFor(() => expect(auth.getSession).toHaveBeenCalledTimes(3));
+      window.dispatchEvent(new Event('popstate'));
+      const screen = table.useTable.getState();
+      pending.resolve(signedIn);
+      await launched;
+      expect(table.useTable.getState()).toBe(screen);
+      expect(fetch).not.toHaveBeenCalled();
+      expect(history.replaceState).not.toHaveBeenCalled();
+      expect(Socket.instances).toHaveLength(0);
+    });
   });
 });

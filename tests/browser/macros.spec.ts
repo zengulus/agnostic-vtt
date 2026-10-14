@@ -27,6 +27,7 @@ test('newline file import, generic results, numeric inputs, privacy and recovery
   const gm = await a.newPage(),
     pc = await b.newPage(),
     errors: string[] = [];
+  await Promise.all([gm.clock.install(), pc.clock.install()]);
   gm.on('pageerror', (e) => errors.push(e.message));
   pc.on('pageerror', (e) => errors.push(e.message));
   await create(gm);
@@ -54,6 +55,10 @@ test('newline file import, generic results, numeric inputs, privacy and recovery
   await pc.getByRole('button', { name: 'Macros · import .txt' }).click();
   await pc.getByRole('button', { name: 'Prepare Attack Name', exact: true }).click();
   await pc.getByLabel('Numeric input X').fill('5');
+  // Macro totals auto-dismiss. Pause browser time during review so screenshots
+  // and assertions in one client cannot consume the other's review window.
+  for (const page of [gm, pc])
+    await page.clock.pauseAt(await page.evaluate(() => Date.now() + 1000));
   await pc.getByRole('button', { name: 'Roll macro', exact: true }).click();
   await expect(pc.locator('.roll-overlay .macro-results')).toBeVisible();
   await expect(gm.locator('.roll-overlay .macro-results')).toBeVisible();
@@ -92,6 +97,7 @@ test('newline file import, generic results, numeric inputs, privacy and recovery
   await expect(gm.locator('.roll-overlay .macro-results')).toContainText('Focus Roll:4');
   expect((await roomState(pc)).rolls).toHaveLength(2);
   await gm.getByRole('button', { name: 'Dismiss roll' }).click();
+  await Promise.all([gm.clock.resume(), pc.clock.resume()]);
   await pc.reload();
   await pc.getByRole('button', { name: 'Join your party', exact: true }).click();
   await expect(pc.getByText('Live', { exact: true })).toBeVisible();
@@ -114,6 +120,7 @@ test('newline file import, generic results, numeric inputs, privacy and recovery
   await pc.getByRole('button', { name: 'Prepare Many Rolls', exact: true }).click();
   await expect(pc.getByLabel('Numeric input constructor')).toHaveValue('');
   await pc.getByLabel('Numeric input constructor').fill('5');
+  await pc.clock.pauseAt(await pc.evaluate(() => Date.now() + 1000));
   await pc.getByRole('button', { name: 'Roll macro', exact: true }).click();
   await pc.locator('.roll-overlay .macro-results dt').last().scrollIntoViewIfNeeded();
   await expect(pc.locator('.roll-overlay .macro-results dt').last()).toHaveText('Result8:');

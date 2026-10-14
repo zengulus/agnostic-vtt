@@ -4,7 +4,7 @@ import sharp from 'sharp';
 import type { SupabaseClient } from '@supabase/supabase-js';
 export const UPLOAD_LIMIT = 10 * 1024 * 1024;
 export interface AssetStorage {
-  put(roomId: string, id: string, data: Buffer): Promise<void>;
+  put(roomId: string, id: string, data: Buffer, signal?: AbortSignal): Promise<void>;
   get(roomId: string, id: string): Promise<Buffer>;
   remove(roomId: string, id: string): Promise<void>;
 }
@@ -13,15 +13,19 @@ export class FileAssetStorage implements AssetStorage {
   private path(room: string, id: string) {
     return join(this.dir, 'assets', room, `${id}.webp`);
   }
-  async put(room: string, id: string, data: Buffer) {
+  async put(room: string, id: string, data: Buffer, signal?: AbortSignal) {
     await mkdir(join(this.dir, 'assets', room), { recursive: true });
-    await writeFile(this.path(room, id), data, { mode: 0o600 });
+    await writeFile(this.path(room, id), data, { mode: 0o600, signal });
   }
   async get(room: string, id: string) {
     return readFile(this.path(room, id));
   }
   async remove(room: string, id: string) {
-    await unlink(this.path(room, id));
+    try {
+      await unlink(this.path(room, id));
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error;
+    }
   }
 }
 export class SupabaseAssetStorage implements AssetStorage {

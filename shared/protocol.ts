@@ -13,6 +13,7 @@ import {
   trackerSchema,
 } from './model.js';
 import type { StateChange, Point, Presence, Roll, RoomState } from './model.js';
+import { tokenEditSchema } from './tokenEdits.js';
 const base = { v: z.literal(VERSION), actionId: z.string().min(1).max(80) };
 const sceneId = idSchema;
 export const clientMessageSchema = z.discriminatedUnion('type', [
@@ -40,7 +41,20 @@ export const clientMessageSchema = z.discriminatedUnion('type', [
     tokenId: idSchema,
     position: pointSchema,
   }),
-  z.object({ ...base, type: z.literal('TOKEN_UPDATE'), sceneId, token: tokenSchema }),
+  z.object({
+    ...base,
+    type: z.literal('TOKEN_UPDATE'),
+    sceneId,
+    token: tokenSchema,
+    createOnly: z.boolean().optional(),
+  }),
+  z.object({
+    ...base,
+    type: z.literal('TOKEN_PATCH'),
+    sceneId,
+    tokenId: idSchema,
+    edits: z.array(tokenEditSchema).min(1).max(12),
+  }),
   z.object({ ...base, type: z.literal('TOKEN_DELETE'), sceneId, tokenId: idSchema }),
   z.object({ ...base, type: z.literal('SCENE_UPDATE'), scene: sceneSchema }),
   z.object({

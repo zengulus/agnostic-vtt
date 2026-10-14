@@ -9,79 +9,115 @@ interface ImageEntry {
   failed: boolean;
   used: number;
   bytes: number;
+  attempts: number;
+  retryAt: number;
+  dispose: () => void;
 }
 const imageCache = new Map<string, ImageEntry>();
+const retryDelays = [1000, 4000];
 let imageBytes = 0;
+function removeImage(key: string) {
+  const entry = imageCache.get(key);
+  if (!entry) return;
+  entry.dispose();
+  imageBytes -= entry.bytes;
+  imageCache.delete(key);
+}
 useTable.subscribe((state, previous) => {
   if (
     state.room.id !== previous.room.id ||
     state.self?.id !== previous.self?.id ||
     state.self?.role !== previous.self?.role
   ) {
-    imageCache.clear();
-    imageBytes = 0;
+    for (const key of imageCache.keys()) removeImage(key);
+  } else if (state.status === 'live' && previous.status !== 'live') {
+    // A restored connection is a deliberate new chance for failed private assets.
+    for (const [key, entry] of imageCache) if (entry.failed) removeImage(key);
   }
 });
 export function invalidateImage(asset: Asset, roomId: string) {
-  const key = `${roomId}/${asset.kind}/${asset.url}`;
-  const entry = imageCache.get(key);
-  if (entry) imageBytes -= entry.bytes;
-  imageCache.delete(key);
+  removeImage(`${roomId}/${asset.kind}/${asset.url}`);
 }
 function image(asset: Asset, roomId: string, map: boolean, redraw: () => void): ImageEntry {
   const key = `${roomId}/${asset.kind}/${asset.url}`,
     existing = imageCache.get(key);
   if (existing) {
     existing.used = performance.now();
-    return existing;
+    if (!existing.failed || existing.retryAt > performance.now()) return existing;
+    removeImage(key);
   }
-  const entry: ImageEntry = { image: null, failed: false, used: performance.now(), bytes: 0 };
-  imageCache.set(key, entry);
   const source = new Image();
-  const timeout = setTimeout(() => {
+  let settled = false;
+  let retry: ReturnType<typeof setTimeout> | undefined;
+  const entry: ImageEntry = {
+    image: null,
+    failed: false,
+    used: performance.now(),
+    bytes: 0,
+    attempts: (existing?.attempts || 0) + 1,
+    retryAt: Infinity,
+    dispose: () => {
+      settled = true;
+      clearTimeout(timeout);
+      clearTimeout(retry);
+      source.onload = null;
+      source.onerror = null;
+    },
+  };
+  imageCache.set(key, entry);
+  const current = () => !settled && imageCache.get(key) === entry;
+  const fail = (retryable = true) => {
+    if (!current()) return;
+    entry.dispose();
     entry.failed = true;
+    const delay = retryable ? retryDelays[entry.attempts - 1] : undefined;
+    if (delay !== undefined) {
+      entry.retryAt = performance.now() + delay;
+      retry = setTimeout(() => {
+        if (imageCache.get(key) === entry) redraw();
+      }, delay);
+    }
     redraw();
-  }, 12000);
+  };
+  const timeout = setTimeout(fail, 12000);
   source.onload = () => {
-    clearTimeout(timeout);
-    if (imageCache.get(key) !== entry) return;
+    if (!current()) return;
     if (!source.naturalWidth || source.naturalWidth * source.naturalHeight > 40000000) {
-      entry.failed = true;
-      redraw();
+      fail(false);
       return;
     }
-    const scale = Math.min(1, (map ? 2048 : 256) / Math.max(source.width, source.height)),
-      canvas = document.createElement('canvas');
-    canvas.width = Math.max(1, Math.round(source.width * scale));
-    canvas.height = Math.max(1, Math.round(source.height * scale));
-    canvas.getContext('2d')!.drawImage(source, 0, 0, canvas.width, canvas.height);
-    entry.image = canvas;
-    entry.failed = false;
-    entry.bytes = canvas.width * canvas.height * 4;
-    imageBytes += entry.bytes;
-    while (imageBytes > 64 * 1024 * 1024 && imageCache.size > 1) {
-      const oldest = [...imageCache]
-        .filter(([k]) => k !== key)
-        .sort((a, b) => a[1].used - b[1].used)[0];
-      if (!oldest) break;
-      imageBytes -= oldest[1].bytes;
-      imageCache.delete(oldest[0]);
+    try {
+      const scale = Math.min(1, (map ? 2048 : 256) / Math.max(source.width, source.height)),
+        canvas = document.createElement('canvas');
+      canvas.width = Math.max(1, Math.round(source.width * scale));
+      canvas.height = Math.max(1, Math.round(source.height * scale));
+      const context = canvas.getContext('2d');
+      if (!context) throw new Error('Canvas is unavailable.');
+      context.drawImage(source, 0, 0, canvas.width, canvas.height);
+      entry.dispose();
+      entry.image = canvas;
+      entry.failed = false;
+      entry.bytes = canvas.width * canvas.height * 4;
+      imageBytes += entry.bytes;
+      while (imageBytes > 64 * 1024 * 1024 && imageCache.size > 1) {
+        const oldest = [...imageCache]
+          .filter(([k]) => k !== key)
+          .sort((a, b) => a[1].used - b[1].used)[0];
+        if (!oldest) break;
+        removeImage(oldest[0]);
+      }
+      redraw();
+    } catch {
+      fail();
     }
-    redraw();
   };
-  source.onerror = () => {
-    clearTimeout(timeout);
-    entry.failed = true;
-    redraw();
-  };
+  source.onerror = () => fail();
   source.referrerPolicy = 'no-referrer';
   void resolveAsset(asset, roomId)
-    .then((url) => (source.src = url))
-    .catch(() => {
-      clearTimeout(timeout);
-      entry.failed = true;
-      redraw();
-    });
+    .then((url) => {
+      if (current()) source.src = url;
+    })
+    .catch(() => fail());
   return entry;
 }
 export function polygonPath(ctx: CanvasRenderingContext2D, points: Point[], closed = true) {

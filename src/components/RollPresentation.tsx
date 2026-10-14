@@ -1,9 +1,8 @@
 import { useEffect, useRef, useState } from 'react';
 import { FastForward, X } from 'lucide-react';
 import { useTable } from '../store.js';
-import { physicalDice, predeterminedNotation } from '../../shared/dice.js';
-import type DiceBox from '@3d-dice/dice-box-threejs';
-import { playTone } from '../sound.js';
+import { physicalDice } from '../../shared/dice.js';
+import { startRollAnimation } from '../rollAnimation.js';
 import type { Roll } from '../../shared/model.js';
 import { MacroResults } from './Macros.js';
 export function RollPresentation({ roll }: { roll: Roll }) {
@@ -14,104 +13,29 @@ export function RollPresentation({ roll }: { roll: Roll }) {
       reducedMotion ? 'total' : 'rolling',
     ),
     [fallback, setFallback] = useState(false);
-  const box = useRef<DiceBox | null>(null),
+  const animation = useRef<ReturnType<typeof startRollAnimation> | null>(null),
     container = useRef<HTMLDivElement>(null);
   const stageId = `dice-${roll.id}`;
   useEffect(() => {
-    let cancelled = false,
-      timer: ReturnType<typeof setTimeout> | undefined,
-      deadline: ReturnType<typeof setTimeout> | undefined,
-      observer: ResizeObserver | undefined;
-    const complete = () => {
-      if (cancelled) return;
-      clearTimeout(deadline);
-      setPhase('terms');
-      timer = setTimeout(() => setPhase('total'), 1000 / dice.speed);
-    };
-    if (reducedMotion) return;
-    void (async () => {
-      try {
-        const { createDiceEngine } = await import('../diceEngine.js');
-        if (cancelled) return;
-        const engine = createDiceEngine(
-          `#${stageId}`,
-          {
-            baseScale: 75,
-            framerate: 1 / 60,
-            strength: dice.intensity,
-            iterationLimit: 500,
-            shadows: dice.performance !== 'low',
-            sounds: false,
-            theme_material: dice.material === 'gemstone' ? 'glass' : dice.material,
-            theme_customColorset: {
-              name: 'aether',
-              foreground: dice.ink,
-              background: dice.color,
-              outline: '#152019',
-              edge: dice.presentation === 'moon' ? '#a9c8d0' : '#cfa85c',
-              texture: 'none',
-              material: dice.material === 'gemstone' ? 'glass' : dice.material,
-            },
-          },
-          dice,
-          sound,
-        );
-        box.current = engine;
-        await engine.initialize();
-        if (cancelled) return;
-        observer = new ResizeObserver(() => {
-          if (container.current)
-            engine.setDimensions({
-              x: container.current.clientWidth,
-              y: container.current.clientHeight,
-            });
-        });
-        observer.observe(container.current!);
-        const result = await engine.roll(predeterminedNotation(roll.terms));
-        if (cancelled) return;
-        const expected = physicalDice(roll.terms).map((d) => d.value),
-          actual = result.sets.flatMap((s) => s.rolls.map((r) => r.value));
-        if (expected.some((n, i) => actual[i] !== n)) {
-          setFallback(true);
-          console.warn('Dice renderer mismatch; displaying authoritative values.');
-        }
-        if (sound) playTone(dice.volume);
-        complete();
-      } catch {
-        if (!cancelled) {
-          setFallback(true);
-          complete();
-        }
-      }
-    })();
-    deadline = setTimeout(() => {
-      if (!cancelled) {
-        setPhase('total');
-        setFallback(true);
-        if (box.current) {
-          box.current.running = false;
-        }
-      }
-    }, 18000 / dice.speed);
+    if (reducedMotion) {
+      setPhase('total');
+      return;
+    }
+    setPhase('rolling');
+    setFallback(false);
+    const current = startRollAnimation({
+      selector: `#${stageId}`,
+      container: container.current!,
+      roll,
+      dice,
+      sound,
+      onPhase: setPhase,
+      onFallback: () => setFallback(true),
+    });
+    animation.current = current;
     return () => {
-      cancelled = true;
-      clearTimeout(deadline);
-      if (timer) clearTimeout(timer);
-      observer?.disconnect();
-      const engine = box.current;
-      if (engine) {
-        engine.running = false;
-        for (const die of engine.diceList) {
-          die.geometry.dispose();
-          for (const material of die.material) {
-            material.map?.dispose();
-            material.dispose();
-          }
-        }
-        engine.renderer?.dispose();
-        engine.renderer?.forceContextLoss();
-      }
-      box.current = null;
+      current.cancel();
+      if (animation.current === current) animation.current = null;
     };
   }, [roll.id, reducedMotion, dice, sound, stageId, roll.terms]);
   useEffect(() => {
@@ -150,8 +74,7 @@ export function RollPresentation({ roll }: { roll: Roll }) {
           <button
             aria-label="Skip dice animation"
             onClick={() => {
-              if (box.current) box.current.running = false;
-              setPhase('total');
+              animation.current?.skip();
             }}
           >
             <FastForward size={17} />

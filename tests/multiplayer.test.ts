@@ -321,9 +321,9 @@ describe('real authoritative WebSocket server', () => {
     const gm = await client(owner);
     await gm.wait('ROOM_SNAPSHOT');
     const originalSave = storage.save.bind(storage);
-    vi.spyOn(storage, 'save').mockImplementation(async (snapshot) => {
+    vi.spyOn(storage, 'save').mockImplementation(async (snapshot, version) => {
       await new Promise((r) => setTimeout(r, 60));
-      await originalSave(snapshot);
+      return originalSave(snapshot, version);
     });
     const second = auth.issue('Another player'),
       [a, b] = await Promise.all([client(player), client(second)]);

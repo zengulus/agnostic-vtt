@@ -247,6 +247,7 @@ test('geometry, drawing layers, hidden turns, hex settings and scene changes syn
 test('dice themes persist, minimal arithmetic remains authoritative, and tablet tools stay accessible', async ({
   page,
 }) => {
+  await page.clock.install();
   const messages = observe(page);
   await create(page);
   await page.getByRole('button', { name: 'Settings', exact: true }).click();
@@ -257,6 +258,8 @@ test('dice themes persist, minimal arithmetic remains authoritative, and tablet 
   await page.getByLabel('Performance preset').selectOption('low');
   await page.getByLabel('Arithmetic theme').selectOption('minimal');
   await page.getByRole('button', { name: 'Done', exact: true }).click();
+  // Minimal totals auto-dismiss after 2.8 seconds; inspect them on a held clock.
+  await page.clock.pauseAt(await page.evaluate(() => Date.now() + 1000));
   await page.getByRole('textbox', { name: 'DICE EXPRESSION' }).fill('2d6+5-2');
   await page.getByRole('button', { name: 'Roll the dice' }).click();
   await expect(page.getByTestId('roll-total')).toBeVisible();
@@ -268,6 +271,7 @@ test('dice themes persist, minimal arithmetic remains authoritative, and tablet 
       String(result.roll.total),
     );
   await page.getByRole('button', { name: 'Dismiss roll', exact: true }).click();
+  await page.clock.resume();
   await page.goto('/');
   await page.getByRole('button', { name: 'Settings', exact: true }).click();
   await expect(page.getByRole('combobox', { name: 'Material', exact: true })).toHaveValue(

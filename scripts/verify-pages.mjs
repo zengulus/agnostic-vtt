@@ -31,6 +31,11 @@ try {
     await new Promise((resolve) => setTimeout(resolve, 100));
   }
   if (!ready) throw new Error('Built site did not become ready.');
+  const html = await (await fetch(address)).text();
+  if (html.includes('%BASE_URL%') || /(?:src|href)=["'][^"']*\/src\//.test(html))
+    throw new Error('Static site contains source entrypoints instead of the built dist output.');
+  if (!html.includes(`${base}assets/`))
+    throw new Error('Built entrypoints do not use the configured repository subpath.');
   browser = await chromium.launch({
     executablePath: process.env.PLAYWRIGHT_CHROMIUM_EXECUTABLE,
     args: ['--enable-unsafe-swiftshader'],
