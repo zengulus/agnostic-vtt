@@ -212,6 +212,10 @@ export interface RoomState {
 }
 /** Server-only fields are NEVER included in ROOM_SNAPSHOT. */
 export interface DurableRoom {
+  /** Server-only snapshot CAS counter; independent of gameplay revision. */
+  saveVersion?: number;
+  /** Private, durable Storage cleanup intents, never included in room projections. */
+  assetCleanup?: Record<string, { after: string }>;
   state: RoomState;
   ownerId: string;
   inviteCode: string;

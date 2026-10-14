@@ -1,4 +1,5 @@
 import { expect, test, type Page } from '@playwright/test';
+import { pausePresentationClock } from './helpers/clock.js';
 import sharp from 'sharp';
 import type { ServerMessage } from '../../shared/protocol.js';
 import type { RoomState } from '../../shared/model.js';
@@ -138,7 +139,6 @@ test('local uploads, statuses, independent template placement, group edits and u
   state = await roomState(page);
   expect(state.scenes[state.activeSceneId].map.kind).toBe('uploaded');
   expect(state.scenes[state.activeSceneId].tokens).toEqual({});
-  await page.screenshot({ path: 'test-results/workshop-table.png' });
   expect(errors).toEqual([]);
 });
 
@@ -238,7 +238,6 @@ test('geometry, drawing layers, hidden turns, hex settings and scene changes syn
     .toBe('0');
   await gm.getByRole('button', { name: 'Kael Wanderer', exact: true }).click();
   await expect(gm.getByRole('button', { name: 'Edit token', exact: true })).toBeVisible();
-  await gm.screenshot({ path: 'test-results/workshop-tracker.png' });
   expect(errors).toEqual([]);
   await a.close();
   await b.close();
@@ -247,6 +246,7 @@ test('geometry, drawing layers, hidden turns, hex settings and scene changes syn
 test('dice themes persist, minimal arithmetic remains authoritative, and tablet tools stay accessible', async ({
   page,
 }) => {
+  await page.clock.install();
   const messages = observe(page);
   await create(page);
   await page.getByRole('button', { name: 'Settings', exact: true }).click();
@@ -257,6 +257,8 @@ test('dice themes persist, minimal arithmetic remains authoritative, and tablet 
   await page.getByLabel('Performance preset').selectOption('low');
   await page.getByLabel('Arithmetic theme').selectOption('minimal');
   await page.getByRole('button', { name: 'Done', exact: true }).click();
+  // Minimal totals auto-dismiss after 2.8 seconds; inspect them on a held clock.
+  await pausePresentationClock(page);
   await page.getByRole('textbox', { name: 'DICE EXPRESSION' }).fill('2d6+5-2');
   await page.getByRole('button', { name: 'Roll the dice' }).click();
   await expect(page.getByTestId('roll-total')).toBeVisible();
@@ -268,6 +270,7 @@ test('dice themes persist, minimal arithmetic remains authoritative, and tablet 
       String(result.roll.total),
     );
   await page.getByRole('button', { name: 'Dismiss roll', exact: true }).click();
+  await page.clock.resume();
   await page.goto('/');
   await page.getByRole('button', { name: 'Settings', exact: true }).click();
   await expect(page.getByRole('combobox', { name: 'Material', exact: true })).toHaveValue(
@@ -284,79 +287,6 @@ test('dice themes persist, minimal arithmetic remains authoritative, and tablet 
   await page.getByRole('button', { name: 'Grid settings', exact: true }).click();
   await expect(page.getByLabel('Grid type')).toBeVisible();
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
-  await page.screenshot({ path: 'test-results/workshop-tablet.png' });
-});
-
-test('custom tosses, slower/faster physics and transparent gemstone d4s retain forced faces', async ({
-  page,
-}) => {
-  test.setTimeout(90000);
-  await page.goto('/');
-  const results = await page.evaluate(async () => {
-    const path = '/src/diceEngine.ts',
-      themes = '/shared/diceThemes.ts';
-    const { createDiceEngine } = await import(path),
-      { dicePreferencesSchema } = await import(themes);
-    const element = document.createElement('div');
-    element.id = 'custom-physics';
-    Object.assign(element.style, {
-      position: 'fixed',
-      width: '700px',
-      height: '450px',
-      top: '0',
-      left: '0',
-    });
-    document.body.appendChild(element);
-    const results = [];
-    for (const [toss, speed] of [
-      ['cascade', 0.5],
-      ['orbit', 2],
-    ]) {
-      const appearance = dicePreferencesSchema.parse({
-        toss,
-        speed,
-        opacity: 0.55,
-        material: 'gemstone',
-        performance: toss === 'orbit' ? 'cinematic' : 'low',
-      });
-      const box = createDiceEngine(
-        '#custom-physics',
-        {
-          baseScale: 65,
-          iterationLimit: 600,
-          shadows: toss === 'orbit',
-          sounds: false,
-          theme_customColorset: {
-            name: 'gemstone',
-            foreground: '#ffffff',
-            background: '#506ea8',
-            texture: 'none',
-            material: 'glass',
-          },
-        },
-        appearance,
-      );
-      await box.initialize();
-      const roll = await box.roll('1d4+1d6+1d20@4,6,20');
-      results.push({
-        values: roll.sets.flatMap((s: { rolls: Array<{ value: number }> }) =>
-          s.rolls.map((r) => r.value),
-        ),
-        opacity: box.diceList[0].material[0].opacity,
-        shadowResolution: box.light.shadow.map?.width || 0,
-      });
-      box.running = false;
-      box.renderer.dispose();
-      box.renderer.forceContextLoss();
-      element.replaceChildren();
-    }
-    element.remove();
-    return results;
-  });
-  expect(results).toEqual([
-    { values: [4, 6, 20], opacity: 0.55, shadowResolution: 0 },
-    { values: [4, 6, 20], opacity: 0.55, shadowResolution: 2048 },
-  ]);
 });
 
 test('large hex maps render only the visible grid with one hundred tokens', async ({

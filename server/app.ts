@@ -14,9 +14,18 @@ export function createApp(
   origins: Set<string>,
   assets?: AssetStorage,
 ) {
+  if (assets) manager.setAssetStorage(assets);
   let decoding = 0;
   const assetCache = new Map<string, Buffer>();
+  const pendingAssetReads = new Map<string, Promise<Buffer>>();
+  const assetCacheLimit = 16 * 1024 * 1024;
   let cacheBytes = 0;
+  const invalidateAssetCache = (key: string) => {
+    const cached = assetCache.get(key);
+    if (cached) cacheBytes -= cached.length;
+    assetCache.delete(key);
+    pendingAssetReads.delete(key);
+  };
   const json = (res: ServerResponse, status: number, value: unknown) => {
     res.writeHead(status, { 'Content-Type': 'application/json', 'Cache-Control': 'no-store' });
     res.end(JSON.stringify(value));
@@ -128,14 +137,35 @@ export function createApp(
           const key = `${roomId}/${id}`;
           let data = assetCache.get(key);
           if (!data) {
-            data = await assets.get(roomId, id);
-            while (cacheBytes + data.length > 16 * 1024 * 1024 && assetCache.size) {
-              const first = assetCache.keys().next().value!;
-              cacheBytes -= assetCache.get(first)!.length;
-              assetCache.delete(first);
+            let pending = pendingAssetReads.get(key);
+            if (!pending) {
+              pending = assets
+                .get(roomId, id)
+                .then((download) => {
+                  // A deleted image must not repopulate the cache from an older read.
+                  // Oversized images can be served without evicting the bounded cache.
+                  if (
+                    pendingAssetReads.get(key) === pending &&
+                    download.length <= assetCacheLimit
+                  ) {
+                    while (cacheBytes + download.length > assetCacheLimit && assetCache.size) {
+                      const first = assetCache.keys().next().value!;
+                      cacheBytes -= assetCache.get(first)!.length;
+                      assetCache.delete(first);
+                    }
+                    assetCache.set(key, download);
+                    cacheBytes += download.length;
+                  }
+                  return download;
+                })
+                .finally(() => {
+                  if (pendingAssetReads.get(key) === pending) pendingAssetReads.delete(key);
+                });
+              pendingAssetReads.set(key, pending);
             }
-            assetCache.set(key, data);
-            cacheBytes += data.length;
+            data = await pending;
+            // Access may have changed while this request waited on shared storage.
+            await manager.assetReadable(roomId, id, user.id);
           }
           res.writeHead(200, {
             'Content-Type': 'image/webp',
@@ -177,13 +207,7 @@ export function createApp(
               createdAt: new Date().toISOString(),
               createdBy: user.id,
             };
-            await assets.put(roomId, assetId, image.data);
-            try {
-              await manager.registerAsset(roomId, user.id, metadata);
-            } catch (error) {
-              await assets.remove(roomId, assetId).catch(() => {});
-              throw error;
-            }
+            await manager.uploadAsset(roomId, user.id, metadata, image.data);
             json(res, 201, { asset: { kind: 'uploaded', url: assetId }, ...metadata });
             return;
           } finally {
@@ -191,12 +215,11 @@ export function createApp(
           }
         }
         if (id && req.method === 'DELETE') {
-          await manager.removeAsset(roomId, id, user.id);
-          await assets.remove(roomId, id);
-          const key = `${roomId}/${id}`,
-            cached = assetCache.get(key);
-          if (cached) cacheBytes -= cached.length;
-          assetCache.delete(key);
+          try {
+            await manager.removeAsset(roomId, id, user.id);
+          } finally {
+            invalidateAssetCache(`${roomId}/${id}`);
+          }
           json(res, 200, { ok: true });
           return;
         }

@@ -7,6 +7,7 @@ import {
   launchDemo,
   liveAvailable,
   send,
+  sendAndWait,
   supabase,
   uploadImage,
   savedCampaigns,
@@ -24,6 +25,51 @@ import { MacroLibraryDialog } from './Macros.js';
 import { DiscordSettings } from './DiscordSettings.js';
 import { unlockSound } from '../sound.js';
 import type { Asset, Token } from '../../shared/model.js';
+import { saveTokenDraft } from '../tokenSave.js';
+
+/** A form belongs to the room, scene and identity where it opened, even between renders. */
+function useSceneDialog(dialog: 'map' | 'token' | 'grid') {
+  const [context] = useState(() => {
+    const s = useTable.getState();
+    return {
+      roomId: s.room.id,
+      scene: s.room.scenes[s.room.activeSceneId],
+      userId: s.self?.id,
+      role: s.self?.role,
+    };
+  });
+  const invalidated = useRef(false);
+  const matches = (s: ReturnType<typeof useTable.getState>) =>
+    s.room.id === context.roomId &&
+    s.room.activeSceneId === context.scene.id &&
+    !!s.room.scenes[context.scene.id] &&
+    s.self?.id === context.userId &&
+    s.self?.role === context.role;
+  useEffect(() => {
+    invalidated.current = false;
+    const check = (s: ReturnType<typeof useTable.getState>) => {
+      if (!matches(s)) {
+        invalidated.current = true;
+        if (s.dialog === dialog) s.set({ dialog: null });
+      }
+    };
+    const unsubscribe = useTable.subscribe(check);
+    check(useTable.getState());
+    return () => {
+      invalidated.current = true;
+      unsubscribe();
+    };
+  }, [context, dialog]);
+  return {
+    scene: context.scene,
+    currentScene: () => {
+      const s = useTable.getState();
+      return !invalidated.current && matches(s) && s.dialog === dialog
+        ? s.room.scenes[context.scene.id]
+        : undefined;
+    },
+  };
+}
 export function Dialogs() {
   const s = useTable(),
     ref = useRef<HTMLDivElement>(null);
@@ -461,11 +507,13 @@ function Launch() {
 function AssetPicker({
   asset,
   onChange,
+  onBusyChange,
   purpose = 'map',
 }: {
   asset: Asset;
   purpose?: 'map' | 'token';
   onChange: (a: Asset, width?: number, height?: number) => void;
+  onBusyChange?: (busy: boolean) => void;
 }) {
   const [url, setUrl] = useState(asset.kind === 'external' ? asset.url : ''),
     [preview, setPreview] = useState<string | undefined>(
@@ -473,20 +521,25 @@ function AssetPicker({
     ),
     [error, setError] = useState(''),
     [busy, setBusy] = useState(false);
+  const setLoading = (value: boolean) => {
+    setBusy(value);
+    onBusyChange?.(value);
+  };
   const generation = useRef(0),
     active = useRef(true);
-  useEffect(
-    () => () => {
+  useEffect(() => {
+    active.current = true;
+    return () => {
       active.current = false;
       generation.current++;
-    },
-    [],
-  );
+    };
+  }, []);
   const roomId = useTable((state) => state.room.id),
     gm = useTable((state) => state.self?.role === 'gm'),
     demo = useTable((state) => state.status === 'demo');
   useEffect(() => {
     let current = true;
+    setUrl(asset.kind === 'external' ? asset.url : '');
     void resolveAsset(asset, roomId)
       .then((uri) => {
         if (current) setPreview(uri);
@@ -500,25 +553,27 @@ function AssetPicker({
   }, [asset.kind, asset.url, roomId]);
   async function upload(file: File) {
     const n = ++generation.current;
-    setBusy(true);
+    setLoading(true);
     setError('');
     try {
       const result = await uploadImage(file, purpose);
+      if (!active.current || n !== generation.current) return;
+      invalidateImage(result.asset, roomId);
+      const uri = await resolveAsset(result.asset, roomId);
       if (active.current && n === generation.current) {
-        invalidateImage(result.asset, roomId);
-        setPreview(await resolveAsset(result.asset, roomId));
+        setPreview(uri);
         onChange(result.asset, result.width, result.height);
       }
     } catch (e) {
-      if (active.current) setError((e as Error).message);
+      if (active.current && n === generation.current) setError((e as Error).message);
     } finally {
-      if (active.current) setBusy(false);
+      if (active.current && n === generation.current) setLoading(false);
     }
   }
   async function check() {
     const n = ++generation.current;
     setError('');
-    setBusy(true);
+    setLoading(true);
     try {
       const next: Asset = { kind: 'external', url };
       validateAsset(next);
@@ -549,13 +604,14 @@ function AssetPicker({
         image.src = url;
       });
       if (active.current && n === generation.current) {
+        invalidateImage(next, roomId);
         setPreview(url);
         onChange(next, dimensions.w, dimensions.h);
       }
     } catch (e) {
       if (active.current && n === generation.current) setError((e as Error).message);
     } finally {
-      if (active.current && n === generation.current) setBusy(false);
+      if (active.current && n === generation.current) setLoading(false);
     }
   }
   return (
@@ -626,7 +682,7 @@ function AssetPicker({
 }
 function MapDialog() {
   const s = useTable(),
-    scene = s.room.scenes[s.room.activeSceneId],
+    { scene, currentScene } = useSceneDialog('map'),
     gm = s.self?.role === 'gm';
   const [asset, setAsset] = useState<Asset>(scene.map),
     [name, setName] = useState(scene.name),
@@ -637,7 +693,7 @@ function MapDialog() {
     <form
       onSubmit={(e) => {
         e.preventDefault();
-        if (!gm) return;
+        if (!gm || !currentScene()) return;
         send({
           type: 'SCENE_CONFIG',
           sceneId: create ? crypto.randomUUID() : scene.id,
@@ -717,9 +773,11 @@ function MapIcon() {
 }
 function TokenDialog() {
   const s = useTable(),
-    scene = s.room.scenes[s.room.activeSceneId],
-    existing = s.selected ? scene.tokens[s.selected] : undefined,
+    { scene, currentScene } = useSceneDialog('token'),
     gm = s.self?.role === 'gm';
+  const [existing, setExisting] = useState(() =>
+    s.selected ? scene.tokens[s.selected] : undefined,
+  );
   const [token, setToken] = useState<Token>(
     existing || {
       id: crypto.randomUUID(),
@@ -736,236 +794,289 @@ function TokenDialog() {
     },
   );
   const [saveTemplate, setSaveTemplate] = useState(false),
+    [assetBusy, setAssetBusy] = useState(false),
+    [saving, setSaving] = useState(false),
+    [saveError, setSaveError] = useState(''),
     [statusLabel, setStatusLabel] = useState(''),
     [statusIcon, setStatusIcon] = useState<'star' | 'shield' | 'flame' | 'eye' | 'circle'>('star');
-  const update = (value: Partial<Token>) => setToken({ ...token, ...value });
+  const update = (value: Partial<Token>) => setToken((current) => ({ ...current, ...value }));
   return (
     <form
-      onSubmit={(e) => {
+      onSubmit={async (e) => {
         e.preventDefault();
-        if (!gm) return;
-        send({ type: 'TOKEN_UPDATE', sceneId: scene.id, token });
-        if (saveTemplate)
-          send({ type: 'LIBRARY_SAVE', token: { ...token, id: crypto.randomUUID() } });
-        s.set({ dialog: null, selected: token.id, selectedIds: [token.id] });
+        if (!gm || saving || assetBusy || !currentScene()) return;
+        setSaving(true);
+        setSaveError('');
+        try {
+          const saved = await saveTokenDraft(
+            { sceneId: scene.id, original: existing, token, saveTemplate },
+            {
+              currentScene,
+              send: sendAndWait,
+              accepted: (saved) => {
+                setExisting(saved);
+                setToken(saved);
+              },
+            },
+          );
+          if (saved && currentScene())
+            s.set({ dialog: null, selected: saved.id, selectedIds: [saved.id] });
+        } catch (error) {
+          if (currentScene()) {
+            setSaveError(error instanceof Error ? error.message : 'Could not save token.');
+            // A lost confirmation may hide a successful creation. Fetch it before offering reload;
+            // createOnly also protects a retry when this snapshot has not arrived yet.
+            if (!existing) send({ type: 'STATE_RESYNC' });
+          }
+        } finally {
+          if (currentScene()) setSaving(false);
+        }
       }}
     >
-      <AssetPicker purpose="token" asset={token.image} onChange={(image) => update({ image })} />
-      <label>
-        Name
-        <input
-          value={token.name}
-          onChange={(e) => update({ name: e.target.value })}
-          maxLength={48}
-          required
-          disabled={!gm}
+      <fieldset disabled={saving} style={{ border: 0, padding: 0, margin: 0, minWidth: 0 }}>
+        <AssetPicker
+          purpose="token"
+          asset={token.image}
+          onChange={(image) => update({ image })}
+          onBusyChange={setAssetBusy}
         />
-      </label>
-      <div className="form-row">
         <label>
-          Size (scene pixels)
+          Name
           <input
-            type="number"
-            value={token.size}
-            onChange={(e) => update({ size: Number(e.target.value) })}
-            min={24}
-            max={240}
+            value={token.name}
+            onChange={(e) => update({ name: e.target.value })}
+            maxLength={48}
             required
             disabled={!gm}
           />
         </label>
-        <label>
-          Rotation
-          <input
-            type="number"
-            value={token.rotation}
-            onChange={(e) => update({ rotation: Number(e.target.value) })}
-            min={-360}
-            max={360}
-            required
-            disabled={!gm}
-          />
-        </label>
-        <label>
-          Ring colour
-          <input
-            type="color"
-            value={token.color}
-            onChange={(e) => update({ color: e.target.value })}
-            disabled={!gm}
-          />
-        </label>
-      </div>
-      <div className="form-row">
-        <label>
-          Visibility
-          <select
-            value={token.visibility}
-            onChange={(e) => update({ visibility: e.target.value as Token['visibility'] })}
-            disabled={!gm}
-          >
-            <option value="public">Visible to party</option>
-            <option value="gm">Game master only</option>
-          </select>
-        </label>
-        <label>
-          Who can move it?
-          <select
-            value={token.owners.includes('*') ? '*' : token.owners[0] || 'gm'}
-            onChange={(e) => update({ owners: e.target.value === 'gm' ? [] : [e.target.value] })}
-            disabled={!gm}
-          >
-            <option value="*">Everyone</option>
-            <option value="gm">Game master only</option>
-            {s.presence.map((p) => (
-              <option key={p.id} value={p.id}>
-                {p.name}
-              </option>
-            ))}
-          </select>
-        </label>
-      </div>
-      <div className="form-row">
-        <label>
-          Resource label
-          <input
-            value={token.resource?.label || ''}
-            onChange={(e) =>
-              update({
-                resource: {
-                  label: e.target.value,
-                  value: token.resource?.value || 0,
-                  max: token.resource?.max || 10,
-                },
-              })
-            }
-            maxLength={16}
-            disabled={!gm}
-          />
-        </label>
-        <label>
-          Current
-          <input
-            type="number"
-            min={0}
-            max={10000}
-            value={token.resource?.value || 0}
-            onChange={(e) =>
-              update({ resource: { ...token.resource!, value: Number(e.target.value) } })
-            }
-            disabled={!gm}
-          />
-        </label>
-        <label>
-          Maximum
-          <input
-            type="number"
-            min={1}
-            max={10000}
-            value={token.resource?.max || 10}
-            onChange={(e) =>
-              update({ resource: { ...token.resource!, max: Number(e.target.value) } })
-            }
-            disabled={!gm}
-          />
-        </label>
-      </div>
-      {gm && (
-        <div className="status-editor">
-          <span className="eyebrow">TOKEN STATUSES</span>
-          <div className="status-chips">
-            {(token.statuses || []).map((status) => (
-              <button
-                key={status.id}
-                type="button"
-                onClick={() =>
-                  update({ statuses: token.statuses!.filter((t) => t.id !== status.id) })
-                }
-                style={{ color: status.color }}
-              >
-                {status.label} ×
-              </button>
-            ))}
-          </div>
-          <div className="form-row">
-            <label>
-              Status label
-              <input
-                value={statusLabel}
-                onChange={(e) => setStatusLabel(e.target.value)}
-                maxLength={24}
-              />
-            </label>
-            <label>
-              Symbol
-              <select
-                value={statusIcon}
-                onChange={(e) => setStatusIcon(e.target.value as typeof statusIcon)}
-              >
-                {['star', 'shield', 'flame', 'eye', 'circle'].map((v) => (
-                  <option key={v}>{v}</option>
-                ))}
-              </select>
-            </label>
-            <button
-              type="button"
-              aria-label="Add status"
-              disabled={!statusLabel.trim() || (token.statuses?.length || 0) >= 8}
-              onClick={() => {
-                update({
-                  statuses: [
-                    ...(token.statuses || []),
-                    {
-                      id: crypto.randomUUID(),
-                      label: statusLabel.trim(),
-                      color: token.color,
-                      icon: statusIcon,
-                    },
-                  ],
-                });
-                setStatusLabel('');
-              }}
-            >
-              <Plus size={16} />
-            </button>
-          </div>
-          <label className="check-label">
+        <div className="form-row">
+          <label>
+            Size (scene pixels)
             <input
-              type="checkbox"
-              checked={saveTemplate}
-              onChange={(e) => setSaveTemplate(e.target.checked)}
+              type="number"
+              value={token.size}
+              onChange={(e) => update({ size: Number(e.target.value) })}
+              min={24}
+              max={240}
+              required
+              disabled={!gm}
             />
-            Also save a reusable token template
+          </label>
+          <label>
+            Rotation
+            <input
+              type="number"
+              value={token.rotation}
+              onChange={(e) => update({ rotation: Number(e.target.value) })}
+              min={-360}
+              max={360}
+              required
+              disabled={!gm}
+            />
+          </label>
+          <label>
+            Ring colour
+            <input
+              type="color"
+              value={token.color}
+              onChange={(e) => update({ color: e.target.value })}
+              disabled={!gm}
+            />
           </label>
         </div>
-      )}
-      {gm && (
-        <>
+        <div className="form-row">
           <label>
-            GM note
-            <textarea
-              value={token.note || ''}
-              onChange={(e) => update({ note: e.target.value })}
-              maxLength={2000}
-              rows={2}
+            Visibility
+            <select
+              value={token.visibility}
+              onChange={(e) => update({ visibility: e.target.value as Token['visibility'] })}
+              disabled={!gm}
+            >
+              <option value="public">Visible to party</option>
+              <option value="gm">Game master only</option>
+            </select>
+          </label>
+          <label>
+            Who can move it?
+            <select
+              value={token.owners.includes('*') ? '*' : token.owners[0] || 'gm'}
+              onChange={(e) => update({ owners: e.target.value === 'gm' ? [] : [e.target.value] })}
+              disabled={!gm}
+            >
+              <option value="*">Everyone</option>
+              <option value="gm">Game master only</option>
+              {s.presence.map((p) => (
+                <option key={p.id} value={p.id}>
+                  {p.name}
+                </option>
+              ))}
+            </select>
+          </label>
+        </div>
+        <div className="form-row">
+          <label>
+            Resource label
+            <input
+              value={token.resource?.label || ''}
+              onChange={(e) =>
+                update({
+                  resource: {
+                    label: e.target.value,
+                    value: token.resource?.value || 0,
+                    max: token.resource?.max || 10,
+                  },
+                })
+              }
+              maxLength={16}
+              disabled={!gm}
             />
           </label>
-          <p className="field-note">
-            <Lock size={11} /> GM notes and hidden tokens are filtered on the server.
-          </p>
-          <button className="primary modal-submit">
-            <Plus size={16} />
-            {existing ? 'Save token' : 'Add to the table'}
-            <Check size={16} />
-          </button>
-        </>
-      )}
+          <label>
+            Current
+            <input
+              type="number"
+              min={0}
+              max={10000}
+              value={token.resource?.value || 0}
+              onChange={(e) =>
+                update({ resource: { ...token.resource!, value: Number(e.target.value) } })
+              }
+              disabled={!gm}
+            />
+          </label>
+          <label>
+            Maximum
+            <input
+              type="number"
+              min={1}
+              max={10000}
+              value={token.resource?.max || 10}
+              onChange={(e) =>
+                update({ resource: { ...token.resource!, max: Number(e.target.value) } })
+              }
+              disabled={!gm}
+            />
+          </label>
+        </div>
+        {gm && (
+          <div className="status-editor">
+            <span className="eyebrow">TOKEN STATUSES</span>
+            <div className="status-chips">
+              {(token.statuses || []).map((status) => (
+                <button
+                  key={status.id}
+                  type="button"
+                  onClick={() =>
+                    update({ statuses: token.statuses!.filter((t) => t.id !== status.id) })
+                  }
+                  style={{ color: status.color }}
+                >
+                  {status.label} ×
+                </button>
+              ))}
+            </div>
+            <div className="form-row">
+              <label>
+                Status label
+                <input
+                  value={statusLabel}
+                  onChange={(e) => setStatusLabel(e.target.value)}
+                  maxLength={24}
+                />
+              </label>
+              <label>
+                Symbol
+                <select
+                  value={statusIcon}
+                  onChange={(e) => setStatusIcon(e.target.value as typeof statusIcon)}
+                >
+                  {['star', 'shield', 'flame', 'eye', 'circle'].map((v) => (
+                    <option key={v}>{v}</option>
+                  ))}
+                </select>
+              </label>
+              <button
+                type="button"
+                aria-label="Add status"
+                disabled={!statusLabel.trim() || (token.statuses?.length || 0) >= 8}
+                onClick={() => {
+                  update({
+                    statuses: [
+                      ...(token.statuses || []),
+                      {
+                        id: crypto.randomUUID(),
+                        label: statusLabel.trim(),
+                        color: token.color,
+                        icon: statusIcon,
+                      },
+                    ],
+                  });
+                  setStatusLabel('');
+                }}
+              >
+                <Plus size={16} />
+              </button>
+            </div>
+            <label className="check-label">
+              <input
+                type="checkbox"
+                checked={saveTemplate}
+                onChange={(e) => setSaveTemplate(e.target.checked)}
+              />
+              Also save a reusable token template
+            </label>
+          </div>
+        )}
+        {gm && (
+          <>
+            <label>
+              GM note
+              <textarea
+                value={token.note || ''}
+                onChange={(e) => update({ note: e.target.value })}
+                maxLength={2000}
+                rows={2}
+              />
+            </label>
+            <p className="field-note">
+              <Lock size={11} /> GM notes and hidden tokens are filtered on the server.
+            </p>
+            {saveError && (
+              <>
+                <p className="form-error" role="alert">
+                  {saveError}
+                </p>
+                {(existing || currentScene()?.tokens[token.id]) && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      const latest = currentScene()?.tokens[token.id];
+                      if (!latest) return;
+                      setExisting(latest);
+                      setToken(latest);
+                      setSaveError('');
+                    }}
+                  >
+                    Reload latest token values
+                  </button>
+                )}
+              </>
+            )}
+            <button className="primary modal-submit" disabled={saving || assetBusy}>
+              <Plus size={16} />
+              {saving ? 'Saving…' : existing ? 'Save token' : 'Add to the table'}
+              <Check size={16} />
+            </button>
+          </>
+        )}
+      </fieldset>
     </form>
   );
 }
 function GridDialog() {
   const s = useTable(),
-    scene = s.room.scenes[s.room.activeSceneId],
+    { scene, currentScene } = useSceneDialog('grid'),
     gm = s.self?.role === 'gm',
     [grid, setGrid] = useState(scene.grid);
   const update = (v: Partial<typeof grid>) => setGrid({ ...grid, ...v });
@@ -973,10 +1084,16 @@ function GridDialog() {
     <form
       onSubmit={(e) => {
         e.preventDefault();
+        const current = currentScene();
+        if (!current) return;
         if (gm) send({ type: 'GRID_UPDATE', sceneId: scene.id, grid });
         else if (!s.self) {
+          const latest = useTable.getState();
           s.set({
-            room: { ...s.room, scenes: { ...s.room.scenes, [scene.id]: { ...scene, grid } } },
+            room: {
+              ...latest.room,
+              scenes: { ...latest.room.scenes, [scene.id]: { ...current, grid } },
+            },
           });
         }
         s.set({ dialog: null });

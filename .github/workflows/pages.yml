@@ -10,10 +10,39 @@ concurrency:
   group: pages-${{ github.ref }}
   cancel-in-progress: true
 jobs:
+  persistence:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:17
+        env:
+          POSTGRES_PASSWORD: disposable-test-password
+          POSTGRES_DB: tabletop_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+      - name: Verify snapshot migration and concurrent writers in PostgreSQL
+        run: bash scripts/test-persistence.sh
+        env:
+          PGHOST: 127.0.0.1
+          PGPORT: 5432
+          PGUSER: postgres
+          PGPASSWORD: disposable-test-password
+          PGDATABASE: tabletop_test
   build:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
       - uses: actions/setup-node@v4
         with:
           node-version: '24'
@@ -33,14 +62,49 @@ jobs:
           VITE_BASE_PATH: ${{ vars.VITE_BASE_PATH || format('/{0}/', github.event.repository.name) }}
       - name: Verify hosted login and campaign entry with mocked services
         run: npm run test:hosted
-      - run: npm run test:e2e
       - uses: actions/upload-pages-artifact@v3
         if: github.event_name != 'pull_request' && github.ref == format('refs/heads/{0}', github.event.repository.default_branch)
         with:
           path: dist
+  browser:
+    name: browser (${{ matrix.suite }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        suite:
+          - connection-cancellation
+          - dialogs
+          - macros
+          - physical-dice
+          - roll-presentation
+          - tabletop
+          - workshop
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          cache: npm
+      - run: npm ci
+      - run: npx playwright install --with-deps chromium
+      # Each suite gets a fresh browser and backend, including independent rate
+      # limits and local snapshots. Keep production limits unchanged.
+      - name: Run browser regressions
+        run: npm run test:e2e -- tests/browser/${{ matrix.suite }}.spec.ts
+      - name: Preserve browser failure evidence
+        uses: actions/upload-artifact@v4
+        if: failure()
+        with:
+          name: browser-failure-evidence-${{ matrix.suite }}
+          path: test-results/
+          if-no-files-found: ignore
+          retention-days: 7
   deploy:
     if: github.event_name != 'pull_request' && github.ref == format('refs/heads/{0}', github.event.repository.default_branch)
-    needs: build
+    needs: [build, persistence, browser]
     permissions:
       pages: write
       id-token: write

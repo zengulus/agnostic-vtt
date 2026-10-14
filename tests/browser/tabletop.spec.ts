@@ -1,4 +1,5 @@
 import { expect, test, type Page } from '@playwright/test';
+import { pausePresentationClock } from './helpers/clock.js';
 import type { ServerMessage } from '../../shared/protocol.js';
 function observe(page: Page) {
   const messages: ServerMessage[] = [];
@@ -24,8 +25,13 @@ test('independent browser clients move tokens, share dice/chat, and reconnect', 
 }) => {
   const a = await browser.newContext(),
     b = await browser.newContext();
+  for (const context of [a, b])
+    await context.addInitScript(() =>
+      localStorage.setItem('aether-settings', JSON.stringify({ reducedMotion: true })),
+    );
   const gm = await a.newPage(),
     pc = await b.newPage();
+  await Promise.all([gm.clock.install(), pc.clock.install()]);
   const gmMessages = observe(gm),
     pcMessages = observe(pc),
     errors: string[] = [];
@@ -65,6 +71,9 @@ test('independent browser clients move tokens, share dice/chat, and reconnect', 
       ),
     )
     .toBeTruthy();
+  // This checks shared authoritative results; the physical-face scenario below
+  // exercises the real renderer. Hold auto-dismiss while inspecting both clients.
+  for (const page of [gm, pc]) await pausePresentationClock(page);
   await gm.getByRole('textbox', { name: 'DICE EXPRESSION' }).fill('1d20 + 5 - 2');
   await gm.getByRole('button', { name: 'Roll the dice' }).click();
   await expect.poll(() => gmMessages.find((m) => m.type === 'DICE_ROLL_RESULT')).toBeTruthy();
@@ -73,15 +82,12 @@ test('independent browser clients move tokens, share dice/chat, and reconnect', 
     pcRoll = pcMessages.find((m) => m.type === 'DICE_ROLL_RESULT')!;
   expect(gmRoll).toEqual(pcRoll);
   if (gmRoll.type === 'DICE_ROLL_RESULT') {
-    await expect(gm.getByTestId('roll-total')).toContainText(String(gmRoll.roll.total), {
-      timeout: 16000,
-    });
-    await expect(pc.getByTestId('roll-total')).toContainText(String(gmRoll.roll.total), {
-      timeout: 16000,
-    });
+    await expect(gm.getByTestId('roll-total')).toContainText(String(gmRoll.roll.total));
+    await expect(pc.getByTestId('roll-total')).toContainText(String(gmRoll.roll.total));
   }
   await gm.getByRole('button', { name: 'Dismiss roll' }).click();
   await pc.getByRole('button', { name: 'Dismiss roll' }).click();
+  await Promise.all([gm.clock.resume(), pc.clock.resume()]);
   await pc.getByRole('button', { name: 'Party chat', exact: true }).click();
   await pc.getByRole('textbox', { name: 'Message your party' }).fill('The crossing looks safe.');
   await pc.getByRole('button', { name: 'Send message' }).click();
@@ -103,6 +109,7 @@ test('independent browser clients move tokens, share dice/chat, and reconnect', 
   await b.close();
 });
 test('keyboard activation works alongside tabletop shortcuts', async ({ page }) => {
+  await page.clock.install();
   await page.addInitScript(() =>
     localStorage.setItem('aether-settings', JSON.stringify({ reducedMotion: true })),
   );
@@ -114,14 +121,20 @@ test('keyboard activation works alongside tabletop shortcuts', async ({ page }) 
   await page.keyboard.press('Escape');
   await expect(launch).toBeFocused();
   await page.keyboard.press('Enter');
-  await page.getByRole('button', { name: 'Create campaign' }).click();
-  await expect(page.getByText('Live', { exact: true })).toBeVisible();
+  // Keyboard behavior does not depend on live campaign creation or socket readiness.
+  await page.getByRole('dialog').getByRole('button', { name: 'Demo', exact: true }).focus();
+  await page.keyboard.press('Enter');
+  await expect(page.getByRole('dialog')).toHaveCount(0);
+  await expect(page.getByText('Demo', { exact: true })).toBeVisible();
+  // Test keyboard dismissal without racing the minimal result's 2.8s auto-dismiss.
+  await pausePresentationClock(page);
   await page.getByRole('button', { name: 'Roll the dice' }).focus();
   await page.keyboard.press('Enter');
   await expect(page.getByTestId('roll-total')).toBeVisible();
   await page.getByRole('button', { name: 'Dismiss roll' }).focus();
   await page.keyboard.press('Space');
   await expect(page.getByTestId('roll-total')).toHaveCount(0);
+  await page.clock.resume();
   await page.evaluate(() => (document.activeElement as HTMLElement).blur());
   await page.keyboard.press('m');
   await expect(page.getByRole('button', { name: 'Measure', exact: true })).toHaveClass(/active/);
@@ -203,73 +216,17 @@ test('map/token URL preview, errors, resizing, and accessible preferences work',
   await expect(page.getByTestId('roll-total')).toBeVisible();
   await expect(page.locator('.physical-dice')).toHaveCount(0);
 });
-test('physical dice show predetermined d20, mixed polyhedra, and percentile faces', async ({
-  page,
-}) => {
-  await page.goto('/');
-  const results = await page.evaluate(async () => {
-    const element = document.createElement('div');
-    element.id = 'physics-test';
-    Object.assign(element.style, {
-      position: 'fixed',
-      width: '800px',
-      height: '550px',
-      top: '0',
-      left: '0',
-      zIndex: '100',
-    });
-    document.body.appendChild(element);
-    // Test the actual renderer installed by the app, rather than a mocked animation.
-    const modulePath = '/src/diceEngine.ts';
-    const { createDiceEngine } = await import(modulePath);
-    const box = createDiceEngine('#physics-test', {
-      baseScale: 65,
-      iterationLimit: 400,
-      theme_customColorset: {
-        name: 'test',
-        foreground: '#fff1d1',
-        background: '#52694d',
-        texture: 'none',
-        material: 'metal',
-      },
-    });
-    await box.initialize();
-    const results = [];
-    for (const notation of [
-      '1d20@14',
-      '1d4+1d6+1d8+1d10+1d12+1d20@3,5,7,8,11,19',
-      '4d4@1,2,3,4',
-      '1d100+1d10@60,7',
-      '1d100+1d10@100,10',
-    ]) {
-      const rolled = await box.roll(notation);
-      results.push(
-        rolled.sets.flatMap((s: { rolls: Array<{ value: number }> }) =>
-          s.rolls.map((r) => r.value),
-        ),
-      );
-    }
-    box.running = false;
-    box.renderer.dispose();
-    box.renderer.forceContextLoss();
-    element.remove();
-    return results;
-  });
-  expect(results).toEqual([[14], [3, 5, 7, 8, 11, 19], [1, 2, 3, 4], [60, 7], [100, 10]]);
-});
 test('desktop and tablet render without errors or overflowing the viewport', async ({ page }) => {
   const errors: string[] = [];
   page.on('pageerror', (e) => errors.push(e.message));
   await page.goto('/');
   await expect(page.getByRole('heading', { name: 'The next chapter.' })).toBeVisible();
-  await page.screenshot({ path: 'test-results/tabletop-desktop.png' });
   await page.setViewportSize({ width: 820, height: 1180 });
   await expect(page.getByRole('button', { name: 'Log in' })).toBeVisible();
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
   await page.setViewportSize({ width: 390, height: 844 });
   await expect(page.getByRole('button', { name: 'Log in' })).toBeVisible();
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
-  await page.screenshot({ path: 'test-results/tabletop-mobile.png' });
   expect(errors).toEqual([]);
 });
 
