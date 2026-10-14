@@ -1,3 +1,5 @@
+import { createHash } from 'node:crypto';
+import { macroDigest, sha256 } from '../shared/macroDigest.js';
 import { describe, expect, it } from 'vitest';
 import { prepareAction } from '../shared/actions.js';
 import { applyChanges, inverseChanges } from '../shared/state.js';
@@ -60,7 +62,9 @@ describe('safe revised macro imports', () => {
         type: 'MACRO_IMPORT',
         text: revised,
         visibility: 'public',
-        replacements: [{ line: 1, id: 'attack', version: 0 }],
+        replacements: [
+          { line: 1, id: 'attack', digest: macroDigest(setup().state.macros!.attack) },
+        ],
       }),
       () => 1,
     );
@@ -69,7 +73,6 @@ describe('safe revised macro imports', () => {
     expect(next.macros?.attack).toEqual({
       ...room.state.macros!.attack,
       source: revised,
-      version: room.state.revision + 1,
     });
   });
   it('rejects stale previews atomically, including new macros in the same import', () => {
@@ -84,7 +87,9 @@ describe('safe revised macro imports', () => {
           type: 'MACRO_IMPORT',
           text: `${original}\n[Heal]([HP(d6)])`,
           visibility: 'public',
-          replacements: [{ line: 1, id: 'attack', version: 0 }],
+          replacements: [
+            { line: 1, id: 'attack', digest: macroDigest(setup().state.macros!.attack) },
+          ],
         }),
         () => 1,
       ),
@@ -102,32 +107,67 @@ describe('safe revised macro imports', () => {
           type: 'MACRO_IMPORT',
           text: revised,
           visibility: 'public',
-          replacements: [{ line: 1, id: 'attack', version: 0 }],
+          replacements: [
+            { line: 1, id: 'attack', digest: macroDigest(setup().state.macros!.attack) },
+          ],
         }),
         () => 1,
       ),
     ).toThrow('changed since');
   });
-  it('does not reuse replacement guards after undo followed by a different edit', () => {
-    const room = setup();
-    const replace = (text: string, version: number) =>
+  it('rejects a stale preview after crash rollback, a different edit at the same revision and reconnect', () => {
+    const room = setup(),
+      snapshot = structuredClone(room.state);
+    const replace = (text: string, digest: string) =>
       message({
         type: 'MACRO_IMPORT',
         text,
         visibility: 'public',
-        replacements: [{ line: 1, id: 'attack', version }],
+        replacements: [{ line: 1, id: 'attack', digest }],
       });
-    const first = prepareAction(room, user, replace(revised, 0), () => 1);
+    const initialDigest = macroDigest(room.state.macros!.attack);
+    const first = prepareAction(room, user, replace(revised, initialDigest), () => 1);
     const undo = inverseChanges(room.state, first);
     room.state = { ...applyChanges(room.state, first), revision: 1 };
-    const staleVersion = room.state.macros!.attack.version!;
-    room.state = { ...applyChanges(room.state, undo), revision: 2 };
-    const another = prepareAction(room, user, replace('[Attack]([Hit(d20 + X + 3)])', 0), () => 1);
-    room.state = { ...applyChanges(room.state, another), revision: 3 };
-    expect(room.state.macros!.attack.version).toBe(3);
-    expect(() => prepareAction(room, user, replace(original, staleVersion), () => 1)).toThrow(
+    const staleDigest = macroDigest(room.state.macros!.attack);
+    // Abrupt crash restores an older durable snapshot. Gameplay revisions can repeat.
+    room.state = snapshot;
+    const another = prepareAction(
+      room,
+      user,
+      replace('[Attack]([Hit(d20 + X + 3)])', initialDigest),
+      () => 1,
+    );
+    room.state = { ...applyChanges(room.state, another), revision: 1 };
+    expect(macroDigest(room.state.macros!.attack)).not.toBe(staleDigest);
+    expect(() => prepareAction(room, user, replace(original, staleDigest), () => 1)).toThrow(
       'changed since',
     );
+    // Undo restores precisely the content reviewed before the first edit, even with legacy fields.
+    room.state = applyChanges(room.state, undo);
+    expect(macroDigest(room.state.macros!.attack)).toBe(initialDigest);
+    expect(prepareAction(room, user, replace(revised, initialDigest), () => 1)).toHaveLength(1);
+  });
+  it('matches SHA-256 for Unicode, padding boundaries and full-length definitions', () => {
+    for (const text of [
+      '',
+      'abc',
+      '🔥雪'.repeat(23),
+      ...[55, 56, 63, 64, 65, 4096, 65536].map((n) => 'x'.repeat(n)),
+    ])
+      expect(sha256(text)).toBe(createHash('sha256').update(text).digest('hex'));
+  });
+  it('rejects revision-only legacy replacement requests instead of trusting an ambiguous guard', () => {
+    expect(
+      clientMessageSchema.safeParse({
+        v: 2,
+        actionId: 'legacy',
+        type: 'MACRO_IMPORT',
+        text: revised,
+        visibility: 'public',
+        replacements: [{ line: 1, id: 'attack', version: 0 }],
+      }).success,
+    ).toBe(false);
   });
   it('replaces 100 long definitions using guards that stay below the socket limit', () => {
     const room = setup();
@@ -141,7 +181,11 @@ describe('safe revised macro imports', () => {
     }));
     for (const macro of entries) room.state.macros[macro.id] = macro;
     const text = entries.map((macro) => `[${macro.name}]([Check(d6)])`).join('\n');
-    const replacements = entries.map((macro, i) => ({ line: i + 1, id: macro.id, version: 0 }));
+    const replacements = entries.map((macro, i) => ({
+      line: i + 1,
+      id: macro.id,
+      digest: macroDigest(macro),
+    }));
     const action: Action = { type: 'MACRO_IMPORT', text, visibility: 'public', replacements };
     const legacy = JSON.stringify({
       ...action,

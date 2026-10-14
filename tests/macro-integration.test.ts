@@ -1,3 +1,4 @@
+import { macroDigest } from '../shared/macroDigest.js';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
@@ -172,7 +173,7 @@ describe('macros and campaign Discord over real HTTP/WebSockets', () => {
     expect(pc.state.revision).toBe(before);
     expect(Object.values(pc.state.macros!)).toHaveLength(2);
   });
-  it('replaces a full library of long definitions over the bounded socket and persists version guards', async () => {
+  it('replaces a full library of long definitions over the bounded socket and persists reviewed content', async () => {
     const gm = await client();
     const definitions = Array.from(
       { length: 100 },
@@ -189,7 +190,7 @@ describe('macros and campaign Discord over real HTTP/WebSockets', () => {
     const replacements = saved.map((macro, i) => ({
       line: i + 1,
       id: macro.id,
-      version: macro.version!,
+      digest: macroDigest(macro),
     }));
     const text = saved.map((macro) => `[${macro.name}]([Check(d6)])`).join('\n');
     const action: Action = { type: 'MACRO_IMPORT', text, visibility: 'public', replacements };
@@ -213,7 +214,7 @@ describe('macros and campaign Discord over real HTTP/WebSockets', () => {
     expect(Object.keys(gm.state.macros!)).toEqual(saved.map((macro) => macro.id));
     expect(
       Object.values(gm.state.macros!).every(
-        (macro) => macro.visibility === 'private' && macro.version === gm.state.revision,
+        (macro) => macro.visibility === 'private' && macro.source.includes('Check(d6)'),
       ),
     ).toBe(true);
     await manager.flushAll();

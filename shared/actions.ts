@@ -1,3 +1,4 @@
+import { macroDigest } from './macroDigest.js';
 import {
   canControl,
   emptyTracker,
@@ -96,7 +97,7 @@ export function prepareAction(
           !entry ||
           entry.status !== 'changed' ||
           !target ||
-          (target.version ?? 0) !== replacement.version
+          macroDigest(target) !== replacement.digest
         )
           throw new Error('The macro changed since this preview. Review the import again.');
       }
@@ -119,8 +120,7 @@ export function prepareAction(
               id,
               name: definition.name,
               source: definition.source,
-              // Using the room revision avoids reusing a version after undo and another edit.
-              version: state.revision + 1,
+
               ownerId: user.id,
               // Updating a private macro must never make it public through the new-import default.
               visibility: previous?.visibility || m.visibility,

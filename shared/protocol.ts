@@ -171,7 +171,7 @@ export const clientMessageSchema = z.discriminatedUnion('type', [
         z.object({
           line: z.number().int().min(1),
           id: idSchema,
-          version: z.number().int().min(0).max(Number.MAX_SAFE_INTEGER),
+          digest: z.string().regex(/^[a-f0-9]{64}$/),
         }),
       )
       .max(100)
