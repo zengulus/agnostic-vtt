@@ -54,6 +54,7 @@ Player mode does not revoke account-level ownership or erase previously received
 - **Tokens:** resize, rotate, assign control, edit a generic resource bar, add custom status labels/icons, and set public or GM visibility. Ctrl/Cmd-click or Ctrl/Cmd-drag selects up to 50 tokens. Group, ungroup, duplicate and move them together. Campaign library templates create independent instances.
 - **Fog:** reveal/conceal with a brush, rectangle or polygon. Click polygon vertices, then press Enter or **Finish**. Each brush stroke forms one undo operation.
 - **Regions/drawing:** circles, rectangles, polygons, lines and cones, with optional snapping. Edit labels, colours, tags and opacity in **Regions & drawing layers**. Freehand and text annotations can be public or GM-only.
+- **Erase drawings:** select the eraser or press `E`, then drag over strokes, text or zones. It removes whole objects; each drag is one undoable edit, including mixed drawings and zones. Adjust the eraser radius in the tool options. Escape, **Clear draft**, or cancelling the pointer cancels the preview before release. Individual regions and annotations can also be deleted in **Regions & drawing layers**.
 - **Measurement:** distance, path, radius, cone and area. Click path waypoints and finish with Enter. Measurements remain local; committed drawings and regions are shared.
 - **Turns:** custom participants, numerical values, manual/highest/lowest order, editable rounds, forward/back navigation and hidden entries. This generic tracker can manage any ordered sequence.
 - **Undo/redo:** GM header controls, or Ctrl/Cmd+Z and Ctrl/Cmd+Shift+Z / Ctrl/Cmd+Y. Undo covers committed table edits across clients, including player movement. Dice and chat remain in history. Up to 50 edits fit within a 1 MiB budget; history resets on server restart. New edits clear redo; membership changes and image deletion clear history.
@@ -64,6 +65,21 @@ Escape clears drafts/selection; Delete removes selected tokens. On tablets, the 
 ## Dice presentation
 
 The server uses cryptographic randomness for d4, d6, d8, d10, d12, d20 and percentiles, including mixed expressions and positive/negative modifiers. It sends structured contributions and the total; browser physics presents those outcomes.
+
+Dice suffixes work in the dice panel, saved presets and macro roll expressions:
+
+| Expression      | Behavior                                            |
+| --------------- | --------------------------------------------------- |
+| `2d20kh1`       | Roll two d20s and keep the highest one.             |
+| `2d20kl1`       | Keep the lowest one.                                |
+| `4d6dl1`        | Roll four d6s and drop the lowest one.              |
+| `4d6dh1`        | Drop the highest one.                               |
+| `5d6r<2`        | Reroll each 1 until its face is at least 2.         |
+| `4d6r<2dl1 + 5` | Reroll ones, drop the lowest final die, then add 5. |
+
+Use at most one keep/drop suffix and one reroll condition per dice term. Keep/drop counts are whole numbers from 1 to the number of dice; dropping every die gives zero. Reroll comparisons support `<`, `<=`, `>`, `>=` and `=` with a threshold from 1 to the number of sides. Rerolls repeat and always run before keep/drop, regardless of suffix order. Conditions that reroll every possible face are rejected; each die allows up to 1000 replacements before the request fails without saving a result. Ties use the original dice order. Signs apply after keep/drop. The existing limit of 20 starting dice still applies, including discarded dice.
+
+Roll displays, history and Discord identify dropped faces and show reroll chains. Physics presents every die's final face, including discarded dice. Replay reuses the stored outcome. `RollTerm.values` contains final faces in roll order; optional `kept` flags exclude faces from the subtotal, and `rerolls` records previous faces per die.
 
 Settings include dice/number colours, metal/glass/plastic/wood/gemstone materials, opacity, scattered/cascade/orbit throws, velvet/stone/astral trays, speed, intensity, sound volume, particles and visual presets. Arcane, moon and ember arithmetic themes show individual contributions before the total. Minimal mode and reduced motion show authoritative arithmetic immediately. Preferences persist in the browser.
 
@@ -93,7 +109,18 @@ Names are generic: `[Healing Roll(...)]`, `[Resource Roll(...)]`, `[Awareness(..
 
 Imported macros persist in campaign snapshots. Public definitions can be used by any campaign member; private definitions are visible to their author and GMs. Only the author or a GM can delete a macro. Result privacy is chosen separately, with private definitions defaulting to private results in the UI. Server randomness, permissions, replay and recent roll history apply to macros just as they do to ordinary dice. One execution is one history entry containing every result group. The legacy `Roll.total` field holds the first group's total; macro-aware consumers should read `Roll.macro.groups`.
 
-Limits: 64 KiB per import, 100 definitions per import/person, 200 per campaign, 4096 characters per definition, eight groups, 20 dice and 40 numeric/dice contributions across the whole macro, four nested label levels, and 12 numeric inputs. Numeric inputs accept finite values between −10,000 and 10,000; constants are integers up to 10,000. Advanced dice conventions and arbitrary scripting are future work.
+Macros can also select random table entries:
+
+```text
+[Grant Maneuvers]\(Select(3){Maneuver1,Maneuver2,Maneuver3,Maneuver4,Maneuver5})
+[Rewards]([Gold Roll(d6 + X)],[Maneuvers(Select(2){"**Lunge**, then *retreat*", "Guard: `1 AP`", "Feint\nGain advantage"})])
+```
+
+`Select(n){entry,entry,...}` picks `n` rows uniformly without replacement and displays them as a list in the roll presentation, history and Discord. Repeated text in different rows is allowed; each row can be picked once. A standalone selection uses the heading **Selected**; `[Heading(Select(n){...})]` gives it a custom heading alongside other selections or named rolls. Picks are literal text, including strings such as `d6` or `X`; they are never evaluated as dice, inputs or code. Table picks are stored in `Roll.macro.groups[].selections`, with empty dice/contributions and a compatibility total of zero.
+
+Entries support basic inline `**bold**`, `*italic*` and backtick code spans. Double-quote entries containing commas, braces, quotes or backslashes; quoted entries use JSON escapes such as `\n` for line breaks and `\"` for a quote. HTML and links display as text. Formatting is preserved in Discord, with mentions disabled. The outer backslash is optional for tables too.
+
+Limits: 64 KiB per import, 100 definitions per import/person, 200 per campaign, 4096 characters per definition, eight result groups, 20 dice and 40 numeric/dice contributions across the whole macro, four nested label levels, and 12 numeric inputs. Tables allow up to 100 nonempty entries of 1000 characters each, with 1–20 picks per selection and at most 20 picks across the macro. The pick count must be a whole number no larger than the table. Numeric inputs accept finite values between −10,000 and 10,000; constants are integers up to 10,000. Exploding dice and arbitrary scripting are future work.
 
 ## Discord webhooks
 

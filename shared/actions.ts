@@ -266,6 +266,33 @@ export function prepareAction(
       gm();
       scene(m.sceneId);
       return [{ kind: 'annotation-delete', sceneId: m.sceneId, id: m.id }];
+    case 'ANNOTATIONS_DELETE': {
+      gm();
+      const s = scene(m.sceneId);
+      if (new Set(m.ids).size !== m.ids.length) throw new Error('Duplicate drawing identifiers.');
+      return m.ids
+        .filter((id) => s.annotations?.[id])
+        .map((id) => ({ kind: 'annotation-delete', sceneId: s.id, id }));
+    }
+    case 'OBJECTS_DELETE': {
+      gm();
+      const s = scene(m.sceneId);
+      if (!m.annotationIds.length && !m.zoneIds.length)
+        throw new Error('Choose drawings or zones to erase.');
+      if (
+        new Set(m.annotationIds).size !== m.annotationIds.length ||
+        new Set(m.zoneIds).size !== m.zoneIds.length
+      )
+        throw new Error('Duplicate object identifiers.');
+      return [
+        ...m.annotationIds
+          .filter((id) => s.annotations?.[id])
+          .map((id): StateChange => ({ kind: 'annotation-delete', sceneId: s.id, id })),
+        ...m.zoneIds
+          .filter((id) => s.zones[id])
+          .map((id): StateChange => ({ kind: 'zone-delete', sceneId: s.id, id })),
+      ];
+    }
     case 'LIBRARY_SAVE':
       gm();
       assertAsset(room, m.token.image);

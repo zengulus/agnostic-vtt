@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import {
   evaluateMacro,
   formatMacroGroup,
@@ -110,5 +110,91 @@ describe('data-only named roll macros', () => {
     const named = parseMacro('[Input]([Check(constructor)])');
     expect(() => evaluateMacro(named, {}, () => 1)).toThrow('for constructor');
     expect(evaluateMacro(named, { constructor: 4 }, () => 1).groups[0].total).toBe(4);
+  });
+});
+
+describe('random table macros', () => {
+  const table = String.raw`[Grant Maneuvers]\(Select(3){Maneuver1,Maneuver2,Maneuver3,Maneuver4,Maneuver5})`;
+  it('accepts the suggested syntax and picks uniformly from remaining rows without replacement', () => {
+    const definition = parseMacro(table),
+      randomInt = vi.fn().mockReturnValueOnce(4).mockReturnValueOnce(0).mockReturnValueOnce(1),
+      result = evaluateMacro(definition, {}, randomInt);
+    expect(definition.variables).toEqual([]);
+    expect(definition.repaired).toBe(false);
+    expect(randomInt.mock.calls).toEqual([
+      [0, 5],
+      [0, 4],
+      [0, 3],
+    ]);
+    expect(result.groups[0]).toEqual({
+      name: 'Selected',
+      selections: ['Maneuver5', 'Maneuver1', 'Maneuver3'],
+      terms: [],
+      contributions: [],
+      total: 0,
+    });
+    expect(macroText(result)).toBe(
+      'Grant Maneuvers\nSelected: • Maneuver5\n• Maneuver1\n• Maneuver3',
+    );
+    expect(physicalDice(result.groups[0].terms)).toEqual([]);
+  });
+  it('supports named tables alongside dice rolls, literal entries and quoted formatting', () => {
+    const definition = parseMacro(
+        String.raw`[Rewards]([Gold Roll(d6 + X)],[Maneuvers(Select(2){"**Lunge**, then *retreat*\nCost: ${'`1 AP`'}",[Guard (stance)],"A {brace} and \"quote\""})])`,
+      ),
+      randomInt = vi.fn().mockReturnValueOnce(5).mockReturnValueOnce(0).mockReturnValueOnce(1),
+      result = evaluateMacro(definition, { X: 2 }, randomInt);
+    expect(definition.variables).toEqual(['X']);
+    expect(result.groups[0].total).toBe(7);
+    expect(result.groups[1].selections).toEqual([
+      '**Lunge**, then *retreat*\nCost: `1 AP`',
+      'A {brace} and "quote"',
+    ]);
+    expect(result.groups[1].total).toBe(0);
+    expect(result.groups[1].terms).toEqual([]);
+    expect(randomInt.mock.calls).toEqual([
+      [1, 7],
+      [0, 3],
+      [0, 2],
+    ]);
+  });
+  it('can select every row, supports whitespace and case, and repairs only final delimiters', () => {
+    const definition = parseMacro('[All](select ( 2 ) { A , B }');
+    expect(definition.repaired).toBe(true);
+    expect(parseMacro(definition.source).repaired).toBe(false);
+    expect(evaluateMacro(definition, {}, () => 0).groups[0].selections).toEqual(['A', 'B']);
+    expect(parseMacro('[All]([Options(Select(1){A})').source).toBe(
+      '[All]([Options(Select(1){A})])',
+    );
+    const imported = importMacros(`${table}\n[Dice]([Roll(d6)])`);
+    expect(imported.errors).toEqual([]);
+    expect(imported.macros).toHaveLength(2);
+  });
+  it.each([
+    '[Bad](Select(0){A})',
+    '[Bad](Select(-1){A})',
+    '[Bad](Select(1.5){A,B})',
+    '[Bad](Select(X){A,B})',
+    '[Bad](Select(21){A,B})',
+    '[Bad](Select(3){A,B})',
+    '[Bad](Select(1){})',
+    '[Bad](Select(1){A,})',
+    '[Bad](Select(1){A,,B})',
+    '[Bad](Select(1){""})',
+    '[Bad](Select(1){"   "})',
+    '[Bad](Select(1){A)',
+    '[Bad](Select(1){"A})',
+    '[Bad](Select(1){"A"junk})',
+    String.raw`[Bad](Select(1){"\q"})`,
+    String.raw`[Bad](Select(1){"\u0000"})`,
+    '[Bad](Select(1){A{B})',
+    '[Bad](Select(1){A} + 1)',
+    '[Bad]([Roll(d6 + Select(1){A})])',
+    `[Bad](Select(1){${'x'.repeat(1001)}})`,
+    `[Bad](Select(1){${Array.from({ length: 101 }, (_, i) => `Row${i}`).join(',')}})`,
+    `[Bad](Select(11){${Array.from({ length: 11 }, (_, i) => `Row${i}`).join(',')}},Select(10){${Array.from({ length: 10 }, (_, i) => `Row${i}`).join(',')}})`,
+    `[Bad](${Array.from({ length: 9 }, () => 'Select(1){A}').join(',')})`,
+  ])('rejects malformed and unbounded table selections: %s', (source) => {
+    expect(() => parseMacro(source)).toThrow();
   });
 });

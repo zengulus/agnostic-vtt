@@ -582,6 +582,7 @@ i {
 .tool-measure canvas,
 .tool-fog canvas,
 .tool-zone canvas,
+.tool-erase canvas,
 .tool-ping canvas {
   cursor: crosshair;
 }
@@ -960,6 +961,13 @@ i {
   margin: 0;
   color: #e1c382;
   overflow-wrap: anywhere;
+}
+.macro-table-selections {
+  margin: 0;
+  padding-left: 1.4em;
+}
+.macro-table-selections li {
+  white-space: pre-wrap;
 }
 .macro-results.expanded {
   width: min(600px, 100%);
@@ -1861,6 +1869,10 @@ i {
 .arith-term.negative > span {
   color: #c5a89f;
   text-shadow: 0 0 25px #ba927d22;
+}
+.arith-term.dropped > span {
+  text-decoration: line-through;
+  opacity: 0.55;
 }
 .arith-term small {
   font-size: 8px;

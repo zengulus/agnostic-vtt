@@ -183,6 +183,41 @@ test('geometry, drawing layers, hidden turns, hex settings and scene changes syn
   await expect
     .poll(async () => Object.values((await roomState(pc)).scenes.hollow.annotations || {}).length)
     .toBe(2);
+  await drag(gm, 300, 950, 550, 950);
+  await expect
+    .poll(async () => Object.keys((await roomState(gm)).scenes.hollow.annotations || {}).length)
+    .toBe(4);
+  await gm.getByRole('button', { name: 'Erase drawings', exact: true }).click();
+  const eraseFrom = await point(gm, 400, 810),
+    eraseTo = await point(gm, 400, 980);
+  await gm.mouse.move(eraseFrom.x, eraseFrom.y);
+  await gm.mouse.down();
+  await gm.mouse.move(eraseTo.x, eraseTo.y, { steps: 5 });
+  // Erasing stays a local preview until release, then commits once for the whole drag.
+  expect(Object.keys((await roomState(gm)).scenes.hollow.annotations || {})).toHaveLength(4);
+  await gm.mouse.up();
+  await expect
+    .poll(async () => Object.keys((await roomState(gm)).scenes.hollow.annotations || {}).length)
+    .toBe(2);
+  await expect
+    .poll(async () => Object.keys((await roomState(pc)).scenes.hollow.annotations || {}).length)
+    .toBe(1);
+  await gm.keyboard.press('Control+z');
+  await expect
+    .poll(async () => Object.keys((await roomState(gm)).scenes.hollow.annotations || {}).length)
+    .toBe(4);
+  await expect
+    .poll(async () => Object.keys((await roomState(pc)).scenes.hollow.annotations || {}).length)
+    .toBe(3);
+  await gm.keyboard.press('Control+Shift+z');
+  await expect
+    .poll(async () => Object.keys((await roomState(pc)).scenes.hollow.annotations || {}).length)
+    .toBe(1);
+  await gm.getByRole('button', { name: 'Undo', exact: true }).click();
+  await expect
+    .poll(async () => Object.keys((await roomState(pc)).scenes.hollow.annotations || {}).length)
+    .toBe(3);
+  await expect(pc.getByRole('button', { name: 'Erase drawings', exact: true })).toHaveCount(0);
   await gm.getByRole('button', { name: 'Mark an area', exact: true }).click();
   await gm.getByLabel('Zone shape').selectOption('polygon');
   for (const [x, y] of [
@@ -364,4 +399,60 @@ test('large hex maps render only the visible grid with one hundred tokens', asyn
     body: JSON.stringify(result),
     contentType: 'application/json',
   });
+});
+
+test('demo drawing and text can be erased, restored, or cancelled on a tablet', async ({
+  page,
+}) => {
+  await page.setViewportSize({ width: 820, height: 1180 });
+  await page.goto('/');
+  await page.getByRole('button', { name: 'Open a demo table', exact: true }).click();
+  await page.getByRole('button', { name: 'Freehand drawing', exact: true }).click();
+  await drag(page, 300, 800, 550, 900);
+  expect(Object.keys((await roomState(page)).scenes.hollow.annotations || {})).toHaveLength(1);
+  await page.keyboard.press('Control+z');
+  expect(Object.keys((await roomState(page)).scenes.hollow.annotations || {})).toHaveLength(0);
+  await page.keyboard.press('Control+Shift+z');
+  await page.getByRole('button', { name: 'Text annotation', exact: true }).click();
+  await page.getByLabel('Annotation text').fill('Erase this note');
+  const anchor = await point(page, 800, 300);
+  await page.mouse.click(anchor.x, anchor.y);
+  const before = (await roomState(page)).scenes.hollow.annotations!;
+  expect(Object.keys(before)).toHaveLength(2);
+  await page.getByRole('button', { name: 'Mark an area', exact: true }).click();
+  await page.getByLabel('Zone shape').selectOption('rectangle');
+  await drag(page, 300, 750, 550, 950);
+  const zonesBefore = (await roomState(page)).scenes.hollow.zones;
+  expect(Object.keys(zonesBefore)).toHaveLength(1);
+  await page.keyboard.press('e');
+  await expect(page.getByLabel('Eraser radius')).toBeVisible();
+  const text = await point(page, 850, 290);
+  await page.mouse.click(text.x, text.y);
+  expect(Object.values((await roomState(page)).scenes.hollow.annotations!)).toEqual(
+    Object.values(before).filter((a) => a.kind === 'stroke'),
+  );
+  await page.keyboard.press('Control+z');
+  expect((await roomState(page)).scenes.hollow.annotations).toEqual(before);
+  const start = await point(page, 400, 810),
+    end = await point(page, 400, 900);
+  await page.mouse.move(start.x, start.y);
+  await page.mouse.down();
+  await page.mouse.move(end.x, end.y, { steps: 3 });
+  await page.keyboard.press('Escape');
+  await page.mouse.up();
+  expect((await roomState(page)).scenes.hollow.annotations).toEqual(before);
+  expect((await roomState(page)).scenes.hollow.zones).toEqual(zonesBefore);
+  await page.getByRole('button', { name: 'Erase drawings', exact: true }).click();
+  const overlap = await point(page, 400, 840);
+  await page.mouse.click(overlap.x, overlap.y);
+  expect(Object.keys((await roomState(page)).scenes.hollow.zones)).toHaveLength(0);
+  expect(Object.values((await roomState(page)).scenes.hollow.annotations!)).toEqual(
+    Object.values(before).filter((a) => a.kind === 'text'),
+  );
+  await page.keyboard.press('Control+z');
+  expect((await roomState(page)).scenes.hollow.annotations).toEqual(before);
+  expect((await roomState(page)).scenes.hollow.zones).toEqual(zonesBefore);
+  await page.keyboard.press('Control+Shift+z');
+  expect(Object.keys((await roomState(page)).scenes.hollow.zones)).toHaveLength(0);
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
 });

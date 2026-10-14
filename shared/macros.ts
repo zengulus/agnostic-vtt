@@ -1,4 +1,5 @@
 import type { RollTerm } from './model.js';
+import { evaluateDiceTerm, readDiceTerm, type DiceSpec } from './dice.js';
 
 export interface Macro {
   id: string;
@@ -8,14 +9,21 @@ export interface Macro {
   visibility: 'public' | 'private';
 }
 type Operand =
-  | { kind: 'dice'; count: number; sides: number }
+  | ({ kind: 'dice'; label: string } & DiceSpec)
   | { kind: 'number'; value: number }
   | { kind: 'variable'; name: string }
   | { kind: 'label'; name: string; expression: Expression };
 type Expression = Array<{ sign: 1 | -1; operand: Operand }>;
+interface TableSelection {
+  count: number;
+  entries: string[];
+}
+type MacroGroup =
+  | { name: string; expression: Expression; selection?: never }
+  | { name: string; selection: TableSelection; expression?: never };
 export interface MacroDefinition {
   name: string;
-  groups: Array<{ name: string; expression: Expression }>;
+  groups: MacroGroup[];
   variables: string[];
   source: string;
   repaired: boolean;
@@ -30,18 +38,20 @@ export interface MacroGroupResult {
   terms: RollTerm[];
   contributions: MacroContribution[];
   total: number;
+  /** Table picks have no arithmetic total or physical dice; total stays 0 for compatibility. */
+  selections?: string[];
 }
 export interface MacroResult {
   name: string;
   groups: MacroGroupResult[];
   variables: Record<string, number>;
 }
-const sides = new Set([4, 6, 8, 10, 12, 20, 100]);
 class Parser {
   position = 0;
   repaired = '';
   terms = 0;
   dice = 0;
+  selections = 0;
   variables = new Set<string>();
   constructor(readonly input: string) {}
   whitespace() {
@@ -73,6 +83,67 @@ class Parser {
       throw new Error('Names need 1–64 characters, without brackets or parentheses.');
     return name;
   }
+  isSelection() {
+    this.whitespace();
+    return /^Select\s*\(/i.test(this.input.slice(this.position));
+  }
+  selection(): TableSelection {
+    this.whitespace();
+    this.position += 'Select'.length;
+    this.expect('(');
+    this.whitespace();
+    const countText = /^\d+/.exec(this.input.slice(this.position));
+    if (!countText) throw new Error('Select needs a whole number of entries to pick.');
+    const count = Number(countText[0]);
+    if (count < 1 || count > 20 || (this.selections += count) > 20)
+      throw new Error('Select supports 1–20 picks, with at most 20 picks per macro.');
+    this.position += countText[0].length;
+    this.expect(')');
+    this.expect('{');
+    const entries: string[] = [];
+    while (true) {
+      this.whitespace();
+      const start = this.position;
+      let entry: string;
+      if (this.input[this.position] === '"') {
+        this.position++;
+        let closed = false;
+        while (this.position < this.input.length) {
+          const character = this.input[this.position++];
+          if (character === '\\') this.position++;
+          else if (character === '"') {
+            closed = true;
+            break;
+          }
+        }
+        if (!closed) throw new Error('A quoted table entry is missing its closing quote.');
+        try {
+          entry = JSON.parse(this.input.slice(start, this.position));
+        } catch {
+          throw new Error('Use valid double-quoted text and escapes in table entries.');
+        }
+      } else {
+        while (this.position < this.input.length && ![',', '}'].includes(this.input[this.position]))
+          this.position++;
+        entry = this.input.slice(start, this.position).trim();
+        if (/[{"\\]/.test(entry))
+          throw new Error('Quote table entries containing braces, quotes or backslashes.');
+      }
+      if (!entry.trim() || entry.length > 1000 || /[\x00-\x08\x0b-\x1f\x7f]/.test(entry))
+        throw new Error('Table entries need 1–1000 characters of text.');
+      entries.push(entry);
+      if (entries.length > 100) throw new Error('Use at most 100 entries per table.');
+      if (this.peek() === ',') {
+        this.position++;
+        continue;
+      }
+      this.expect('}');
+      break;
+    }
+    if (count > entries.length)
+      throw new Error('Select cannot pick more entries than the table contains.');
+    return { count, entries };
+  }
   expression(depth = 0): Expression {
     if (depth > 4) throw new Error('Labels can nest at most four levels.');
     const result: Expression = [];
@@ -96,22 +167,20 @@ class Parser {
       } else {
         this.whitespace();
         const rest = this.input.slice(this.position),
-          die = /^(\d*)d(100|20|12|10|8|6|4|%)(?![\w])/i.exec(rest),
+          die = readDiceTerm(rest),
           number = /^\d+(?![\w])/.exec(rest),
           variable = /^[A-Za-z][A-Za-z0-9_]{0,23}(?![\w])/.exec(rest);
         if (die) {
-          const count = Number(die[1] || 1),
-            size = die[2] === '%' ? 100 : Number(die[2]);
-          if (count < 1 || count > 20 || !sides.has(size) || (this.dice += count) > 20)
+          if ((this.dice += die.spec.count) > 20)
             throw new Error('A macro supports up to 20 standard dice in total.');
-          operand = { kind: 'dice', count, sides: size };
-          this.position += die[0].length;
+          operand = { kind: 'dice', ...die.spec, label: die.label };
+          this.position += die.length;
         } else if (number) {
           const value = Number(number[0]);
           if (value > 10000) throw new Error('Numbers must be 10,000 or less.');
           operand = { kind: 'number', value };
           this.position += number[0].length;
-        } else if (variable && !/^\d*d\d+$/i.test(variable[0])) {
+        } else if (variable && !/^\d*d\d+/i.test(variable[0])) {
           this.variables.add(variable[0]);
           if (this.variables.size > 12) throw new Error('Use at most 12 numeric inputs.');
           operand = { kind: 'variable', name: variable[0] };
@@ -142,14 +211,19 @@ export function parseMacro(source: string): MacroDefinition {
   p.expect('(');
   const groups: MacroDefinition['groups'] = [];
   while (true) {
-    p.expect('[');
-    const groupName = p.name('(');
-    p.expect('(');
-    const expression = p.expression();
-    p.expect(')');
-    p.expect(']', true);
-    groups.push({ name: groupName, expression });
-    if (groups.length > 8) throw new Error('Use at most eight named rolls in a macro.');
+    if (p.isSelection()) groups.push({ name: 'Selected', selection: p.selection() });
+    else {
+      p.expect('[');
+      const groupName = p.name('(');
+      p.expect('(');
+      const group: MacroGroup = p.isSelection()
+        ? { name: groupName, selection: p.selection() }
+        : { name: groupName, expression: p.expression() };
+      p.expect(')');
+      p.expect(']', true);
+      groups.push(group);
+    }
+    if (groups.length > 8) throw new Error('Use at most eight result groups in a macro.');
     if (p.peek() === ',') {
       p.position++;
       continue;
@@ -225,28 +299,33 @@ export function evaluateMacro(
           },
         ];
       }
+      if (operand.kind === 'dice') {
+        const term = evaluateDiceTerm(operand, direction, operand.label, randomInt);
+        return [
+          {
+            ...(labels.length ? { label: labels.join(' · ') } : {}),
+            terms: [term],
+            total: term.subtotal,
+          },
+        ];
+      }
       const value =
           operand.kind === 'number'
             ? operand.value
             : operand.kind === 'variable'
               ? variables[operand.name]
               : 0,
-        values =
-          operand.kind === 'dice'
-            ? Array.from({ length: operand.count }, () => randomInt(1, operand.sides + 1))
-            : [Math.abs(value)],
+        values = [Math.abs(value)],
         termSign = (value < 0 ? -direction : direction) as 1 | -1,
         term: RollTerm = {
-          kind: operand.kind === 'dice' ? 'dice' : 'modifier',
+          kind: 'modifier',
           sign: termSign,
           values,
-          sides: operand.kind === 'dice' ? operand.sides : undefined,
+          sides: undefined,
           label:
-            operand.kind === 'dice'
-              ? `${operand.count}d${operand.sides}`
-              : operand.kind === 'variable'
-                ? operand.name
-                : `${termSign < 0 ? '−' : '+'}${Math.abs(value)}`,
+            operand.kind === 'variable'
+              ? operand.name
+              : `${termSign < 0 ? '−' : '+'}${Math.abs(value)}`,
           subtotal: values.reduce((a, b) => a + b, 0) * termSign,
         };
       return [
@@ -261,6 +340,15 @@ export function evaluateMacro(
     name: definition.name,
     variables: { ...variables },
     groups: definition.groups.map((group) => {
+      if (group.selection) {
+        const remaining = [...group.selection.entries],
+          selections: string[] = [];
+        for (let i = 0; i < group.selection.count; i++) {
+          const index = randomInt(0, remaining.length);
+          selections.push(remaining.splice(index, 1)[0]);
+        }
+        return { name: group.name, selections, contributions: [], terms: [], total: 0 };
+      }
       const contributions = evaluate(group.expression);
       return {
         name: group.name,
@@ -272,6 +360,7 @@ export function evaluateMacro(
   };
 }
 export function formatMacroGroup(group: MacroGroupResult): string {
+  if (group.selections) return group.selections.map((entry) => `• ${entry}`).join('\n');
   if (!group.contributions.some((c) => c.label)) return String(group.total);
   const unit = /^(.*?)\s+roll$/i.exec(group.name)?.[1].trim().toLowerCase() || '';
   const expression = group.contributions

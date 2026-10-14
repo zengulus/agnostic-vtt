@@ -8,6 +8,8 @@ import {
   parseMacro,
   type MacroResult,
 } from '../../shared/macros.js';
+import { macroTextParts } from '../../shared/macroFormatting.js';
+import { formatRollBreakdown } from '../../shared/dice.js';
 
 export function MacroResults({
   result,
@@ -23,16 +25,33 @@ export function MacroResults({
       {result.groups.map((group, index) => (
         <div key={index}>
           <dt>{group.name}:</dt>
-          <dd>{reveal ? formatMacroGroup(group) : '…'}</dd>
-          {details && (
-            <small className="macro-result-terms">
-              {group.terms
-                .map(
-                  (term, i) =>
-                    `${i ? (term.sign < 0 ? ' − ' : ' + ') : term.sign < 0 ? '−' : ''}${term.values.length > 1 ? `(${term.values.join(' + ')})` : term.values[0]}${term.kind === 'dice' ? ` (${term.label})` : ''}`,
-                )
-                .join('')}
-            </small>
+          <dd>
+            {!reveal ? (
+              '…'
+            ) : group.selections ? (
+              <ul className="macro-table-selections">
+                {group.selections.map((entry, i) => (
+                  <li key={i}>
+                    {macroTextParts(entry).map((part, j) =>
+                      part.kind === 'bold' ? (
+                        <strong key={j}>{part.text}</strong>
+                      ) : part.kind === 'italic' ? (
+                        <em key={j}>{part.text}</em>
+                      ) : part.kind === 'code' ? (
+                        <code key={j}>{part.text}</code>
+                      ) : (
+                        part.text
+                      ),
+                    )}
+                  </li>
+                ))}
+              </ul>
+            ) : (
+              formatMacroGroup(group)
+            )}
+          </dd>
+          {(details || group.terms.some((t) => t.kept || t.rerolls)) && group.terms.length > 0 && (
+            <small className="macro-result-terms">{formatRollBreakdown(group.terms)}</small>
           )}
         </div>
       ))}
@@ -179,7 +198,8 @@ export function MacroLibraryDialog() {
         <h3>Import macro.txt</h3>
         <p className="muted">
           One macro per line. Use any roll names and labels; numeric inputs such as X are filled in
-          when you roll.
+          when you roll. Select(3)&#123;A,B,C,D&#125; picks three table entries without replacement.
+          Entries support **bold**, *italic* and `code`; quote entries containing commas.
         </p>
         <label className="file-import">
           <span>

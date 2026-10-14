@@ -64,3 +64,15 @@ it('filters player content, denies GM edits, and restores GM state when switchin
   expect(table.useTable.getState().room.scenes.hollow.tokens.sentinel.visibility).toBe('public');
   expect(table.useTable.getState().room.revision).toBe(0);
 });
+it('refits scenes and clears selection when undoing or redoing a scene switch', () => {
+  const initialFit = table.useTable.getState().fitNonce;
+  demo.demoAction({ type: 'SCENE_CHANGE', sceneId: 'sanctuary' });
+  table.useTable.getState().set({ selected: 'ranger', selectedIds: ['ranger'] });
+  demo.demoAction({ type: 'UNDO' });
+  expect(table.useTable.getState().room.activeSceneId).toBe('hollow');
+  expect(table.useTable.getState().selected).toBeNull();
+  expect(table.useTable.getState().fitNonce).toBe(initialFit + 2);
+  demo.demoAction({ type: 'REDO' });
+  expect(table.useTable.getState().room.activeSceneId).toBe('sanctuary');
+  expect(table.useTable.getState().fitNonce).toBe(initialFit + 3);
+});

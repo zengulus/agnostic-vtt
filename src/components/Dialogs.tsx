@@ -1390,6 +1390,11 @@ function Help() {
             'GM: draw freehand or place text. Choose Party or GM only before drawing.',
           ],
           [
+            'E',
+            'Erase drawings',
+            'GM: drag over drawings, text or zones to erase whole objects. One Undo restores the whole gesture. Delete individual objects in Regions & annotations.',
+          ],
+          [
             'CTRL',
             'Select a group',
             'Ctrl/Cmd-click tokens or drag a selection box. Group, duplicate and save templates from the selection bar.',
@@ -1415,6 +1420,11 @@ function Help() {
         <span>
           Try <code>1d20 + 5 - 2</code>, <code>3d6</code>, or <code>1d100</code>. Supports d4, d6,
           d8, d10, d12, d20 and percentile dice.
+          <br />
+          <code>2d20kh1</code> keeps the highest die; <code>4d6dl1</code> drops the lowest. Use
+          kh/kl to keep highest/lowest or dh/dl to drop highest/lowest, followed by a count.
+          <code>5d6r&lt;2</code> rerolls ones until each die is at least 2. Rerolls support &lt;,
+          &lt;=, &gt;, &gt;= and =, and run before keep/drop. These also work in macros.
         </span>
       </div>
       <p className="field-note">

@@ -148,6 +148,9 @@ export interface Draft {
   end: Point;
   points: Point[];
   completed?: boolean;
+  radius?: number;
+  erasedIds?: string[];
+  erasedZoneIds?: string[];
 }
 interface RenderOptions {
   scene: Scene;
@@ -265,6 +268,7 @@ export class SceneRenderer {
       ctx.stroke();
     }
     for (const z of Object.values(s.zones)) {
+      const erasing = o.draft?.erasedZoneIds?.includes(z.id);
       ctx.save();
       ctx.fillStyle = z.color;
       ctx.strokeStyle = z.color;
@@ -282,20 +286,25 @@ export class SceneRenderer {
         );
       else if (z.points) polygonPath(ctx, z.points, z.shape !== 'line');
       else ctx.rect(z.x, z.y, z.width, z.height);
-      ctx.globalAlpha = z.opacity ?? 0.2;
+      ctx.globalAlpha = (z.opacity ?? 0.2) * (erasing ? 0.2 : 1);
       if (z.shape !== 'line') ctx.fill();
-      ctx.globalAlpha = 0.75;
+      ctx.globalAlpha = erasing ? 0.15 : 0.75;
       ctx.setLineDash([8 / c.zoom, 5 / c.zoom]);
       ctx.stroke();
-      ctx.restore();
+      ctx.globalAlpha = erasing ? 0.15 : 1;
       ctx.fillStyle = z.color;
       ctx.font = `${13 / c.zoom}px sans-serif`;
       ctx.textAlign = 'left';
       ctx.fillText(z.label, z.x + 8 / c.zoom, z.y - 8 / c.zoom);
+      ctx.restore();
     }
     for (const a of Object.values(s.annotations || {})) {
       ctx.save();
-      ctx.globalAlpha = a.visibility === 'gm' ? 0.55 : 1;
+      ctx.globalAlpha = o.draft?.erasedIds?.includes(a.id)
+        ? 0.15
+        : a.visibility === 'gm'
+          ? 0.55
+          : 1;
       ctx.fillStyle = a.color;
       ctx.strokeStyle = a.color;
       ctx.lineWidth = a.width;
@@ -463,6 +472,13 @@ export class SceneRenderer {
     ctx.fillStyle = o.drawColor;
     ctx.lineWidth = 2 / c.zoom;
     ctx.setLineDash([7 / c.zoom, 5 / c.zoom]);
+    if (d.tool === 'erase') {
+      ctx.strokeStyle = '#fff0c8';
+      ctx.beginPath();
+      ctx.arc(b.x, b.y, d.radius || 24, 0, Math.PI * 2);
+      ctx.stroke();
+      return;
+    }
     if (d.tool === 'draw') {
       ctx.setLineDash([]);
       ctx.lineWidth = o.drawWidth;

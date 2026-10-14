@@ -53,8 +53,12 @@ export function RollPresentation({ roll }: { roll: Roll }) {
   }, [phase, finishRoll, reducedMotion, dice.speed, roll.macro]);
   const contributions = roll.terms.flatMap((t) =>
     t.kind === 'dice'
-      ? t.values.map((v) => ({ value: v * t.sign, label: `d${t.sides}` }))
-      : [{ value: t.subtotal, label: 'modifier' }],
+      ? t.values.map((v, i) => ({
+          value: v * t.sign,
+          dropped: t.kept?.[i] === false,
+          label: `${t.label}${t.kept?.[i] === false ? ' · dropped' : ''}${t.rerolls?.[i].length ? ` · ${t.rerolls[i].join(' → ')} → ${v} (rerolled)` : ''}`,
+        }))
+      : [{ value: t.subtotal, label: 'modifier', dropped: false }],
   );
   return (
     <div
@@ -95,12 +99,12 @@ export function RollPresentation({ roll }: { roll: Roll }) {
             <div className="arith-terms">
               {contributions.map((c, i) => (
                 <div
-                  className={`arith-term ${c.value < 0 ? 'negative' : ''}`}
+                  className={`arith-term ${c.value < 0 ? 'negative' : ''} ${c.dropped ? 'dropped' : ''}`}
                   key={i}
                   style={{ animationDelay: `${i * 0.09}s` }}
                 >
                   <span>
-                    {i > 0 && c.value >= 0 ? '+' : ''}
+                    {!c.dropped && i > 0 && c.value >= 0 ? '+' : ''}
                     {c.value}
                   </span>
                   <small>{c.label}</small>

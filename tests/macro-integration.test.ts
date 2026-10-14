@@ -231,6 +231,52 @@ describe('macros and campaign Discord over real HTTP/WebSockets', () => {
     await pc.commit({ type: 'MACRO_DELETE', id });
     expect(pc.state.macros![id]).toBeUndefined();
   });
+  it('shares table picks, deduplicates requests and persists selections across restart', async () => {
+    const gm = await client(),
+      pc = await client(player);
+    await configure();
+    const imported = await gm.commit({
+      type: 'MACRO_IMPORT',
+      text: String.raw`[Grant Maneuvers]\(Select(3){**Lunge**, *Retreat*, Guard, Riposte, Feint})`,
+      visibility: 'public',
+    });
+    await pc.wait('STATE_PATCH', (m) => m.actionId === imported.actionId);
+    const id = Object.keys(pc.state.macros!)[0];
+    const action: Action = { type: 'MACRO_ROLL_REQUEST', id, variables: {}, visibility: 'public' };
+    const patch = await pc.commit(action);
+    await gm.wait('STATE_PATCH', (m) => m.actionId === patch.actionId);
+    const a = await gm.wait('DICE_ROLL_RESULT'),
+      b = await pc.wait('DICE_ROLL_RESULT');
+    expect(a).toEqual(b);
+    const picks = a.roll.macro!.groups[0].selections!;
+    expect(picks).toHaveLength(3);
+    expect(new Set(picks).size).toBe(3);
+    expect(
+      picks.every((pick) => ['**Lunge**', '*Retreat*', 'Guard', 'Riposte', 'Feint'].includes(pick)),
+    ).toBe(true);
+    expect(a.roll.terms).toEqual([]);
+    await manager.discordDelivery.idle();
+    expect(transport).toHaveBeenCalledTimes(1);
+    expect(JSON.parse(String(transport.mock.calls[0][1]?.body)).embeds[0].fields[0].value).toBe(
+      picks.map((pick) => `• ${pick}`).join('\n'),
+    );
+    pc.send(action, patch.actionId);
+    await pc.wait('ROOM_SNAPSHOT');
+    expect(pc.state.rolls).toHaveLength(1);
+    expect(pc.state.rolls[0]).toEqual(a.roll);
+    await pc.commit({ ...action, visibility: 'private' });
+    await pc.wait('DICE_ROLL_RESULT', (m) => m.roll.visibility === 'private');
+    await manager.discordDelivery.idle();
+    expect(transport).toHaveBeenCalledTimes(1);
+    const before = pc.state.rolls;
+    clients.forEach((c) => c.ws.terminate());
+    clients.length = 0;
+    await app.close();
+    await start();
+    const restored = await client(player);
+    expect(restored.state.rolls).toEqual(before);
+    expect(restored.state.macros![id].name).toBe('Grant Maneuvers');
+  });
   it('posts public macros and ordinary dice automatically, never private results, and deduplicates clicks', async () => {
     const gm = await client(),
       pc = await client(player);
@@ -267,6 +313,55 @@ describe('macros and campaign Discord over real HTTP/WebSockets', () => {
     expect((await request(`/rolls/${privateResult.roll.id}`, owner, { method: 'POST' })).ok).toBe(
       false,
     );
+  });
+  it('shares and persists authoritative keep/drop/reroll outcomes for ordinary dice and macros', async () => {
+    const gm = await client(),
+      pc = await client(player);
+    await configure();
+    const expression = '2d20kh1 + 4d6dl1 + 5d6r<2 - 3';
+    const imported = await gm.commit({
+      type: 'MACRO_IMPORT',
+      text: `[Advanced]([Result(${expression})])`,
+      visibility: 'public',
+    });
+    await pc.wait('STATE_PATCH', (m) => m.actionId === imported.actionId);
+    const id = Object.keys(pc.state.macros!)[0];
+    const actions: Action[] = [
+      { type: 'DICE_ROLL_REQUEST', expression, visibility: 'public' },
+      { type: 'MACRO_ROLL_REQUEST', id, variables: {}, visibility: 'public' },
+    ];
+    for (const action of actions) {
+      const patch = await pc.commit(action);
+      await gm.wait('STATE_PATCH', (m) => m.actionId === patch.actionId);
+      const a = await gm.wait('DICE_ROLL_RESULT'),
+        b = await pc.wait('DICE_ROLL_RESULT');
+      expect(a).toEqual(b);
+      const terms = a.roll.terms;
+      expect(terms[0].subtotal).toBe(Math.max(...terms[0].values));
+      expect(terms[0].kept!.filter(Boolean)).toHaveLength(1);
+      expect(terms[1].subtotal).toBe(
+        terms[1].values.reduce((n, value) => n + value, 0) - Math.min(...terms[1].values),
+      );
+      expect(terms[1].kept!.filter(Boolean)).toHaveLength(3);
+      expect(terms[2].values.every((value) => value >= 2 && value <= 6)).toBe(true);
+      expect(terms[2].rerolls!.every((previous) => previous.every((value) => value === 1))).toBe(
+        true,
+      );
+      expect(a.roll.total).toBe(terms.reduce((n, term) => n + term.subtotal, 0));
+      pc.send(action, patch.actionId);
+      await pc.wait('ROOM_SNAPSHOT');
+      expect(pc.state.rolls.at(-1)).toEqual(a.roll);
+    }
+    await manager.discordDelivery.idle();
+    expect(transport).toHaveBeenCalledTimes(2);
+    for (const call of transport.mock.calls)
+      expect(JSON.parse(String(call[1]?.body)).embeds[0].fields[0].value).toContain('(dropped)');
+    const before = pc.state.rolls;
+    clients.forEach((c) => c.ws.terminate());
+    clients.length = 0;
+    await app.close();
+    await start();
+    expect((await client(player)).state.rolls).toEqual(before);
   });
   it('keeps the webhook secret in durable server storage and restricts management to the owner', async () => {
     const gm = await client(),

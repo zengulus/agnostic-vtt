@@ -742,7 +742,10 @@ export class RoomManager {
       target.push(entry);
     } else {
       changes = prepareAction(data, peer.identity, message, role);
-      if (!['DICE_ROLL_REQUEST', 'MACRO_ROLL_REQUEST', 'CHAT_SEND'].includes(message.type)) {
+      if (
+        changes.length &&
+        !['DICE_ROLL_REQUEST', 'MACRO_ROLL_REQUEST', 'CHAT_SEND'].includes(message.type)
+      ) {
         const inverse = inverseChanges(before, changes);
         const groupId = message.type === 'FOG_APPEND' ? message.groupId : undefined,
           last = room.undo.at(-1);

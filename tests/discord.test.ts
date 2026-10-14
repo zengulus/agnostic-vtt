@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from 'vitest';
 import { DiscordDelivery, discordPayload, normalizeWebhook } from '../server/discord.js';
 import { evaluateMacro, parseMacro } from '../shared/macros.js';
+import { evaluateDice } from '../shared/dice.js';
 import type { Roll } from '../shared/model.js';
 const endpoint =
   'https://discord.com/api/webhooks/123456789012345678/abcdefghijklmnopqrstuvwxyz_123456';
@@ -87,6 +88,28 @@ describe('Discord webhook delivery', () => {
         embed.fields.reduce((n, f) => n + f.name.length + f.value.length, 0),
     ).toBeLessThanOrEqual(6000);
   });
+  it('formats table lists and inline styles while escaping links, HTML and mentions', () => {
+    const macro = evaluateMacro(
+      parseMacro(
+        '[Grant](Select(2){"**Lunge**, *retreat*, `1 AP`", "@everyone <script> [link](https://example.com)"})',
+      ),
+      {},
+      () => 0,
+    );
+    const payload = discordPayload({ ...roll(), macro }, 'Room');
+    expect(payload.allowed_mentions.parse).toEqual([]);
+    expect(payload.embeds[0].fields[0]).toEqual({
+      name: 'Selected',
+      value:
+        '• **Lunge**, *retreat*, `1 AP`\n• @\u200beveryone \\<script\\> \\[link\\]\\(https://example.com\\)',
+      inline: false,
+    });
+    macro.groups[0].selections = Array.from({ length: 20 }, () => '*'.repeat(1000));
+    const field = discordPayload({ ...roll(), macro }, 'Room').embeds[0].fields[0];
+    expect(field.value.length).toBeLessThanOrEqual(1024);
+    expect(field.value).toMatch(/…$/);
+    expect(field.value).not.toContain('= 0');
+  });
   it('confirms delivery, deduplicates, preserves order, and respects reset headers', async () => {
     const transport = vi
         .fn<typeof fetch>()
@@ -112,6 +135,19 @@ describe('Discord webhook delivery', () => {
     await delivery.idle();
     expect(transport).toHaveBeenCalledTimes(2);
     delivery.close();
+  });
+  it('explains dropped faces and repeated rerolls in ordinary and macro results', () => {
+    const queue = [4, 18, 1, 1, 5];
+    const result = evaluateDice('2d20kh1 + d6r<2', () => queue.shift()!);
+    const field = discordPayload({ ...roll(), ...result, expression: '2d20kh1 + d6r<2' }, 'Room')
+      .embeds[0].fields[0];
+    expect(field.value).toContain('4 (dropped) + 18');
+    expect(field.value).toContain('1 → 1 → 5 (rerolled)');
+    expect(field.value).toContain('= 23');
+    const macro = evaluateMacro(parseMacro('[Check]([Attack Roll(2d20kh1)])'), {}, () => 4);
+    const macroField = discordPayload({ ...roll(), macro }, 'Room').embeds[0].fields[0];
+    expect(macroField.value).toContain('4 (dropped)');
+    expect(macroField.value).toContain('(2d20kh1)');
   });
   it('retains a webhook cooldown when its queue empties between rolls', async () => {
     let now = 0;

@@ -407,6 +407,72 @@ describe('campaign workshop over real HTTP and WebSockets', () => {
     await pc.wait('STATE_PATCH', (m) => m.actionId === reveal.actionId);
     expect(pc.state.scenes.hollow.tokens.ranger).toBeDefined();
   });
+  it('undoes and redoes a complete erase gesture without revealing private annotations', async () => {
+    const gm = await client(owner),
+      pc = await client(player);
+    await gm.wait('ROOM_SNAPSHOT');
+    await pc.wait('ROOM_SNAPSHOT');
+    const annotation = {
+      kind: 'stroke' as const,
+      points: [
+        { x: 100, y: 100 },
+        { x: 200, y: 100 },
+      ],
+      color: '#ffffff',
+      width: 4,
+      text: '',
+    };
+    for (const visibility of ['public', 'gm'] as const) {
+      const patch = await gm.commit({
+        type: 'ANNOTATION_UPDATE',
+        sceneId: 'hollow',
+        annotation: { ...annotation, id: visibility, visibility },
+      });
+      await pc.wait('STATE_PATCH', (m) => m.actionId === patch.actionId);
+    }
+    const before = structuredClone(gm.state.scenes.hollow.annotations);
+    const addedZone = await gm.commit({
+      type: 'ZONE_UPDATE',
+      sceneId: 'hollow',
+      zone: {
+        id: 'zone',
+        shape: 'rectangle',
+        x: 100,
+        y: 100,
+        width: 100,
+        height: 100,
+        color: '#ffffff',
+        label: 'Zone',
+      },
+    });
+    await pc.wait('STATE_PATCH', (m) => m.actionId === addedZone.actionId);
+    const zonesBefore = structuredClone(gm.state.scenes.hollow.zones);
+    const erased = await gm.commit({
+      type: 'OBJECTS_DELETE',
+      sceneId: 'hollow',
+      annotationIds: ['public', 'gm'],
+      zoneIds: ['zone'],
+    });
+    const publicPatch = await pc.wait('STATE_PATCH', (m) => m.actionId === erased.actionId);
+    expect(publicPatch.changes).toEqual([
+      { kind: 'annotation-delete', sceneId: 'hollow', id: 'public' },
+      { kind: 'zone-delete', sceneId: 'hollow', id: 'zone' },
+    ]);
+    expect(gm.state.scenes.hollow.annotations).toEqual({});
+    expect(gm.state.scenes.hollow.zones).toEqual({});
+    const undone = await gm.commit({ type: 'UNDO' });
+    const restorePatch = await pc.wait('STATE_PATCH', (m) => m.actionId === undone.actionId);
+    expect(gm.state.scenes.hollow.annotations).toEqual(before);
+    expect(restorePatch.changes).toHaveLength(2);
+    expect(gm.state.scenes.hollow.zones).toEqual(zonesBefore);
+    expect(pc.state.scenes.hollow.zones).toEqual(zonesBefore);
+    expect(Object.keys(pc.state.scenes.hollow.annotations!)).toEqual(['public']);
+    const redone = await gm.commit({ type: 'REDO' });
+    await pc.wait('STATE_PATCH', (m) => m.actionId === redone.actionId);
+    expect(gm.state.scenes.hollow.annotations).toEqual({});
+    expect(pc.state.scenes.hollow.annotations).toEqual({});
+    expect(pc.state.scenes.hollow.zones).toEqual({});
+  });
   it('rejects a mixed-permission batch atomically and lets only GMs undo committed movement', async () => {
     const gm = await client(owner);
     await gm.wait('ROOM_SNAPSHOT');

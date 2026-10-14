@@ -161,6 +161,10 @@ export function inverseChanges(state: RoomState, changes: StateChange[]): StateC
       case 'scene-active':
         inverse.unshift({ ...c, sceneId: current.activeSceneId });
         break;
+      case 'scene-delete':
+        if (current.scenes[c.sceneId])
+          inverse.unshift({ kind: 'scene', scene: current.scenes[c.sceneId] });
+        break;
       case 'library':
         inverse.unshift({ ...c, token: current.tokenLibrary?.[c.id] || null });
         break;

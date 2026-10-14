@@ -26,6 +26,7 @@ import {
   VolumeX,
   X,
   Pencil,
+  Eraser,
   Type,
   Flag,
   FolderOpen,
@@ -35,7 +36,7 @@ import { useTable } from './store.js';
 import { inviteUrl, launchDemo, liveAvailable, send } from './connection.js';
 import { AssetImage } from './assets.js';
 import { HistoryControls, TrackerPanel } from './components/Workshop.js';
-import { parseDice } from '../shared/dice.js';
+import { formatRollValues, parseDice } from '../shared/dice.js';
 import { Tabletop } from './components/Tabletop.js';
 import { RollPresentation } from './components/RollPresentation.js';
 import { Dialogs } from './components/Dialogs.js';
@@ -59,6 +60,7 @@ const tools: Array<{
   { id: 'fog', label: 'Fog reveal / conceal', key: 'F', icon: Eye, gm: true },
   { id: 'draw', label: 'Freehand drawing', key: 'D', icon: Pencil, gm: true },
   { id: 'text', label: 'Text annotation', key: 'T', icon: Type, gm: true },
+  { id: 'erase', label: 'Erase drawings', key: 'E', icon: Eraser, gm: true },
 ];
 export function App() {
   const s = useTable(),
@@ -501,7 +503,7 @@ function Chronicle() {
                             <span className="history-expression">{r.expression}</span>
                             <small>
                               {r.terms
-                                .map((t) => (t.kind === 'dice' ? t.values.join(' + ') : t.label))
+                                .map((t) => (t.kind === 'dice' ? formatRollValues(t) : t.label))
                                 .join(' · ')}
                             </small>
                           </span>

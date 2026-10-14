@@ -4,12 +4,92 @@ import { macroText } from '../../shared/macros.js';
 import type { RoomState } from '../../shared/model.js';
 
 const example = String.raw`[Attack Name]\([Attack Roll(1d20 + X)],[Damage Roll(1d6 + [Fire(1d6)] + [Akashic(12)])`;
+
+test('formatted table picks appear identically in party presentations and history', async ({
+  browser,
+}) => {
+  await withParty(browser, async (gm, pc) => {
+    await gm.getByRole('button', { name: 'Macros · import .txt' }).click();
+    await gm
+      .getByLabel('Macro definitions')
+      .fill(
+        '[Grant Maneuvers](Select(3){"**Lunge**, then *retreat*", "Guard: `1 AP`", "<img src=x onerror=alert(1)>\\nNext line"})',
+      );
+    await gm.getByRole('button', { name: 'Import 1 macro', exact: true }).click();
+    await expect(gm.getByRole('button', { name: 'Prepare Grant Maneuvers' })).toBeVisible();
+    await gm.getByRole('button', { name: 'Close dialog' }).click();
+    await expect.poll(async () => Object.keys((await roomState(pc)).macros || {}).length).toBe(1);
+    await pc.getByRole('button', { name: 'Macros · import .txt' }).click();
+    await pc.getByRole('button', { name: 'Prepare Grant Maneuvers' }).click();
+    await expect(pc.locator('.macro-inputs input')).toHaveCount(0);
+    for (const page of [gm, pc]) await pausePresentationClock(page);
+    await pc.getByRole('button', { name: 'Roll macro', exact: true }).click();
+    for (const page of [gm, pc]) {
+      const results = page.locator('.roll-overlay .macro-table-selections');
+      await expect(results.locator('li')).toHaveCount(3);
+      await expect(results.locator('strong')).toHaveText('Lunge');
+      await expect(results.locator('em')).toHaveText('retreat');
+      await expect(results.locator('code')).toHaveText('1 AP');
+      await expect(results).toContainText('<img src=x onerror=alert(1)>\nNext line');
+      await expect(results.locator('img')).toHaveCount(0);
+      await expect(page.locator('.roll-overlay .macro-result-terms')).toHaveCount(0);
+    }
+    expect((await roomState(pc)).rolls[0]).toEqual((await roomState(gm)).rolls[0]);
+    for (const page of [gm, pc]) {
+      await page.getByRole('button', { name: 'Dismiss roll' }).click();
+      await expect(page.locator('.history-card .macro-table-selections li')).toHaveCount(3);
+      await expect(page.locator('.history-card .macro-table-selections strong')).toHaveText(
+        'Lunge',
+      );
+    }
+  });
+});
+
 async function create(page: Page) {
   await page.goto('/');
   await page.getByRole('button', { name: 'Log in' }).click();
   await page.getByRole('button', { name: 'Create campaign' }).click();
   await expect(page.getByText('Live', { exact: true })).toBeVisible();
 }
+
+test('keep, drop and reroll results appear in party dice, macro displays and history', async ({
+  browser,
+}) => {
+  await withParty(browser, async (gm, pc) => {
+    for (const page of [gm, pc]) await pausePresentationClock(page);
+    for (const expression of ['2d20kh1', '4d6dl1', '5d6r<2']) {
+      await pc.getByLabel('Dice expression', { exact: true }).fill(expression);
+      await pc.getByRole('button', { name: 'Roll the dice', exact: true }).click();
+      for (const page of [gm, pc])
+        await expect(page.locator('.roll-overlay')).toContainText(expression);
+      const result = (await roomState(pc)).rolls.at(-1)!;
+      expect(result).toEqual((await roomState(gm)).rolls.at(-1));
+      expect(result.total).toBe(result.terms[0].subtotal);
+      for (const page of [gm, pc]) {
+        if (expression !== '5d6r<2')
+          await expect(page.locator('.roll-overlay .arith-term.dropped')).toHaveCount(1);
+        else expect(result.terms[0].values.every((value) => value >= 2)).toBe(true);
+        await page.getByRole('button', { name: 'Dismiss roll' }).click();
+        if (expression !== '5d6r<2')
+          await expect(page.locator('.history-card').first()).toContainText('(dropped)');
+      }
+      await pc.clock.runFor(950);
+    }
+    await pc.getByRole('button', { name: 'Macros · import .txt' }).click();
+    await pc.getByLabel('Macro definitions').fill('[Advantage]([Attack Roll(2d20kh1 + X)])');
+    await pc.getByRole('button', { name: 'Import 1 macro', exact: true }).click();
+    await pc.getByRole('button', { name: 'Prepare Advantage' }).click();
+    await pc.getByLabel('Numeric input X').fill('5');
+    await pc.getByRole('button', { name: 'Roll macro', exact: true }).click();
+    for (const page of [gm, pc]) {
+      await expect(page.locator('.roll-overlay .macro-result-terms')).toContainText('(dropped)');
+      await page.getByRole('button', { name: 'Dismiss roll' }).click();
+      await expect(
+        page.locator('.history-card').first().locator('.macro-result-terms'),
+      ).toContainText('(dropped)');
+    }
+  });
+});
 async function roomState(page: Page): Promise<RoomState> {
   return page.evaluate(async () => {
     const path = '/src/store.ts';

@@ -2,3 +2,10 @@
 [Attack Name]\([Attack Roll(1d20 + X)],[Damage Roll(1d6 + [Fire(1d6)] + [Akashic(12)])])
 [Restoration]\([Healing Roll(2d6 + [Divine(4)] + X)])
 [Exploration]\([Perception Roll(1d20 + WIS)],[Travel Supplies(12 - [Consumed(1d4)])])
+# Tables pick rows without replacement. Quote entries containing commas or JSON escapes.
+[Grant Maneuvers]\(Select(3){Maneuver1,Maneuver2,Maneuver3,Maneuver4,Maneuver5})
+[Rewards]([Gold Roll(d6 + X)],[Maneuvers(Select(2){"**Lunge**, then *retreat*", "Guard: `1 AP`", "Feint\nGain advantage"})])
+# Keep/drop and reroll modifiers work in named rolls and labels.
+[Advantage]([Attack Roll(2d20kh1 + X)])
+[Ability Score]([Score(4d6dl1)])
+[Reliable Damage]([Damage Roll(5d6r<2)])

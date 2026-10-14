@@ -48,7 +48,7 @@ export function ToolOptions({
   clearDraft: () => void;
 }) {
   const s = useTable();
-  if (!['zone', 'fog', 'draw', 'text', 'measure'].includes(s.tool)) return null;
+  if (!['zone', 'fog', 'draw', 'text', 'erase', 'measure'].includes(s.tool)) return null;
   return (
     <div className="tool-options" aria-label="Active tool options">
       {s.tool === 'zone' && (
@@ -188,6 +188,21 @@ export function ToolOptions({
             ))}
           </select>
         </label>
+      )}
+      {s.tool === 'erase' && (
+        <>
+          <label>
+            Eraser radius
+            <input
+              type="range"
+              min={4}
+              max={160}
+              value={s.eraserSize}
+              onChange={(e) => s.set({ eraserSize: Number(e.target.value) })}
+            />
+          </label>
+          <span>Drag to erase whole drawings, text or zones. Undo restores the gesture.</span>
+        </>
       )}
       {((s.tool === 'fog' && s.fogShape === 'polygon') ||
         (s.tool === 'zone' && s.zoneShape === 'polygon') ||

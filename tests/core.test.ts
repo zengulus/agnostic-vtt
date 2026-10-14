@@ -52,7 +52,6 @@ describe('bounded generic dice mathematics', () => {
     'd20+10001',
     'd20-',
     '1d6/0',
-    '2d6kh1',
   ])('rejects invalid/unsupported expression %s', (e) => expect(() => parseDice(e)).toThrow());
   it.each([4, 6, 8, 10, 12, 20, 100])('secure outcomes always lie within d%s bounds', (sides) => {
     for (let i = 0; i < 30; i++) {

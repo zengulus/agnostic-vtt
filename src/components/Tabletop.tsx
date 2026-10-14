@@ -17,8 +17,9 @@ import { clampPoint, screenToWorld, snapPoint, type Camera } from '../../shared/
 import { canControl, type Point, type Token, type FogOperation } from '../../shared/model.js';
 import { SceneRenderer, conePoints, type Draft } from '../rendering.js';
 import { ToolOptions } from './Workshop.js';
+import { drawingsAlongBrush, zonesAlongBrush } from '../../shared/drawings.js';
 interface Drag {
-  kind: 'pan' | 'token' | 'measure' | 'zone' | 'fog' | 'draw' | 'select';
+  kind: 'pan' | 'token' | 'measure' | 'zone' | 'fog' | 'draw' | 'select' | 'erase';
   start: Point;
   camera: Camera;
   token?: Token;
@@ -27,6 +28,9 @@ interface Drag {
   lastSent: number;
   lastBrush: number;
   groupId: string;
+  erased?: Set<string>;
+  erasedZones?: Set<string>;
+  erasePoint?: Point;
 }
 export function Tabletop() {
   const canvas = useRef<HTMLCanvasElement>(null),
@@ -57,6 +61,42 @@ export function Tabletop() {
       operation,
       ...(groupId ? { groupId } : {}),
     });
+  }
+  function eraseAlong(from: Point, to: Point, gesture: Drag) {
+    const st = useTable.getState(),
+      ctx = canvas.current!.getContext('2d')!;
+    if (st.self?.role !== 'gm') return;
+    ctx.save();
+    const ids = drawingsAlongBrush(
+      Object.values(st.room.scenes[st.room.activeSceneId].annotations || {}),
+      from,
+      to,
+      st.eraserSize,
+      (text, fontSize) => {
+        ctx.font = `${fontSize}px Georgia`;
+        return ctx.measureText(text).width;
+      },
+    );
+    ctx.restore();
+    for (const id of ids) gesture.erased!.add(id);
+    for (const id of zonesAlongBrush(
+      Object.values(st.room.scenes[st.room.activeSceneId].zones),
+      from,
+      to,
+      st.eraserSize,
+    ))
+      gesture.erasedZones!.add(id);
+    gesture.erasePoint = to;
+    draft.current = {
+      tool: 'erase',
+      start: to,
+      end: to,
+      points: [],
+      radius: st.eraserSize,
+      erasedIds: [...gesture.erased!],
+      erasedZoneIds: [...gesture.erasedZones!],
+    };
+    redraw();
   }
   function finishPolygon() {
     const d = draft.current,
@@ -267,6 +307,7 @@ export function Tabletop() {
         f: 'fog',
         d: 'draw',
         t: 'text',
+        e: 'erase',
       } as const;
       if (key in tools) st.set({ tool: tools[key as keyof typeof tools] });
     };
@@ -299,6 +340,7 @@ export function Tabletop() {
   }
   function onDown(e: React.PointerEvent<HTMLCanvasElement>) {
     if (e.button === 2) return;
+    e.currentTarget.focus({ preventScroll: true });
     e.currentTarget.setPointerCapture(e.pointerId);
     const st = useTable.getState(),
       s = st.room.scenes[st.room.activeSceneId],
@@ -365,7 +407,20 @@ export function Tabletop() {
       redraw();
       return;
     }
-    if (['zone', 'fog', 'draw', 'text'].includes(st.tool) && st.self?.role !== 'gm') return;
+    if (['zone', 'fog', 'draw', 'text', 'erase'].includes(st.tool) && st.self?.role !== 'gm')
+      return;
+    if (st.tool === 'erase') {
+      const gesture: Drag = {
+        ...base,
+        kind: 'erase',
+        erased: new Set(),
+        erasedZones: new Set(),
+        erasePoint: world,
+      };
+      drag.current = gesture;
+      eraseAlong(world, world, gesture);
+      return;
+    }
     if (st.tool === 'text') {
       send({
         type: 'ANNOTATION_UPDATE',
@@ -473,6 +528,17 @@ export function Tabletop() {
     }
     const d = drag.current;
     if (!d) {
+      if (st.tool === 'erase' && st.self?.role === 'gm') {
+        draft.current = {
+          tool: 'erase',
+          start: world,
+          end: world,
+          points: [],
+          radius: st.eraserSize,
+        };
+        redraw();
+        return;
+      }
       if (draft.current && !draft.current.completed) {
         draft.current.end = world;
         redraw();
@@ -483,6 +549,10 @@ export function Tabletop() {
       st.set({
         camera: { ...d.camera, x: d.camera.x + p.x - d.start.x, y: d.camera.y + p.y - d.start.y },
       });
+      return;
+    }
+    if (d.kind === 'erase') {
+      eraseAlong(d.erasePoint!, world, d);
       return;
     }
     if (draft.current) {
@@ -545,6 +615,25 @@ export function Tabletop() {
     const st = useTable.getState(),
       s = st.room.scenes[st.room.activeSceneId],
       shape = draft.current;
+    if (d.kind === 'erase') {
+      eraseAlong(
+        d.erasePoint!,
+        clampPoint(screenToWorld(pointer(e), st.camera), s.width, s.height, 0),
+        d,
+      );
+      if ((d.erased!.size || d.erasedZones!.size) && st.self?.role === 'gm')
+        send({
+          type: 'OBJECTS_DELETE',
+          sceneId: s.id,
+          annotationIds: [...d.erased!],
+          zoneIds: [...d.erasedZones!],
+        });
+      draft.current = null;
+      redraw();
+      if (e.currentTarget.hasPointerCapture(e.pointerId))
+        e.currentTarget.releasePointerCapture(e.pointerId);
+      return;
+    }
     if (d.kind === 'token' && d.tokens) {
       const positions = d.tokens.map((t) => ({
         tokenId: t.id,
@@ -634,10 +723,17 @@ export function Tabletop() {
     <div className={`tabletop tool-${store.tool}`}>
       <canvas
         ref={canvas}
+        tabIndex={0}
         aria-label="Interactive tabletop: drag tokens, scroll to zoom, hold Space to pan"
         onPointerDown={onDown}
         onPointerMove={onMove}
         onPointerUp={onUp}
+        onPointerLeave={() => {
+          if (!drag.current && draft.current?.tool === 'erase') {
+            draft.current = null;
+            redraw();
+          }
+        }}
         onPointerCancel={() => {
           drag.current = null;
           draft.current = null;

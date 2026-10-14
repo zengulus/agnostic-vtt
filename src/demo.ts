@@ -24,6 +24,8 @@ function publish(reset = false) {
   const s = useTable.getState();
   const self = { ...identity, role, color: '#d8b46c' };
   const projected = projectRoom(room, identity.id, role);
+  const oldScene = s.room.scenes[s.room.activeSceneId],
+    newScene = projected.scenes[projected.activeSceneId];
   s.set({
     room: projected,
     self,
@@ -46,6 +48,9 @@ function publish(reset = false) {
         : null,
     selectedIds: s.selectedIds.filter((id) => projected.scenes[projected.activeSceneId].tokens[id]),
     previews: {},
+    fitNonce:
+      s.fitNonce +
+      (reset || oldScene.width !== newScene.width || oldScene.height !== newScene.height ? 1 : 0),
     ...(reset
       ? {
           selected: null,
@@ -57,7 +62,6 @@ function publish(reset = false) {
           dialog: null,
           error: null,
           deliveries: {},
-          fitNonce: s.fitNonce + 1,
         }
       : {}),
   });
@@ -103,7 +107,10 @@ export function demoAction(action: Action) {
     target.push(edit);
   } else {
     changes = prepareAction(room, identity, m, randomInt, role);
-    if (!['DICE_ROLL_REQUEST', 'MACRO_ROLL_REQUEST', 'CHAT_SEND'].includes(m.type)) {
+    if (
+      changes.length &&
+      !['DICE_ROLL_REQUEST', 'MACRO_ROLL_REQUEST', 'CHAT_SEND'].includes(m.type)
+    ) {
       const groupId = m.type === 'FOG_APPEND' ? m.groupId : undefined,
         last = undo.at(-1);
       if (groupId && last?.groupId === groupId) last.forward.push(...changes);
@@ -119,7 +126,7 @@ export function demoAction(action: Action) {
     }
   }
   room.state = { ...applyChanges(before, changes), revision: before.revision + 1 };
-  publish(m.type === 'SCENE_CHANGE');
+  publish(before.activeSceneId !== room.state.activeSceneId);
   for (const change of changes)
     if (change.kind === 'roll') {
       const s = useTable.getState();

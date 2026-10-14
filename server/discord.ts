@@ -1,5 +1,7 @@
 import type { Roll } from '../shared/model.js';
 import { formatMacroGroup } from '../shared/macros.js';
+import { discordTableEntry } from '../shared/macroFormatting.js';
+import { formatRollBreakdown, formatRollValues } from '../shared/dice.js';
 export type DeliveryStatus = 'queued' | 'sent' | 'failed';
 export type DeliveryReport = (status: DeliveryStatus, message: string) => void;
 
@@ -48,12 +50,17 @@ export function discordPayload(roll: Roll, campaign: string) {
         timestamp: roll.createdAt,
         fields: groups.map((group, index) => {
           const value = roll.macro
-              ? formatMacroGroup(group)
-              : `${roll.expression}\n${roll.terms.map((t) => `${t.sign < 0 ? '−' : '+'}${t.values.join(' + ')}`).join(' ')} = ${roll.total}`,
-            safe = escapeMarkdown(value);
+              ? `${formatMacroGroup(group)}${group.terms.some((t) => t.kept || t.rerolls) ? `\n${formatRollBreakdown(group.terms)}` : ''}`
+              : `${roll.expression}\n${roll.terms.map((t) => `${t.sign < 0 ? '−' : '+'}${formatRollValues(t)}`).join(' ')} = ${roll.total}`,
+            safe = group.selections
+              ? group.selections.map((entry) => `• ${discordTableEntry(entry)}`).join('\n')
+              : escapeMarkdown(value);
           return {
             name: names[index],
-            value: safe.length <= budget ? safe : `${safe.slice(0, budget - 40)}… = ${group.total}`,
+            value:
+              safe.length <= budget
+                ? safe
+                : `${safe.slice(0, budget - 40)}…${group.selections ? '' : ` = ${group.total}`}`,
             inline: false,
           };
         }),

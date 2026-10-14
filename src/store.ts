@@ -5,7 +5,8 @@ import { sampleScene } from '../shared/sample.js';
 import type { Camera } from '../shared/geometry.js';
 import { dicePreferencesSchema, type DicePreferences } from '../shared/diceThemes.js';
 import type { DiscordStatus, HistoryStatus } from '../shared/protocol.js';
-export type Tool = 'select' | 'pan' | 'measure' | 'ping' | 'zone' | 'fog' | 'draw' | 'text';
+export type Tool =
+  'select' | 'pan' | 'measure' | 'ping' | 'zone' | 'fog' | 'draw' | 'text' | 'erase';
 export type Dialog =
   | 'launch'
   | 'map'
@@ -66,6 +67,7 @@ interface UIState {
   brushSize: number;
   drawColor: string;
   drawWidth: number;
+  eraserSize: number;
   annotationText: string;
   annotationVisibility: 'public' | 'gm';
   measurementShape: 'distance' | 'path' | 'radius' | 'cone' | 'area';
@@ -122,6 +124,7 @@ export const useTable = create<UIState>((set, get) => ({
   brushSize: 130,
   drawColor: '#d8b46c',
   drawWidth: 4,
+  eraserSize: 24,
   annotationText: 'A note for the party',
   annotationVisibility: 'public',
   measurementShape: 'distance',

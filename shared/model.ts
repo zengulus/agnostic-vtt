@@ -167,6 +167,10 @@ export interface RollTerm {
   sign: 1 | -1;
   sides?: number;
   values: number[];
+  /** Final faces remain in roll order, including discarded dice. */
+  kept?: boolean[];
+  /** Previous faces for each die, before its final value. */
+  rerolls?: number[][];
   label: string;
   subtotal: number;
 }
