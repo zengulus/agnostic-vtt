@@ -1,4 +1,5 @@
 import { expect, test, type Page } from '@playwright/test';
+import { pausePresentationClock } from './helpers/clock.js';
 import { macroText } from '../../shared/macros.js';
 import type { RoomState } from '../../shared/model.js';
 
@@ -56,8 +57,7 @@ test('newline file import, generic results, numeric inputs, privacy and recovery
   await pc.getByLabel('Numeric input X').fill('5');
   // Macro totals auto-dismiss. Pause browser time during review so assertions
   // in one client cannot consume the other's review window.
-  for (const page of [gm, pc])
-    await page.clock.pauseAt(await page.evaluate(() => Date.now() + 1000));
+  for (const page of [gm, pc]) await pausePresentationClock(page);
   await pc.getByRole('button', { name: 'Roll macro', exact: true }).click();
   await expect(pc.locator('.roll-overlay .macro-results')).toBeVisible();
   await expect(gm.locator('.roll-overlay .macro-results')).toBeVisible();
@@ -118,7 +118,7 @@ test('newline file import, generic results, numeric inputs, privacy and recovery
   await pc.getByRole('button', { name: 'Prepare Many Rolls', exact: true }).click();
   await expect(pc.getByLabel('Numeric input constructor')).toHaveValue('');
   await pc.getByLabel('Numeric input constructor').fill('5');
-  await pc.clock.pauseAt(await pc.evaluate(() => Date.now() + 1000));
+  await pausePresentationClock(pc);
   await pc.getByRole('button', { name: 'Roll macro', exact: true }).click();
   await pc.locator('.roll-overlay .macro-results dt').last().scrollIntoViewIfNeeded();
   await expect(pc.locator('.roll-overlay .macro-results dt').last()).toHaveText('Result8:');
@@ -131,6 +131,7 @@ test('newline file import, generic results, numeric inputs, privacy and recovery
 test('owner webhook settings keep credentials out of browser storage and expose delivery controls', async ({
   page,
 }) => {
+  await page.clock.install();
   await page.addInitScript(() =>
     localStorage.setItem('aether-settings', JSON.stringify({ reducedMotion: true })),
   );
@@ -164,6 +165,7 @@ test('owner webhook settings keep credentials out of browser storage and expose 
     clicks++;
     await route.fulfill({ status: 202, contentType: 'application/json', body: '{"queued":true}' });
   });
+  await pausePresentationClock(page);
   await page.getByRole('button', { name: 'Roll the dice' }).click();
   await page.getByRole('button', { name: 'Dismiss roll' }).click();
   await page.getByRole('button', { name: 'Send to Discord ↗', exact: true }).click();

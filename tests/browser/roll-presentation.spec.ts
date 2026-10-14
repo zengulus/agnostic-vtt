@@ -1,4 +1,5 @@
 import { expect, test } from '@playwright/test';
+import { pausePresentationClock } from './helpers/clock.js';
 
 test('minimal totals advance queued rolls only after their full display interval', async ({
   page,
@@ -10,7 +11,7 @@ test('minimal totals advance queued rolls only after their full display interval
   await page.goto('/');
   await page.getByRole('button', { name: 'Open a demo table' }).click();
   await expect(page.getByText('Demo', { exact: true })).toBeVisible();
-  await page.clock.pauseAt(await page.evaluate(() => Date.now() + 1000));
+  await pausePresentationClock(page);
   const expression = page.getByRole('textbox', { name: 'DICE EXPRESSION' });
   await expression.fill('1d20');
   await page.getByRole('button', { name: 'Roll the dice' }).click();

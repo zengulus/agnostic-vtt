@@ -1,4 +1,5 @@
 import { expect, test, type Page } from '@playwright/test';
+import { pausePresentationClock } from './helpers/clock.js';
 import type { ServerMessage } from '../../shared/protocol.js';
 function observe(page: Page) {
   const messages: ServerMessage[] = [];
@@ -72,8 +73,7 @@ test('independent browser clients move tokens, share dice/chat, and reconnect', 
     .toBeTruthy();
   // This checks shared authoritative results; the physical-face scenario below
   // exercises the real renderer. Hold auto-dismiss while inspecting both clients.
-  for (const page of [gm, pc])
-    await page.clock.pauseAt(await page.evaluate(() => Date.now() + 1000));
+  for (const page of [gm, pc]) await pausePresentationClock(page);
   await gm.getByRole('textbox', { name: 'DICE EXPRESSION' }).fill('1d20 + 5 - 2');
   await gm.getByRole('button', { name: 'Roll the dice' }).click();
   await expect.poll(() => gmMessages.find((m) => m.type === 'DICE_ROLL_RESULT')).toBeTruthy();
@@ -127,7 +127,7 @@ test('keyboard activation works alongside tabletop shortcuts', async ({ page }) 
   await expect(page.getByRole('dialog')).toHaveCount(0);
   await expect(page.getByText('Demo', { exact: true })).toBeVisible();
   // Test keyboard dismissal without racing the minimal result's 2.8s auto-dismiss.
-  await page.clock.pauseAt(await page.evaluate(() => Date.now() + 1000));
+  await pausePresentationClock(page);
   await page.getByRole('button', { name: 'Roll the dice' }).focus();
   await page.keyboard.press('Enter');
   await expect(page.getByTestId('roll-total')).toBeVisible();

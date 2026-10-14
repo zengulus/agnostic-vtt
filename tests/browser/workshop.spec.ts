@@ -1,4 +1,5 @@
 import { expect, test, type Page } from '@playwright/test';
+import { pausePresentationClock } from './helpers/clock.js';
 import sharp from 'sharp';
 import type { ServerMessage } from '../../shared/protocol.js';
 import type { RoomState } from '../../shared/model.js';
@@ -257,7 +258,7 @@ test('dice themes persist, minimal arithmetic remains authoritative, and tablet 
   await page.getByLabel('Arithmetic theme').selectOption('minimal');
   await page.getByRole('button', { name: 'Done', exact: true }).click();
   // Minimal totals auto-dismiss after 2.8 seconds; inspect them on a held clock.
-  await page.clock.pauseAt(await page.evaluate(() => Date.now() + 1000));
+  await pausePresentationClock(page);
   await page.getByRole('textbox', { name: 'DICE EXPRESSION' }).fill('2d6+5-2');
   await page.getByRole('button', { name: 'Roll the dice' }).click();
   await expect(page.getByTestId('roll-total')).toBeVisible();
