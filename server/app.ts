@@ -384,10 +384,16 @@ export function createApp(
     server,
     wss,
     async close() {
+      const httpClosed = new Promise<void>((resolve) => server.close(() => resolve()));
       for (const ws of wss.clients) ws.terminate();
-      await new Promise<void>((resolve) => wss.close(() => resolve()));
-      await manager.close();
-      await new Promise<void>((resolve) => server.close(() => resolve()));
+      const socketsClosed = new Promise<void>((resolve) => wss.close(() => resolve()));
+      try {
+        await manager.close();
+      } finally {
+        // Upload HTTP requests can outlive the bounded shutdown grace period.
+        server.closeAllConnections();
+        await Promise.all([httpClosed, socketsClosed]);
+      }
     },
   };
 }

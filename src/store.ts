@@ -10,6 +10,7 @@ export type Tool =
 export type Dialog =
   | 'launch'
   | 'map'
+  | 'new-scene'
   | 'token'
   | 'grid'
   | 'invite'
@@ -57,6 +58,7 @@ interface UIState {
   dice: DicePreferences;
   history: HistoryStatus;
   members: Presence[];
+  removedMembers: Array<{ id: string; name: string }>;
   ownerId: string | null;
   discord: DiscordStatus;
   deliveries: Record<string, { status: 'queued' | 'sent' | 'failed'; message: string }>;
@@ -114,6 +116,7 @@ export const useTable = create<UIState>((set, get) => ({
   dice: settings.dice || dicePreferencesSchema.parse({}),
   history: { canUndo: false, canRedo: false, undoLabel: '', redoLabel: '' },
   members: [],
+  removedMembers: [],
   ownerId: null,
   discord: { configured: false, enabled: false, mode: 'automatic', canManage: false },
   deliveries: {},

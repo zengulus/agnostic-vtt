@@ -1,5 +1,5 @@
 import { useMemo, useState } from 'react';
-import { Lock, Play, Trash2, Upload } from 'lucide-react';
+import { Lock, Play, Star, Trash2, Upload } from 'lucide-react';
 import { useTable } from '../store.js';
 import { sendAndWait } from '../connection.js';
 import {
@@ -8,6 +8,13 @@ import {
   parseMacro,
   type MacroResult,
 } from '../../shared/macros.js';
+import { planMacroImport } from '../../shared/macroImport.js';
+import {
+  macroPreferencesKey,
+  readMacroPreferences,
+  writeMacroPreferences,
+  type MacroPreferences,
+} from '../macroPreferences.js';
 import { macroTextParts } from '../../shared/macroFormatting.js';
 import { formatRollBreakdown } from '../../shared/dice.js';
 
@@ -62,6 +69,14 @@ export function MacroResults({
 export function MacroLibraryDialog() {
   const s = useTable(),
     macros = Object.values(s.room.macros || {});
+  const preferencesKey = macroPreferencesKey(s.room.id, s.self?.id);
+  const [preferences, setPreferences] = useState(() => readMacroPreferences(preferencesKey)),
+    [filter, setFilter] = useState<'all' | 'favorites' | 'recent'>('all'),
+    [replacements, setReplacements] = useState<Record<number, { id: string; source: string }>>({});
+  const remember = (next: MacroPreferences) => {
+    setPreferences(next);
+    writeMacroPreferences(preferencesKey, next);
+  };
   const [text, setText] = useState(''),
     [visibility, setVisibility] = useState<'public' | 'private'>('public'),
     [selected, setSelected] = useState(''),
@@ -72,14 +87,29 @@ export function MacroLibraryDialog() {
   const preview = useMemo(() => {
     if (!text.trim()) return null;
     try {
-      return importMacros(text);
+      const imported = importMacros(text);
+      return { ...imported, plan: planMacroImport(imported.macros, macros, s.self?.id || '') };
     } catch (error) {
-      return { macros: [], errors: [{ line: 1, message: (error as Error).message }] };
+      return { macros: [], plan: [], errors: [{ line: 1, message: (error as Error).message }] };
     }
-  }, [text]);
+  }, [text, s.room.macros, s.self?.id]);
   const macro = macros.find((m) => m.id === selected),
     definition = macro ? parseMacro(macro.source) : null;
   const inputValue = (name: string) => (Object.hasOwn(values, name) ? values[name] : '');
+  const listed =
+    filter === 'recent'
+      ? preferences.recent.flatMap((id) => macros.filter((m) => m.id === id))
+      : macros.filter((m) => filter !== 'favorites' || preferences.favorites.includes(m.id));
+  const acceptedReplacements = (preview?.plan || []).flatMap((p) => {
+    const chosen = replacements[p.definition.line];
+    return p.status === 'changed' &&
+      chosen &&
+      p.matches.some((m) => m.id === chosen.id && m.source === chosen.source)
+      ? [{ line: p.definition.line, ...chosen }]
+      : [];
+  });
+  const importCount =
+    (preview?.plan.filter((p) => p.status === 'new').length || 0) + acceptedReplacements.length;
   const act = async (action: Parameters<typeof sendAndWait>[0], success?: () => void) => {
     setBusy(true);
     setError('');
@@ -94,15 +124,23 @@ export function MacroLibraryDialog() {
   };
   return (
     <div className="macro-library">
+      <div className="macro-filters" aria-label="Macro library filters">
+        {(['all', 'favorites', 'recent'] as const).map((value) => (
+          <button key={value} aria-pressed={filter === value} onClick={() => setFilter(value)}>
+            {value === 'all' ? 'All macros' : value === 'favorites' ? 'Favorites' : 'Recent rolls'}
+          </button>
+        ))}
+      </div>
       <div className="macro-list">
+        {!listed.length && !!macros.length && <p className="muted">No macros in this view yet.</p>}
         {!macros.length && <p className="muted">No saved macros yet.</p>}
-        {macros.map((m) => (
+        {listed.map((m) => (
           <div className={`macro-library-row ${selected === m.id ? 'selected' : ''}`} key={m.id}>
             <button
               aria-label={`Prepare ${m.name}`}
               onClick={() => {
                 setSelected(m.id);
-                setValues({});
+                setValues(preferences.inputs[m.id] || {});
                 setPrivateRoll(m.visibility === 'private');
                 setError('');
               }}
@@ -115,6 +153,23 @@ export function MacroLibraryDialog() {
                 </small>
               </span>
               {m.visibility === 'private' && <Lock size={13} />}
+            </button>
+            <button
+              aria-label={`Favorite ${m.name}`}
+              aria-pressed={preferences.favorites.includes(m.id)}
+              onClick={() =>
+                remember({
+                  ...preferences,
+                  favorites: preferences.favorites.includes(m.id)
+                    ? preferences.favorites.filter((id) => id !== m.id)
+                    : [...preferences.favorites, m.id].slice(-200),
+                })
+              }
+            >
+              <Star
+                size={14}
+                fill={preferences.favorites.includes(m.id) ? 'currentColor' : 'none'}
+              />
             </button>
             {(m.ownerId === s.self?.id || s.self?.role === 'gm') && (
               <button
@@ -154,7 +209,17 @@ export function MacroLibraryDialog() {
                 variables,
                 visibility: privateRoll ? 'private' : 'public',
               },
-              () => s.set({ dialog: null }),
+              () => {
+                remember({
+                  ...preferences,
+                  recent: [macro.id, ...preferences.recent.filter((id) => id !== macro.id)].slice(
+                    0,
+                    20,
+                  ),
+                  inputs: { ...preferences.inputs, [macro.id]: values },
+                });
+                s.set({ dialog: null });
+              },
             );
           }}
         >
@@ -172,7 +237,14 @@ export function MacroLibraryDialog() {
                   max="10000"
                   required
                   value={inputValue(name)}
-                  onChange={(e) => setValues({ ...values, [name]: e.target.value })}
+                  onChange={(e) => {
+                    const next = { ...values, [name]: e.target.value };
+                    setValues(next);
+                    remember({
+                      ...preferences,
+                      inputs: { ...preferences.inputs, [macro.id]: next },
+                    });
+                  }}
                 />
               </label>
             ))}
@@ -216,6 +288,7 @@ export function MacroLibraryDialog() {
               try {
                 if (file.size > 65536) throw new Error('Import text files up to 64 KiB.');
                 setText(await file.text());
+                setReplacements({});
                 setError('');
               } catch (error) {
                 setError((error as Error).message);
@@ -231,6 +304,7 @@ export function MacroLibraryDialog() {
             value={text}
             onChange={(e) => {
               setText(e.target.value);
+              setReplacements({});
               setError('');
             }}
             spellCheck={false}
@@ -251,13 +325,64 @@ export function MacroLibraryDialog() {
                 Line {error.line}: {error.message}
               </p>
             ))}
-            {preview.macros.map((m) => (
+            <p>
+              Unchanged macros are skipped. Changed macros stay as they are until you select a
+              replacement. Only your own macros can be replaced.
+            </p>
+            {preview.plan.map(({ definition: m, matches, status }) => (
               <div key={m.line}>
                 <strong>{m.name}</strong>
                 <small>
                   Line {m.line} · {m.groups.map((g) => g.name).join(' · ')}
                   {m.variables.length ? ` · Inputs: ${m.variables.join(', ')}` : ''}
                 </small>
+                <small>
+                  {status === 'unchanged'
+                    ? 'Unchanged · skip'
+                    : status === 'new'
+                      ? 'New · add'
+                      : 'Changed · review replacement'}
+                </small>
+                {status === 'changed' && (
+                  <>
+                    <label>
+                      Replace {m.name}
+                      <select
+                        aria-label={`Replace ${m.name}`}
+                        value={acceptedReplacements.find((r) => r.line === m.line)?.id || ''}
+                        onChange={(e) => {
+                          const target = matches.find((existing) => existing.id === e.target.value);
+                          const next = { ...replacements };
+                          if (target) next[m.line] = { id: target.id, source: target.source };
+                          else delete next[m.line];
+                          setReplacements(next);
+                        }}
+                      >
+                        <option value="">Skip changed macro</option>
+                        {matches.map((target, index) => (
+                          <option key={target.id} value={target.id}>
+                            Replace saved {m.name}
+                            {matches.length > 1 ? ` (${index + 1})` : ''} · {target.visibility}
+                          </option>
+                        ))}
+                      </select>
+                    </label>
+                    {matches
+                      .filter(
+                        (target) =>
+                          !acceptedReplacements.some((r) => r.line === m.line) ||
+                          target.id === replacements[m.line]?.id,
+                      )
+                      .map((target) => (
+                        <div key={target.id}>
+                          <small>Saved definition · {target.visibility}</small>
+                          <code>{target.source}</code>
+                        </div>
+                      ))}
+                    <small>Imported definition</small>
+                    <code>{m.source}</code>
+                  </>
+                )}
                 {m.repaired && (
                   <>
                     <p className="macro-repair">
@@ -285,14 +410,20 @@ export function MacroLibraryDialog() {
           disabled={
             busy ||
             (s.status !== 'live' && s.status !== 'demo') ||
-            !preview?.macros.length ||
-            !!preview.errors.length
+            !importCount ||
+            !!preview?.errors.length
           }
-          onClick={() => void act({ type: 'MACRO_IMPORT', text, visibility }, () => setText(''))}
+          onClick={() =>
+            void act(
+              { type: 'MACRO_IMPORT', text, visibility, replacements: acceptedReplacements },
+              () => {
+                setText('');
+                setReplacements({});
+              },
+            )
+          }
         >
-          {busy
-            ? 'Saving…'
-            : `Import ${preview?.macros.length || 0} macro${preview?.macros.length === 1 ? '' : 's'}`}
+          {busy ? 'Saving…' : `Import ${importCount} macro${importCount === 1 ? '' : 's'}`}
         </button>
       </div>
       {error && (

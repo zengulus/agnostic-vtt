@@ -16,6 +16,7 @@ import { launchDemo, liveAvailable, send } from '../connection.js';
 import { clampPoint, screenToWorld, snapPoint, type Camera } from '../../shared/geometry.js';
 import { canControl, type Point, type Token, type FogOperation } from '../../shared/model.js';
 import { SceneRenderer, conePoints, type Draft } from '../rendering.js';
+import { TokenResource } from './TokenResource.js';
 import { ToolOptions } from './Workshop.js';
 import { drawingsAlongBrush, zonesAlongBrush } from '../../shared/drawings.js';
 interface Drag {
@@ -790,6 +791,9 @@ export function Tabletop() {
               ? `${store.selectedIds.length} tokens`
               : selected.name.split(' · ')[0]}
           </strong>
+          {store.selectedIds.length <= 1 && (
+            <TokenResource key={scene.id + selected.id} token={selected} sceneId={scene.id} />
+          )}
           {store.self?.role === 'gm' && (
             <>
               <button

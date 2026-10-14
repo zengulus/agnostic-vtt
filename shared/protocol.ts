@@ -55,6 +55,13 @@ export const clientMessageSchema = z.discriminatedUnion('type', [
     tokenId: idSchema,
     edits: z.array(tokenEditSchema).min(1).max(12),
   }),
+  z.object({
+    ...base,
+    type: z.literal('TOKEN_RESOURCE_ADJUST'),
+    sceneId,
+    tokenId: idSchema,
+    delta: z.number().finite().min(-10000).max(10000),
+  }),
   z.object({ ...base, type: z.literal('TOKEN_DELETE'), sceneId, tokenId: idSchema }),
   z.object({ ...base, type: z.literal('SCENE_UPDATE'), scene: sceneSchema }),
   z.object({
@@ -153,10 +160,17 @@ export const clientMessageSchema = z.discriminatedUnion('type', [
     userId: z.string().uuid(),
     role: z.enum(['gm', 'player', 'remove']),
   }),
+  z.object({ ...base, type: z.literal('MEMBER_RESTORE'), userId: z.string().uuid() }),
   z.object({ ...base, type: z.literal('INVITE_ROTATE') }),
   z.object({
     ...base,
     type: z.literal('MACRO_IMPORT'),
+    replacements: z
+      .array(
+        z.object({ line: z.number().int().min(1), id: idSchema, source: z.string().max(4096) }),
+      )
+      .max(100)
+      .optional(),
     text: z.string().min(1).max(65536),
     visibility: z.enum(['public', 'private']),
   }),
@@ -219,7 +233,13 @@ export type ExtraServerMessage =
       message: string;
     }
   | { v: 2; type: 'HISTORY_STATUS'; history: HistoryStatus }
-  | { v: 2; type: 'MEMBERS_UPDATE'; members: Array<Presence>; ownerId: string }
+  | {
+      v: 2;
+      type: 'MEMBERS_UPDATE';
+      members: Array<Presence>;
+      ownerId: string;
+      removedMembers?: Array<{ id: string; name: string }>;
+    }
   | { v: 2; type: 'REVOKED'; message: string }
   | {
       v: 2;

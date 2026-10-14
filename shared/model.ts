@@ -225,6 +225,7 @@ export interface DurableRoom {
   inviteCode: string;
   members: Record<string, { name: string; role: 'gm' | 'player' }>;
   revokedMembers?: string[];
+  revokedMemberNames?: Record<string, string>;
   discord?: { url: string; enabled: boolean; mode: 'automatic' | 'manual' };
 }
 export type Change =

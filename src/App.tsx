@@ -235,9 +235,9 @@ export function App() {
             <h2>Scenes</h2>
             {(gm || !s.self) && (
               <button
-                aria-label="Add a map from URL"
-                title="Add a map from URL"
-                onClick={() => s.set({ dialog: 'map' })}
+                aria-label="New scene"
+                title="New scene"
+                onClick={() => s.set({ dialog: 'new-scene' })}
               >
                 <Plus size={16} />
               </button>
@@ -390,6 +390,7 @@ function Chronicle() {
   const [expression, setExpression] = useState('1d20 + 5 - 2'),
     [privateRoll, setPrivate] = useState(false),
     [chat, setChat] = useState(''),
+    [drawer, setDrawer] = useState(false),
     [pending, setPending] = useState(false),
     [presets, setPresets] = useState<string[]>(() => {
       const defaults = ['1d20 + 5', '2d6', '1d100'];
@@ -439,7 +440,16 @@ function Chronicle() {
     }
   };
   return (
-    <aside className="chronicle">
+    <aside className={`chronicle ${drawer ? 'drawer-open' : ''}`}>
+      <button
+        className="mobile-activity-toggle"
+        aria-expanded={drawer}
+        aria-controls="table-activity"
+        onClick={() => setDrawer(!drawer)}
+      >
+        <MessageSquare size={16} /> {drawer ? 'Close table activity' : 'Chat, turns & history'}
+        {drawer ? <ChevronDown size={16} /> : <ChevronRight size={16} />}
+      </button>
       <div className="chronicle-tabs">
         <button
           className={s.panel === 'chronicle' ? 'active' : ''}
@@ -463,7 +473,7 @@ function Chronicle() {
           Turns
         </button>
       </div>
-      <div className="activity-panel">
+      <div className="activity-panel" id="table-activity">
         {s.panel === 'tracker' ? (
           <TrackerPanel />
         ) : s.panel === 'chronicle' ? (

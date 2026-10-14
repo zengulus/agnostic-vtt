@@ -530,6 +530,10 @@ function open() {
             message.self.role === 'gm' && store.room.id === message.state.id
               ? store.history
               : { canUndo: false, canRedo: false, undoLabel: '', redoLabel: '' },
+          removedMembers:
+            message.self.role === 'gm' && store.room.id === message.state.id
+              ? store.removedMembers
+              : [],
           members:
             message.self.role === 'gm' && store.room.id === message.state.id ? store.members : [],
           ownerId:
@@ -626,7 +630,11 @@ function open() {
         store.set({ history: message.history });
         break;
       case 'MEMBERS_UPDATE':
-        store.set({ members: message.members, ownerId: message.ownerId });
+        store.set({
+          members: message.members,
+          ownerId: message.ownerId,
+          removedMembers: message.removedMembers || [],
+        });
         break;
       case 'DISCORD_STATUS':
         store.set({ discord: message.discord });
@@ -650,6 +658,7 @@ function open() {
           selected: null,
           selectedIds: [],
           members: [],
+          removedMembers: [],
           ownerId: null,
           discord: { configured: false, enabled: false, mode: 'automatic', canManage: false },
           deliveries: {},

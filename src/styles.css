@@ -2236,7 +2236,7 @@ i {
   .app,
   .app.library-collapsed {
     grid-template-columns: 43px minmax(0, 1fr);
-    grid-template-rows: 59px minmax(280px, 1fr) 215px 25px;
+    grid-template-rows: 59px minmax(280px, 1fr) max-content 25px;
     min-height: 580px;
   }
   .app-header {
@@ -3056,4 +3056,99 @@ i {
   .roll-particles {
     right: 36px;
   }
+}
+
+.mobile-activity-toggle {
+  display: none;
+}
+.selection-toolbar {
+  flex-wrap: wrap;
+  max-width: calc(100% - 24px);
+}
+.token-resource {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  font-size: 12px;
+}
+.resource-actions {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.resource-actions input {
+  width: 56px;
+  padding: 6px;
+}
+.resource-actions button {
+  padding: 8px;
+  min-height: 36px;
+}
+.member-removal-warning {
+  padding: 12px;
+  border: 1px solid #c8786c;
+  flex-wrap: wrap;
+}
+.member-removal-warning p {
+  width: 100%;
+}
+.member-management small {
+  display: block;
+  font-size: 11px;
+}
+@media (max-width: 620px) {
+  .mobile-activity-toggle {
+    display: flex;
+    justify-content: space-between;
+    padding: 10px 16px;
+    min-height: 42px;
+    flex-shrink: 0;
+    color: inherit;
+    border-bottom: 1px solid var(--line);
+  }
+  .chronicle .dice-workbench {
+    flex-shrink: 0;
+  }
+  .chronicle.drawer-open {
+    position: fixed;
+    z-index: 30;
+    inset: auto 0 0;
+    height: min(75dvh, 640px);
+    border-top: 1px solid #c8b987;
+    box-shadow: 0 -12px 40px #0008;
+  }
+  .chronicle.drawer-open .chronicle-tabs {
+    display: flex;
+    flex-shrink: 0;
+  }
+  .chronicle.drawer-open .activity-panel {
+    display: flex;
+    min-height: 120px;
+    padding: 12px;
+  }
+  .chronicle.drawer-open .dice-workbench {
+    display: none;
+  }
+  .selection-toolbar .token-resource {
+    flex-basis: 100%;
+  }
+  .resource-actions button {
+    min-height: 44px;
+  }
+}
+.macro-filters {
+  display: flex;
+  gap: 12px;
+  margin-bottom: 12px;
+}
+.macro-filters button {
+  padding: 8px;
+}
+.macro-filters button[aria-pressed='true'] {
+  color: var(--rubric, #d8b46c);
+  border-bottom: 1px solid currentColor;
+}
+.macro-preview code {
+  overflow-wrap: anywhere;
 }

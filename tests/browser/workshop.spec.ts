@@ -126,13 +126,12 @@ test('local uploads, statuses, independent template placement, group edits and u
   await page.getByRole('button', { name: 'Images', exact: true }).click();
   await expect(page.getByAltText('warden.png')).toBeVisible();
   await page.getByRole('button', { name: 'Close dialog' }).click();
-  await page.getByRole('button', { name: 'Map settings', exact: true }).click();
+  await page.getByRole('button', { name: 'New scene', exact: true }).click();
   await page
     .getByLabel('Upload image', { exact: true })
     .setInputFiles({ name: 'moss-map.png', mimeType: 'image/png', buffer: png });
   await expect(page.getByAltText('Image preview')).toHaveAttribute('src', /^blob:/);
   await page.getByLabel('Scene name').fill('Moss archive');
-  await page.getByLabel('Save as a new scene').check();
   await page.getByRole('button', { name: 'Add scene', exact: true }).click();
   await page.getByRole('button', { name: 'Moss archive', exact: true }).click();
   await expect(page.getByRole('heading', { name: 'Moss archive', exact: true })).toBeVisible();

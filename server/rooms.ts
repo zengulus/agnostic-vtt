@@ -319,6 +319,7 @@ export class RoomManager {
       .catch(() => {})
       .then(async () => {
         this.assertActive(room);
+        if (this.closing) throw new Error('The table server is shutting down. Try again shortly.');
         await action();
       });
     room.assetPromise = pending;
@@ -575,6 +576,13 @@ export class RoomManager {
         v: 2,
         type: 'MEMBERS_UPDATE',
         ownerId: room.data.ownerId,
+        removedMembers:
+          peer.identity.id === room.data.ownerId
+            ? (room.data.revokedMembers || []).map((id) => ({
+                id,
+                name: room.data.revokedMemberNames?.[id] || id,
+              }))
+            : [],
         members: Object.entries(room.data.members).map(([id, m]) => ({
           id,
           ...m,
@@ -591,7 +599,7 @@ export class RoomManager {
     if (!room) return;
     if (!room.peers.delete(peer)) return;
     this.broadcastPresence(room);
-    if (!room.peers.size) {
+    if (!room.peers.size && !this.closing) {
       if (room.timer) clearTimeout(room.timer);
       room.timer = setTimeout(() => {
         room.timer = undefined;
@@ -626,6 +634,7 @@ export class RoomManager {
     room.idleTimer.unref();
   }
   handle(peer: Peer, id: string, message: ClientMessage) {
+    if (this.closing) throw new Error('The table server is shutting down. Try again shortly.');
     const room = this.rooms.get(id);
     if (!room || !room.peers.has(peer)) throw new Error('Join a campaign first.');
     const data = room.data,
@@ -701,16 +710,32 @@ export class RoomManager {
       }
       return;
     }
-    if (message.type === 'MEMBER_UPDATE' || message.type === 'INVITE_ROTATE') {
+    if (
+      message.type === 'MEMBER_UPDATE' ||
+      message.type === 'MEMBER_RESTORE' ||
+      message.type === 'INVITE_ROTATE'
+    ) {
       if (peer.identity.id !== data.ownerId || role !== 'gm')
         throw new Error('Only the campaign owner manages membership and invitations.');
       if (message.type === 'INVITE_ROTATE') data.inviteCode = randomBytes(18).toString('base64url');
-      else {
+      else if (message.type === 'MEMBER_RESTORE') {
+        if (!data.revokedMembers?.includes(message.userId))
+          throw new Error('Removed member not found.');
+        if (Object.keys(data.members).length >= 10)
+          throw new Error('This table already has ten members.');
+        data.members[message.userId] = {
+          name: data.revokedMemberNames?.[message.userId] || message.userId,
+          role: 'player',
+        };
+        data.revokedMembers = data.revokedMembers.filter((id) => id !== message.userId);
+        if (data.revokedMemberNames) delete data.revokedMemberNames[message.userId];
+      } else {
         if (message.userId === data.ownerId)
           throw new Error('The campaign owner cannot be removed or demoted.');
         const member = data.members[message.userId];
         if (!member) throw new Error('Member not found.');
         if (message.role === 'remove') {
+          data.revokedMemberNames = { ...data.revokedMemberNames, [message.userId]: member.name };
           delete data.members[message.userId];
           data.revokedMembers = [...new Set([...(data.revokedMembers || []), message.userId])];
           for (const p of room.peers)
@@ -867,7 +892,14 @@ export class RoomManager {
     if (room.dirty) this.schedule(room);
   }
   async flushAll() {
-    await Promise.all([...this.rooms.values()].map((r) => this.flush(r)));
+    const results = await Promise.allSettled([...this.rooms.values()].map((r) => this.flush(r)));
+    const failures = results.filter((r) => r.status === 'rejected');
+    if (failures.length === 1) throw failures[0].reason;
+    if (failures.length)
+      throw new AggregateError(
+        failures.map((r) => r.reason),
+        'Snapshot saves failed.',
+      );
   }
   async close() {
     this.closing = true;
@@ -877,7 +909,22 @@ export class RoomManager {
       if (r.idleTimer) clearTimeout(r.idleTimer);
       if (r.cleanupTimer) clearTimeout(r.cleanupTimer);
     }
-    await Promise.allSettled([...this.rooms.values()].map((r) => r.assetPromise));
+    // Do not put a slow image in one campaign ahead of every other campaign's save.
+    // Retry initial failures in the final pass, while retaining each room's dirty state.
+    const initial = Promise.allSettled([...this.rooms.values()].map((r) => this.flush(r)));
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    try {
+      await Promise.race([
+        Promise.allSettled([...this.rooms.values()].map((r) => r.assetPromise)),
+        new Promise<void>((resolve) => {
+          timer = setTimeout(resolve, 3000);
+        }),
+      ]);
+    } finally {
+      if (timer) clearTimeout(timer);
+    }
+    await initial;
+    // Includes manifests and rollback intents changed by uploads during the grace period.
     await this.flushAll();
   }
   get stats() {

@@ -622,6 +622,41 @@ describe('campaign workshop over real HTTP and WebSockets', () => {
     await manager.flushAll();
     expect(await (await request('/api/campaigns', player.token)).json()).toEqual([]);
   });
+  it('lets only the owner restore revoked access as a player, preserving the member name across restart', async () => {
+    const gm = await client(owner);
+    await gm.wait('ROOM_SNAPSHOT');
+    const pc = await client(player);
+    await pc.wait('ROOM_SNAPSHOT');
+    gm.send({ type: 'MEMBER_UPDATE', userId: player.id, role: 'remove' });
+    await pc.wait('REVOKED');
+    const removed = await gm.wait('MEMBERS_UPDATE', (m) => !!m.removedMembers?.length);
+    expect(removed.removedMembers).toEqual([{ id: player.id, name: player.name }]);
+    await manager.flushAll();
+    clients.forEach((c) => c.ws.terminate());
+    clients.length = 0;
+    await app.close();
+    await start();
+    const resumed = await client(owner);
+    await resumed.wait('ROOM_SNAPSHOT');
+    expect((await resumed.wait('MEMBERS_UPDATE')).removedMembers).toEqual(removed.removedMembers);
+    resumed.send({ type: 'MEMBER_RESTORE', userId: player.id });
+    const restored = await resumed.wait('MEMBERS_UPDATE', (m) =>
+      m.members.some((p) => p.id === player.id),
+    );
+    expect(restored.members.find((p) => p.id === player.id)).toMatchObject({
+      name: player.name,
+      role: 'player',
+    });
+    expect(restored.removedMembers).toEqual([]);
+    const rejoined = await client(player);
+    await rejoined.wait('ROOM_SNAPSHOT');
+    const deniedId = rejoined.send({ type: 'MEMBER_RESTORE', userId: owner.id });
+    expect((await rejoined.wait('ERROR', (m) => m.actionId === deniedId)).message).toContain(
+      'Only the campaign owner',
+    );
+    await manager.flushAll();
+    expect((await storage.load(room.id))?.revokedMembers).toEqual([]);
+  });
   it('advances through hidden turns and wraps rounds, with undo restoring the prior tracker', async () => {
     const gm = await client(owner);
     await gm.wait('ROOM_SNAPSHOT');

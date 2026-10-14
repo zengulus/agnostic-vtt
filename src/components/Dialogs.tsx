@@ -28,7 +28,7 @@ import type { Asset, Token } from '../../shared/model.js';
 import { saveTokenDraft } from '../tokenSave.js';
 
 /** A form belongs to the room, scene and identity where it opened, even between renders. */
-function useSceneDialog(dialog: 'map' | 'token' | 'grid') {
+function useSceneDialog(dialog: 'map' | 'new-scene' | 'token' | 'grid') {
   const [context] = useState(() => {
     const s = useTable.getState();
     return {
@@ -115,6 +115,7 @@ export function Dialogs() {
   const title = {
     launch: supabase ? 'Your campaigns' : 'Your table',
     map: 'Scene',
+    'new-scene': 'New Scene',
     token: 'Character',
     grid: 'Grid',
     invite: 'Your party',
@@ -149,8 +150,8 @@ export function Dialogs() {
         <h2 id="modal-title">{title}</h2>
         {s.dialog === 'launch' ? (
           <Launch />
-        ) : s.dialog === 'map' ? (
-          <MapDialog />
+        ) : s.dialog === 'map' || s.dialog === 'new-scene' ? (
+          <MapDialog key={s.dialog} create={s.dialog === 'new-scene'} />
         ) : s.dialog === 'token' ? (
           <TokenDialog />
         ) : s.dialog === 'grid' ? (
@@ -680,34 +681,49 @@ function AssetPicker({
     </div>
   );
 }
-function MapDialog() {
+function MapDialog({ create }: { create: boolean }) {
   const s = useTable(),
-    { scene, currentScene } = useSceneDialog('map'),
+    { scene, currentScene } = useSceneDialog(create ? 'new-scene' : 'map'),
     gm = s.self?.role === 'gm';
-  const [asset, setAsset] = useState<Asset>(scene.map),
-    [name, setName] = useState(scene.name),
-    [width, setWidth] = useState(scene.width),
-    [height, setHeight] = useState(scene.height),
-    [create, setCreate] = useState(false);
+  const [asset, setAsset] = useState<Asset>(
+      create ? { kind: 'builtin', url: 'blank.svg' } : scene.map,
+    ),
+    [name, setName] = useState(create ? '' : scene.name),
+    [width, setWidth] = useState(create ? 1600 : scene.width),
+    [height, setHeight] = useState(create ? 1200 : scene.height),
+    [sceneId] = useState(() => (create ? crypto.randomUUID() : scene.id)),
+    [saving, setSaving] = useState(false),
+    [assetBusy, setAssetBusy] = useState(false),
+    [error, setError] = useState('');
   return (
     <form
-      onSubmit={(e) => {
+      onSubmit={async (e) => {
         e.preventDefault();
-        if (!gm || !currentScene()) return;
-        send({
-          type: 'SCENE_CONFIG',
-          sceneId: create ? crypto.randomUUID() : scene.id,
-          name,
-          map: asset,
-          width,
-          height,
-          create,
-        });
-        s.set({ dialog: null, fitNonce: s.fitNonce + 1 });
+        if (!gm || saving || assetBusy || !currentScene()) return;
+        setSaving(true);
+        setError('');
+        try {
+          await sendAndWait({
+            type: 'SCENE_CONFIG',
+            sceneId,
+            name,
+            map: asset,
+            width,
+            height,
+            create,
+          });
+          if (currentScene()) s.set({ dialog: null, fitNonce: useTable.getState().fitNonce + 1 });
+        } catch (error) {
+          if (currentScene())
+            setError(error instanceof Error ? error.message : 'Scene save failed.');
+        } finally {
+          if (currentScene()) setSaving(false);
+        }
       }}
     >
       <AssetPicker
         asset={asset}
+        onBusyChange={setAssetBusy}
         onChange={(a, w, h) => {
           setAsset(a);
           setWidth(Math.min(10000, Math.max(200, w || 1600)));
@@ -752,13 +768,14 @@ function MapDialog() {
       </div>
       {gm ? (
         <>
-          <label className="check-label">
-            <input type="checkbox" checked={create} onChange={(e) => setCreate(e.target.checked)} />
-            Save as a new scene
-          </label>
-          <button className="primary modal-submit">
+          {error && (
+            <p className="form-error" role="alert">
+              {error}
+            </p>
+          )}
+          <button className="primary modal-submit" disabled={saving || assetBusy}>
             <MapIcon />
-            {create ? 'Add scene' : 'Save scene'}
+            {saving ? 'Saving…' : create ? 'Add scene' : 'Save scene'}
             <Check size={16} />
           </button>
         </>
@@ -906,11 +923,14 @@ function TokenDialog() {
             >
               <option value="*">Everyone</option>
               <option value="gm">Game master only</option>
-              {s.presence.map((p) => (
-                <option key={p.id} value={p.id}>
-                  {p.name}
-                </option>
-              ))}
+              {[...new Map([...s.presence, ...s.members].map((p) => [p.id, p])).values()].map(
+                (p) => (
+                  <option key={p.id} value={p.id}>
+                    {p.name}
+                    {s.presence.some((online) => online.id === p.id) ? '' : ' (offline)'}
+                  </option>
+                ),
+              )}
             </select>
           </label>
         </div>
@@ -1078,25 +1098,36 @@ function GridDialog() {
   const s = useTable(),
     { scene, currentScene } = useSceneDialog('grid'),
     gm = s.self?.role === 'gm',
-    [grid, setGrid] = useState(scene.grid);
+    [grid, setGrid] = useState(scene.grid),
+    [saving, setSaving] = useState(false),
+    [error, setError] = useState('');
   const update = (v: Partial<typeof grid>) => setGrid({ ...grid, ...v });
   return (
     <form
-      onSubmit={(e) => {
+      onSubmit={async (e) => {
         e.preventDefault();
         const current = currentScene();
-        if (!current) return;
-        if (gm) send({ type: 'GRID_UPDATE', sceneId: scene.id, grid });
-        else if (!s.self) {
-          const latest = useTable.getState();
-          s.set({
-            room: {
-              ...latest.room,
-              scenes: { ...latest.room.scenes, [scene.id]: { ...current, grid } },
-            },
-          });
+        if (!current || saving) return;
+        setSaving(true);
+        setError('');
+        try {
+          if (gm) await sendAndWait({ type: 'GRID_UPDATE', sceneId: scene.id, grid });
+          else if (!s.self) {
+            const latest = useTable.getState();
+            s.set({
+              room: {
+                ...latest.room,
+                scenes: { ...latest.room.scenes, [scene.id]: { ...current, grid } },
+              },
+            });
+          }
+          if (currentScene()) s.set({ dialog: null });
+        } catch (error) {
+          if (currentScene())
+            setError(error instanceof Error ? error.message : 'Grid save failed.');
+        } finally {
+          if (currentScene()) setSaving(false);
         }
-        s.set({ dialog: null });
       }}
     >
       <p className="modal-description">
@@ -1218,9 +1249,14 @@ function GridDialog() {
           disabled={!!s.self && !gm}
         />
       </label>
+      {error && (
+        <p className="form-error" role="alert">
+          {error}
+        </p>
+      )}
       {(gm || !s.self) && (
-        <button className="primary modal-submit">
-          Save grid
+        <button className="primary modal-submit" disabled={saving}>
+          {saving ? 'Saving…' : 'Save grid'}
           <Check size={16} />
         </button>
       )}
@@ -1229,7 +1265,8 @@ function GridDialog() {
 }
 function Invite() {
   const s = useTable(),
-    [copied, setCopied] = useState(false);
+    [copied, setCopied] = useState(false),
+    [removing, setRemoving] = useState<string | null>(null);
   return (
     <>
       <p className="modal-description">Anyone with your invitation can join as a player.</p>
@@ -1269,14 +1306,44 @@ function Invite() {
                   <option value="player">Player</option>
                   <option value="gm">Campaign role</option>
                 </select>
-                <button
-                  aria-label={`Remove ${m.name}`}
-                  onClick={() => send({ type: 'MEMBER_UPDATE', userId: m.id, role: 'remove' })}
-                >
+                <button aria-label={`Remove ${m.name}`} onClick={() => setRemoving(m.id)}>
                   <X size={14} />
                 </button>
               </div>
             ))}
+          {removing && s.members.some((m) => m.id === removing) && (
+            <div className="member-removal-warning" role="alert">
+              <p>
+                Remove {s.members.find((m) => m.id === removing)?.name}? They will be disconnected
+                and blocked from this campaign, including invitation links, until you restore
+                access.
+              </p>
+              <button
+                onClick={() => {
+                  if (send({ type: 'MEMBER_UPDATE', userId: removing, role: 'remove' }))
+                    setRemoving(null);
+                }}
+              >
+                Remove and block access
+              </button>
+              <button onClick={() => setRemoving(null)}>Cancel removal</button>
+            </div>
+          )}
+          {!!s.removedMembers.length && <span className="eyebrow">REMOVED MEMBERS</span>}
+          {s.removedMembers.map((m) => (
+            <div key={m.id}>
+              <span>
+                {m.name}
+                <small>Access blocked</small>
+              </span>
+              <button
+                aria-label={`Restore access for ${m.name}`}
+                onClick={() => send({ type: 'MEMBER_RESTORE', userId: m.id })}
+              >
+                Restore Access
+              </button>
+            </div>
+          ))}
           <button
             className="subtle-button"
             onClick={() => {

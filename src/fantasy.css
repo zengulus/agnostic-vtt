@@ -709,7 +709,7 @@
 @media (max-width: 620px) {
   .app,
   .app.library-collapsed {
-    grid-template-rows: 59px minmax(280px, 1fr) 207px;
+    grid-template-rows: 59px minmax(280px, 1fr) max-content;
     min-height: 546px;
   }
   .brand > span {

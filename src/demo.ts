@@ -35,6 +35,7 @@ function publish(reset = false) {
     inviteCode: undefined,
     ownerId: null,
     members: [],
+    removedMembers: [],
     discord: { configured: false, enabled: false, mode: 'automatic', canManage: false },
     history: {
       canUndo: role === 'gm' && !!undo.length,

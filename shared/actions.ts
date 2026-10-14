@@ -14,6 +14,7 @@ import { clampPoint, snapPoint } from './geometry.js';
 import { evaluateDice } from './dice.js';
 import { sampleScene } from './sample.js';
 import { importMacros, parseMacro, evaluateMacro } from './macros.js';
+import { planMacroImport } from './macroImport.js';
 import { applyTokenEdits } from './tokenEdits.js';
 export function assertAsset(room: DurableRoom, asset: Token['image']) {
   validateAsset(asset);
@@ -80,24 +81,45 @@ export function prepareAction(
       if (imported.errors.length)
         throw new Error(`Line ${imported.errors[0].line}: ${imported.errors[0].message}`);
       const existing = Object.values(state.macros || {});
+      const plan = planMacroImport(imported.macros, existing, user.id);
+      const replacements = m.replacements || [];
       if (
-        existing.length + imported.macros.length > 200 ||
-        existing.filter((macro) => macro.ownerId === user.id).length + imported.macros.length > 100
+        new Set(replacements.map((r) => r.line)).size !== replacements.length ||
+        new Set(replacements.map((r) => r.id)).size !== replacements.length
+      )
+        throw new Error('Duplicate macro replacements.');
+      // Check every replacement before preparing any changes. Stale previews must be reviewed again.
+      for (const replacement of replacements) {
+        const entry = plan.find((p) => p.definition.line === replacement.line);
+        const target = entry?.matches.find((macro) => macro.id === replacement.id);
+        if (!entry || entry.status !== 'changed' || !target || target.source !== replacement.source)
+          throw new Error('The macro changed since this preview. Review the import again.');
+      }
+      const additions = plan.filter((p) => p.status === 'new').length;
+      if (
+        existing.length + additions > 200 ||
+        existing.filter((macro) => macro.ownerId === user.id).length + additions > 100
       )
         throw new Error('Save at most 100 macros per person and 200 per campaign.');
-      return imported.macros.map((definition) => {
-        const id = randomUUID();
-        return {
-          kind: 'macro',
-          id,
-          macro: {
+      return plan.flatMap(({ definition, matches, status }) => {
+        const replacement = replacements.find((r) => r.line === definition.line);
+        if (status === 'unchanged' || (status === 'changed' && !replacement)) return [];
+        const previous = matches.find((macro) => macro.id === replacement?.id);
+        const id = previous?.id || randomUUID();
+        return [
+          {
+            kind: 'macro' as const,
             id,
-            name: definition.name,
-            source: definition.source,
-            ownerId: user.id,
-            visibility: m.visibility,
+            macro: {
+              id,
+              name: definition.name,
+              source: definition.source,
+              ownerId: user.id,
+              // Updating a private macro must never make it public through the new-import default.
+              visibility: previous?.visibility || m.visibility,
+            },
           },
-        };
+        ];
       });
     }
     case 'MACRO_DELETE': {
@@ -137,6 +159,23 @@ export function prepareAction(
       if (new Set(m.positions.map((p) => p.tokenId)).size !== m.positions.length)
         throw new Error('Duplicate token identifiers in batch.');
       return m.positions.map((p) => move(m.sceneId, p.tokenId, p.position));
+    case 'TOKEN_RESOURCE_ADJUST': {
+      const { t } = controlled(m.sceneId, m.tokenId);
+      if (!t.resource) throw new Error('This token has no resource counter.');
+      return [
+        {
+          kind: 'token',
+          sceneId: m.sceneId,
+          token: {
+            ...t,
+            resource: {
+              ...t.resource,
+              value: Math.max(0, Math.min(t.resource.max, t.resource.value + m.delta)),
+            },
+          },
+        },
+      ];
+    }
     case 'TOKEN_UPDATE':
       gm();
       if (m.createOnly && scene(m.sceneId).tokens[m.token.id])
