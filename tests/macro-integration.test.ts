@@ -12,7 +12,12 @@ import { createApp } from '../server/app.js';
 import { DiscordDelivery } from '../server/discord.js';
 import { applyChanges } from '../shared/state.js';
 import { macroText } from '../shared/macros.js';
-import type { Action, ServerMessage } from '../shared/protocol.js';
+import {
+  serializeClientAction,
+  MAX_CLIENT_MESSAGE_BYTES,
+  type Action,
+  type ServerMessage,
+} from '../shared/protocol.js';
 import type { RoomState } from '../shared/model.js';
 
 const endpoint =
@@ -166,6 +171,58 @@ describe('macros and campaign Discord over real HTTP/WebSockets', () => {
     expect((await pc.wait('ERROR', (m) => m.actionId === id)).message).toContain('Line 2');
     expect(pc.state.revision).toBe(before);
     expect(Object.values(pc.state.macros!)).toHaveLength(2);
+  });
+  it('replaces a full library of long definitions over the bounded socket and persists version guards', async () => {
+    const gm = await client();
+    const definitions = Array.from(
+      { length: 100 },
+      (_, i) =>
+        `[Roll ${i}](Select(1){${Array.from({ length: 4 }, () => 'x'.repeat(900)).join(',')}})`,
+    );
+    for (let batch = 0; batch < 10; batch++)
+      await gm.commit({
+        type: 'MACRO_IMPORT',
+        text: definitions.slice(batch * 10, batch * 10 + 10).join('\n'),
+        visibility: 'private',
+      });
+    const saved = Object.values(gm.state.macros!);
+    const replacements = saved.map((macro, i) => ({
+      line: i + 1,
+      id: macro.id,
+      version: macro.version!,
+    }));
+    const text = saved.map((macro) => `[${macro.name}]([Check(d6)])`).join('\n');
+    const action: Action = { type: 'MACRO_IMPORT', text, visibility: 'public', replacements };
+    expect(
+      Buffer.byteLength(
+        JSON.stringify({
+          ...action,
+          replacements: saved.map((macro, i) => ({
+            line: i + 1,
+            id: macro.id,
+            source: macro.source,
+          })),
+        }),
+      ),
+    ).toBeGreaterThan(MAX_CLIENT_MESSAGE_BYTES);
+    expect(Buffer.byteLength(serializeClientAction(action, 'replace-all'))).toBeLessThan(
+      MAX_CLIENT_MESSAGE_BYTES,
+    );
+    await gm.commit(action);
+    expect(gm.ws.readyState).toBe(WebSocket.OPEN);
+    expect(Object.keys(gm.state.macros!)).toEqual(saved.map((macro) => macro.id));
+    expect(
+      Object.values(gm.state.macros!).every(
+        (macro) => macro.visibility === 'private' && macro.version === gm.state.revision,
+      ),
+    ).toBe(true);
+    await manager.flushAll();
+    expect((await storage.load(room.id))?.state.macros).toEqual(gm.state.macros);
+    const staleId = gm.send(action);
+    expect((await gm.wait('ERROR', (message) => message.actionId === staleId)).message).toContain(
+      'changed since',
+    );
+    expect(gm.ws.readyState).toBe(WebSocket.OPEN);
   });
   it('protects private definitions and outcomes, validates variables, and authorizes deletion', async () => {
     const gm = await client(),

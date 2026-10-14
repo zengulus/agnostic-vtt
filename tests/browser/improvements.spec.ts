@@ -250,3 +250,110 @@ test('offline owners remain assignable and removal requires a warning before acc
     await playerContext.close();
   }
 });
+
+for (const viewport of [
+  { width: 390, height: 844 },
+  { width: 820, height: 1180 },
+]) {
+  test(`compact library creates a blank scene at ${viewport.width}px without editing the active scene`, async ({
+    page,
+  }) => {
+    await demo(page);
+    const original = (await state(page)).scenes.hollow;
+    await page.setViewportSize(viewport);
+    await page.getByRole('button', { name: 'Toggle library', exact: true }).click();
+    const library = page.getByRole('dialog');
+    await expect(
+      library.getByRole('button', { name: 'Scene settings', exact: true }),
+    ).toBeVisible();
+    await library.getByRole('button', { name: 'New Scene', exact: true }).click();
+    await expect(page.getByRole('heading', { name: 'New Scene', exact: true })).toBeVisible();
+    await expect(page.getByLabel('Scene name')).toHaveValue('');
+    await expect(page.getByAltText('Image preview')).toHaveAttribute('src', /blank.svg$/);
+    await page.getByLabel('Scene name').fill('Compact adventure');
+    await page.getByRole('button', { name: 'Add scene', exact: true }).click();
+    await expect(page.getByRole('dialog')).toHaveCount(0);
+    const room = await state(page),
+      added = Object.values(room.scenes).find((scene) => scene.name === 'Compact adventure')!;
+    expect(added.tokens).toEqual({});
+    expect(room.scenes.hollow).toEqual(original);
+  });
+}
+
+test('compact library keeps scene creation restricted to the GM', async ({ page }) => {
+  await demo(page, true);
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.getByRole('button', { name: 'Toggle library', exact: true }).click();
+  await expect(
+    page.getByRole('dialog').getByRole('button', { name: 'New Scene', exact: true }),
+  ).toHaveCount(0);
+});
+
+test('scene and grid controls stay locked until acknowledgement and unlock on rejection', async ({
+  page,
+}) => {
+  let pending: { message: string | Buffer; actionId: string } | undefined;
+  let finish: ((accepted: boolean) => void) | undefined;
+  await page.routeWebSocket('**/ws', (ws) => {
+    const server = ws.connectToServer();
+    ws.onMessage((message) => {
+      const action = JSON.parse(message.toString());
+      if (action.type === 'SCENE_CONFIG' || action.type === 'GRID_UPDATE') {
+        pending = { message, actionId: action.actionId };
+      } else server.send(message);
+    });
+    finish = (accepted) => {
+      const action = pending!;
+      pending = undefined;
+      if (accepted) server.send(action.message);
+      else
+        ws.send(
+          JSON.stringify({
+            v: 2,
+            type: 'ERROR',
+            actionId: action.actionId,
+            message: 'Save rejected for regression check.',
+          }),
+        );
+    };
+  });
+  await page.goto('/');
+  await page.getByRole('button', { name: 'Log in', exact: true }).click();
+  await page.getByRole('button', { name: 'Create campaign', exact: true }).click();
+  await expect(page.getByText('Live', { exact: true })).toBeVisible();
+  for (const kind of ['map', 'grid', 'new-scene'] as const) {
+    await page
+      .getByRole('button', {
+        name: kind === 'map' ? 'Map settings' : kind === 'grid' ? 'Grid settings' : 'New scene',
+        exact: true,
+      })
+      .click();
+    const label = kind === 'grid' ? 'Units' : 'Scene name';
+    await page.getByLabel(label, { exact: true }).fill('Draft');
+    const submit = kind === 'grid' ? 'Save grid' : kind === 'map' ? 'Save scene' : 'Add scene';
+    await page.getByRole('button', { name: submit, exact: true }).click();
+    await expect.poll(() => !!pending).toBe(true);
+    const controls = page.locator('.modal form').locator('input,select,textarea,button');
+    for (const control of await controls.all()) await expect(control).toBeDisabled();
+    expect(await page.getByLabel(label, { exact: true }).inputValue()).toBe('Draft');
+    finish!(false);
+    await expect(page.getByRole('dialog').getByRole('alert')).toContainText('Save rejected');
+    await expect(page.getByLabel(label, { exact: true })).toBeEnabled();
+    await expect(page.getByLabel(label, { exact: true })).toHaveValue('Draft');
+    await page.getByLabel(label, { exact: true }).fill('Retry draft');
+    await page.getByRole('button', { name: submit, exact: true }).click();
+    await expect.poll(() => !!pending).toBe(true);
+    for (const control of await controls.all()) await expect(control).toBeDisabled();
+    finish!(true);
+    await expect(page.getByRole('dialog')).toHaveCount(0);
+    const room = await state(page);
+    if (kind === 'map') expect(room.scenes.hollow.name).toBe('Retry draft');
+    else if (kind === 'grid') expect(room.scenes.hollow.grid.units).toBe('Retry draft');
+    else
+      expect(
+        Object.values(room.scenes).some(
+          (scene) => scene.name === 'Retry draft' && !Object.keys(scene.tokens).length,
+        ),
+      ).toBe(true);
+  }
+});

@@ -92,7 +92,12 @@ export function prepareAction(
       for (const replacement of replacements) {
         const entry = plan.find((p) => p.definition.line === replacement.line);
         const target = entry?.matches.find((macro) => macro.id === replacement.id);
-        if (!entry || entry.status !== 'changed' || !target || target.source !== replacement.source)
+        if (
+          !entry ||
+          entry.status !== 'changed' ||
+          !target ||
+          (target.version ?? 0) !== replacement.version
+        )
           throw new Error('The macro changed since this preview. Review the import again.');
       }
       const additions = plan.filter((p) => p.status === 'new').length;
@@ -114,6 +119,8 @@ export function prepareAction(
               id,
               name: definition.name,
               source: definition.source,
+              // Using the room revision avoids reusing a version after undo and another edit.
+              version: state.revision + 1,
               ownerId: user.id,
               // Updating a private macro must never make it public through the new-import default.
               visibility: previous?.visibility || m.visibility,

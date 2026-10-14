@@ -72,7 +72,7 @@ export function MacroLibraryDialog() {
   const preferencesKey = macroPreferencesKey(s.room.id, s.self?.id);
   const [preferences, setPreferences] = useState(() => readMacroPreferences(preferencesKey)),
     [filter, setFilter] = useState<'all' | 'favorites' | 'recent'>('all'),
-    [replacements, setReplacements] = useState<Record<number, { id: string; source: string }>>({});
+    [replacements, setReplacements] = useState<Record<number, { id: string; version: number }>>({});
   const remember = (next: MacroPreferences) => {
     setPreferences(next);
     writeMacroPreferences(preferencesKey, next);
@@ -104,7 +104,7 @@ export function MacroLibraryDialog() {
     const chosen = replacements[p.definition.line];
     return p.status === 'changed' &&
       chosen &&
-      p.matches.some((m) => m.id === chosen.id && m.source === chosen.source)
+      p.matches.some((m) => m.id === chosen.id && (m.version ?? 0) === chosen.version)
       ? [{ line: p.definition.line, ...chosen }]
       : [];
   });
@@ -353,7 +353,8 @@ export function MacroLibraryDialog() {
                         onChange={(e) => {
                           const target = matches.find((existing) => existing.id === e.target.value);
                           const next = { ...replacements };
-                          if (target) next[m.line] = { id: target.id, source: target.source };
+                          if (target)
+                            next[m.line] = { id: target.id, version: target.version ?? 0 };
                           else delete next[m.line];
                           setReplacements(next);
                         }}

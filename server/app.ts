@@ -1,7 +1,11 @@
 import { createServer, type IncomingMessage, type ServerResponse } from 'node:http';
 import { WebSocketServer, WebSocket } from 'ws';
 import { z } from 'zod';
-import { clientMessageSchema, type ServerMessage } from '../shared/protocol.js';
+import {
+  clientMessageSchema,
+  MAX_CLIENT_MESSAGE_BYTES,
+  type ServerMessage,
+} from '../shared/protocol.js';
 import { metrics } from './persistence.js';
 import { LocalAuth, type Auth } from './auth.js';
 import { RoomManager, type Peer } from './rooms.js';
@@ -257,7 +261,11 @@ export function createApp(
       });
     }
   });
-  const wss = new WebSocketServer({ noServer: true, maxPayload: 262144, perMessageDeflate: false });
+  const wss = new WebSocketServer({
+    noServer: true,
+    maxPayload: MAX_CLIENT_MESSAGE_BYTES,
+    perMessageDeflate: false,
+  });
   server.on('upgrade', (req, socket, head) => {
     if (
       req.url !== '/ws' ||

@@ -721,67 +721,69 @@ function MapDialog({ create }: { create: boolean }) {
         }
       }}
     >
-      <AssetPicker
-        asset={asset}
-        onBusyChange={setAssetBusy}
-        onChange={(a, w, h) => {
-          setAsset(a);
-          setWidth(Math.min(10000, Math.max(200, w || 1600)));
-          setHeight(Math.min(10000, Math.max(200, h || 1200)));
-        }}
-      />
-      <label>
-        Scene name
-        <input
-          value={name}
-          onChange={(e) => setName(e.target.value)}
-          maxLength={60}
-          required
-          disabled={!gm}
+      <fieldset disabled={saving} style={{ border: 0, padding: 0, margin: 0, minWidth: 0 }}>
+        <AssetPicker
+          asset={asset}
+          onBusyChange={setAssetBusy}
+          onChange={(a, w, h) => {
+            setAsset(a);
+            setWidth(Math.min(10000, Math.max(200, w || 1600)));
+            setHeight(Math.min(10000, Math.max(200, h || 1200)));
+          }}
         />
-      </label>
-      <div className="form-row">
         <label>
-          Width
+          Scene name
           <input
-            type="number"
-            value={width}
-            onChange={(e) => setWidth(Number(e.target.value))}
-            min={200}
-            max={10000}
+            value={name}
+            onChange={(e) => setName(e.target.value)}
+            maxLength={60}
             required
             disabled={!gm}
           />
         </label>
-        <label>
-          Height
-          <input
-            type="number"
-            value={height}
-            onChange={(e) => setHeight(Number(e.target.value))}
-            min={200}
-            max={10000}
-            required
-            disabled={!gm}
-          />
-        </label>
-      </div>
-      {gm ? (
-        <>
-          {error && (
-            <p className="form-error" role="alert">
-              {error}
-            </p>
-          )}
-          <button className="primary modal-submit" disabled={saving || assetBusy}>
-            <MapIcon />
-            {saving ? 'Saving…' : create ? 'Add scene' : 'Save scene'}
-            <Check size={16} />
-          </button>
-        </>
-      ) : (
-        <p className="field-note">Your game master manages the campaign’s scenes.</p>
-      )}
+        <div className="form-row">
+          <label>
+            Width
+            <input
+              type="number"
+              value={width}
+              onChange={(e) => setWidth(Number(e.target.value))}
+              min={200}
+              max={10000}
+              required
+              disabled={!gm}
+            />
+          </label>
+          <label>
+            Height
+            <input
+              type="number"
+              value={height}
+              onChange={(e) => setHeight(Number(e.target.value))}
+              min={200}
+              max={10000}
+              required
+              disabled={!gm}
+            />
+          </label>
+        </div>
+        {gm ? (
+          <>
+            {error && (
+              <p className="form-error" role="alert">
+                {error}
+              </p>
+            )}
+            <button className="primary modal-submit" disabled={saving || assetBusy}>
+              <MapIcon />
+              {saving ? 'Saving…' : create ? 'Add scene' : 'Save scene'}
+              <Check size={16} />
+            </button>
+          </>
+        ) : (
+          <p className="field-note">Your game master manages the campaign’s scenes.</p>
+        )}
+      </fieldset>
     </form>
   );
 }
@@ -1130,136 +1132,138 @@ function GridDialog() {
         }
       }}
     >
-      <p className="modal-description">
-        Choose square or hex geometry, or a world without lines. Measurements can follow real
-        distance or count grid steps.
-      </p>
-      <div className="form-row">
-        <label>
-          Grid type
-          <select
-            value={grid.type || 'square'}
-            onChange={(e) => update({ type: e.target.value as 'square' | 'hex' })}
-            disabled={!!s.self && !gm}
-          >
-            <option value="square">Square</option>
-            <option value="hex">Hex · pointy top</option>
-          </select>
-        </label>
-        <label>
-          Measurement convention
-          <select
-            value={grid.measurement || 'real'}
-            onChange={(e) => update({ measurement: e.target.value as 'real' | 'grid' })}
-            disabled={!!s.self && !gm}
-          >
-            <option value="real">Real distance</option>
-            <option value="grid">Grid steps</option>
-          </select>
-        </label>
-      </div>
-      <label className="check-label">
-        <input
-          type="checkbox"
-          checked={grid.enabled}
-          onChange={(e) => update({ enabled: e.target.checked })}
-          disabled={!!s.self && !gm}
-        />
-        Show grid
-      </label>
-      <label className="check-label">
-        <input
-          type="checkbox"
-          checked={grid.snap}
-          onChange={(e) => update({ snap: e.target.checked })}
-          disabled={!!s.self && !gm}
-        />
-        Snap tokens to grid centres
-      </label>
-      <div className="form-row">
-        <label>
-          Cell size (pixels)
-          <input
-            type="number"
-            min={16}
-            max={200}
-            value={grid.size}
-            onChange={(e) => update({ size: Number(e.target.value) })}
-            required
-            disabled={!!s.self && !gm}
-          />
-        </label>
-        <label>
-          Distance per cell
-          <input
-            type="number"
-            min={0.1}
-            max={1000}
-            step={0.1}
-            value={grid.distance}
-            onChange={(e) => update({ distance: Number(e.target.value) })}
-            required
-            disabled={!!s.self && !gm}
-          />
-        </label>
-        <label>
-          Units
-          <input
-            value={grid.units}
-            maxLength={12}
-            onChange={(e) => update({ units: e.target.value })}
-            required
-            disabled={!!s.self && !gm}
-          />
-        </label>
-      </div>
-      <div className="form-row">
-        <label>
-          X alignment
-          <input
-            type="number"
-            min={-200}
-            max={200}
-            value={grid.offsetX}
-            onChange={(e) => update({ offsetX: Number(e.target.value) })}
-            disabled={!!s.self && !gm}
-          />
-        </label>
-        <label>
-          Y alignment
-          <input
-            type="number"
-            min={-200}
-            max={200}
-            value={grid.offsetY}
-            onChange={(e) => update({ offsetY: Number(e.target.value) })}
-            disabled={!!s.self && !gm}
-          />
-        </label>
-      </div>
-      <label>
-        Grid opacity · {Math.round(grid.opacity * 100)}%
-        <input
-          type="range"
-          min={0}
-          max={0.6}
-          step={0.01}
-          value={grid.opacity}
-          onChange={(e) => update({ opacity: Number(e.target.value) })}
-          disabled={!!s.self && !gm}
-        />
-      </label>
-      {error && (
-        <p className="form-error" role="alert">
-          {error}
+      <fieldset disabled={saving} style={{ border: 0, padding: 0, margin: 0, minWidth: 0 }}>
+        <p className="modal-description">
+          Choose square or hex geometry, or a world without lines. Measurements can follow real
+          distance or count grid steps.
         </p>
-      )}
-      {(gm || !s.self) && (
-        <button className="primary modal-submit" disabled={saving}>
-          {saving ? 'Saving…' : 'Save grid'}
-          <Check size={16} />
-        </button>
-      )}
+        <div className="form-row">
+          <label>
+            Grid type
+            <select
+              value={grid.type || 'square'}
+              onChange={(e) => update({ type: e.target.value as 'square' | 'hex' })}
+              disabled={!!s.self && !gm}
+            >
+              <option value="square">Square</option>
+              <option value="hex">Hex · pointy top</option>
+            </select>
+          </label>
+          <label>
+            Measurement convention
+            <select
+              value={grid.measurement || 'real'}
+              onChange={(e) => update({ measurement: e.target.value as 'real' | 'grid' })}
+              disabled={!!s.self && !gm}
+            >
+              <option value="real">Real distance</option>
+              <option value="grid">Grid steps</option>
+            </select>
+          </label>
+        </div>
+        <label className="check-label">
+          <input
+            type="checkbox"
+            checked={grid.enabled}
+            onChange={(e) => update({ enabled: e.target.checked })}
+            disabled={!!s.self && !gm}
+          />
+          Show grid
+        </label>
+        <label className="check-label">
+          <input
+            type="checkbox"
+            checked={grid.snap}
+            onChange={(e) => update({ snap: e.target.checked })}
+            disabled={!!s.self && !gm}
+          />
+          Snap tokens to grid centres
+        </label>
+        <div className="form-row">
+          <label>
+            Cell size (pixels)
+            <input
+              type="number"
+              min={16}
+              max={200}
+              value={grid.size}
+              onChange={(e) => update({ size: Number(e.target.value) })}
+              required
+              disabled={!!s.self && !gm}
+            />
+          </label>
+          <label>
+            Distance per cell
+            <input
+              type="number"
+              min={0.1}
+              max={1000}
+              step={0.1}
+              value={grid.distance}
+              onChange={(e) => update({ distance: Number(e.target.value) })}
+              required
+              disabled={!!s.self && !gm}
+            />
+          </label>
+          <label>
+            Units
+            <input
+              value={grid.units}
+              maxLength={12}
+              onChange={(e) => update({ units: e.target.value })}
+              required
+              disabled={!!s.self && !gm}
+            />
+          </label>
+        </div>
+        <div className="form-row">
+          <label>
+            X alignment
+            <input
+              type="number"
+              min={-200}
+              max={200}
+              value={grid.offsetX}
+              onChange={(e) => update({ offsetX: Number(e.target.value) })}
+              disabled={!!s.self && !gm}
+            />
+          </label>
+          <label>
+            Y alignment
+            <input
+              type="number"
+              min={-200}
+              max={200}
+              value={grid.offsetY}
+              onChange={(e) => update({ offsetY: Number(e.target.value) })}
+              disabled={!!s.self && !gm}
+            />
+          </label>
+        </div>
+        <label>
+          Grid opacity · {Math.round(grid.opacity * 100)}%
+          <input
+            type="range"
+            min={0}
+            max={0.6}
+            step={0.01}
+            value={grid.opacity}
+            onChange={(e) => update({ opacity: Number(e.target.value) })}
+            disabled={!!s.self && !gm}
+          />
+        </label>
+        {error && (
+          <p className="form-error" role="alert">
+            {error}
+          </p>
+        )}
+        {(gm || !s.self) && (
+          <button className="primary modal-submit" disabled={saving}>
+            {saving ? 'Saving…' : 'Save grid'}
+            <Check size={16} />
+          </button>
+        )}
+      </fieldset>
     </form>
   );
 }

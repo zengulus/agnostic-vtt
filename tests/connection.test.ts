@@ -168,6 +168,22 @@ describe('client connection transitions', () => {
     connection.connect('campaign-b');
     await rejected;
   });
+  it('rejects oversized escaped macro payloads with feedback before touching the socket', async () => {
+    const socket = await connect(),
+      before = socket.sent.length;
+    // This fits the text character limit, but JSON escaping exceeds the UTF-8 frame limit.
+    await expect(
+      connection.sendAndWait({
+        type: 'MACRO_IMPORT',
+        text: '#' + '\x00'.repeat(65000) + '\n[Roll]([Check(d6)])',
+        visibility: 'public',
+      }),
+    ).rejects.toThrow('Import fewer definitions');
+    expect(socket.sent).toHaveLength(before);
+    expect(socket.readyState).toBe(Socket.OPEN);
+    expect(table.useTable.getState().status).toBe('live');
+    expect(table.useTable.getState().error).toContain('too large to send');
+  });
   it('preserves Headers instances while adding bearer authentication', async () => {
     await connection.authorizedFetch('/api/test', {
       headers: new Headers({ 'Content-Type': 'application/json', 'X-Image-Purpose': 'token' }),

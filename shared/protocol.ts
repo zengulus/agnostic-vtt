@@ -14,6 +14,7 @@ import {
 } from './model.js';
 import type { StateChange, Point, Presence, Roll, RoomState } from './model.js';
 import { tokenEditSchema } from './tokenEdits.js';
+export const MAX_CLIENT_MESSAGE_BYTES = 256 * 1024;
 const base = { v: z.literal(VERSION), actionId: z.string().min(1).max(80) };
 const sceneId = idSchema;
 export const clientMessageSchema = z.discriminatedUnion('type', [
@@ -167,7 +168,11 @@ export const clientMessageSchema = z.discriminatedUnion('type', [
     type: z.literal('MACRO_IMPORT'),
     replacements: z
       .array(
-        z.object({ line: z.number().int().min(1), id: idSchema, source: z.string().max(4096) }),
+        z.object({
+          line: z.number().int().min(1),
+          id: idSchema,
+          version: z.number().int().min(0).max(Number.MAX_SAFE_INTEGER),
+        }),
       )
       .max(100)
       .optional(),
@@ -192,6 +197,17 @@ export type Action = ClientMessage extends infer T
     ? Omit<T, 'v' | 'actionId'>
     : never
   : never;
+/** Measure the actual UTF-8 JSON frame, including escaped text and replacement guards. */
+export function serializeClientAction(action: Action, actionId: string): string {
+  const payload = JSON.stringify({ ...action, v: 2, actionId });
+  if (new TextEncoder().encode(payload).byteLength > MAX_CLIENT_MESSAGE_BYTES)
+    throw new Error(
+      action.type === 'MACRO_IMPORT'
+        ? 'This macro import is too large to send. Import fewer definitions at a time.'
+        : 'This action is too large to send. Save smaller groups of changes.',
+    );
+  return payload;
+}
 export type ServerMessage =
   | ExtraServerMessage
   | {

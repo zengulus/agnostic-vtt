@@ -75,6 +75,7 @@ jobs:
         suite:
           - connection-cancellation
           - dialogs
+          - improvements
           - macros
           - physical-dice
           - roll-presentation

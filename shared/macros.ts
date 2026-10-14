@@ -5,6 +5,8 @@ export interface Macro {
   id: string;
   name: string;
   source: string;
+  /** Revision at import/replacement; absent legacy definitions use version zero. */
+  version?: number;
   ownerId: string;
   visibility: 'public' | 'private';
 }

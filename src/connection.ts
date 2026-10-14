@@ -1,6 +1,11 @@
 import { demoAction, startDemo } from './demo.js';
 import { authClient, commitAuthSession, isolatedAuthClient } from './auth.js';
-import type { Action, DiscordStatus, ServerMessage } from '../shared/protocol.js';
+import {
+  serializeClientAction,
+  type Action,
+  type DiscordStatus,
+  type ServerMessage,
+} from '../shared/protocol.js';
 import { useTable, notify } from './store.js';
 import { demoState } from './store.js';
 import { applyChanges } from '../shared/state.js';
@@ -57,7 +62,8 @@ export function sendAndWait(action: Action): Promise<void> {
     }
   }
   const id = send(action);
-  if (!id) return Promise.reject(new Error('Connect to a live table first.'));
+  if (!id)
+    return Promise.reject(new Error(useTable.getState().error || 'Connect to a live table first.'));
   return new Promise((resolve, reject) => {
     const timer = setTimeout(() => {
       actionWaiters.delete(id);
@@ -405,8 +411,13 @@ export function send(action: Action) {
     return null;
   }
   const actionId = crypto.randomUUID();
-  socket.send(JSON.stringify({ ...action, v: 2, actionId }));
-  return actionId;
+  try {
+    socket.send(serializeClientAction(action, actionId));
+    return actionId;
+  } catch (error) {
+    notify(error instanceof Error ? error.message : 'Could not send this action.');
+    return null;
+  }
 }
 export function connect(roomId: string, inviteCode?: string, role?: 'gm' | 'player') {
   cancelLaunch();

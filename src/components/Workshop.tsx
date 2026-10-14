@@ -234,6 +234,9 @@ export function TokenLibraryDialog() {
         </button>
         {gm && (
           <>
+            <button className="subtle-button" onClick={() => s.set({ dialog: 'new-scene' })}>
+              New Scene
+            </button>
             <button
               className="subtle-button"
               onClick={() => s.set({ dialog: 'token', selected: null, selectedIds: [] })}
