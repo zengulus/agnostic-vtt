@@ -1,4 +1,4 @@
-import { useEffect, useRef } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import {
   LocateFixed,
   Minus,
@@ -12,8 +12,14 @@ import {
   Save,
 } from 'lucide-react';
 import { useTable } from '../store.js';
-import { launchDemo, liveAvailable, send } from '../connection.js';
-import { clampPoint, screenToWorld, snapPoint, type Camera } from '../../shared/geometry.js';
+import { launchDemo, liveAvailable, send, sendAndWait } from '../connection.js';
+import {
+  clampPoint,
+  nudgePoint,
+  screenToWorld,
+  snapPoint,
+  type Camera,
+} from '../../shared/geometry.js';
 import { canControl, type Point, type Token, type FogOperation } from '../../shared/model.js';
 import { SceneRenderer, conePoints, type Draft } from '../rendering.js';
 import { TokenResource } from './TokenResource.js';
@@ -34,12 +40,14 @@ interface Drag {
   erasePoint?: Point;
 }
 export function Tabletop() {
+  const [compactControls, setCompactControls] = useState(false);
   const canvas = useRef<HTMLCanvasElement>(null),
     frame = useRef(0),
     dirty = useRef(true),
     dimensions = useRef({ w: 1, h: 1 }),
     drag = useRef<Drag | null>(null),
     space = useRef(false),
+    nudging = useRef(false),
     draft = useRef<Draft | null>(null),
     renderer = useRef(new SceneRenderer()),
     pointers = useRef(new Map<number, Point>()),
@@ -279,6 +287,28 @@ export function Tabletop() {
         return;
       }
       if (e.ctrlKey || e.metaKey || e.altKey) return;
+      if (['ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight'].includes(e.key)) {
+        if (!st.self || !['live', 'demo'].includes(st.status)) return;
+        const scene = st.room.scenes[st.room.activeSceneId];
+        const tokens = [
+          ...new Set([...st.selectedIds, ...(st.selected ? [st.selected] : [])]),
+        ].flatMap((id) => (scene.tokens[id] ? [scene.tokens[id]] : []));
+        if (!tokens.length || tokens.some((t) => !canControl(t, st.self!.id, st.self!.role)))
+          return;
+        e.preventDefault();
+        if (nudging.current) return;
+        nudging.current = true;
+        const positions = tokens.map((t) => ({
+          tokenId: t.id,
+          position: clampPoint(nudgePoint(t, e.key, scene.grid), scene.width, scene.height, t.size),
+        }));
+        void sendAndWait({ type: 'TOKEN_MOVE_BATCH', sceneId: scene.id, positions })
+          .catch((error) => useTable.getState().set({ error: error.message }))
+          .finally(() => {
+            nudging.current = false;
+          });
+        return;
+      }
       if (e.code === 'Space') {
         e.preventDefault();
         space.current = true;
@@ -784,69 +814,96 @@ export function Tabletop() {
         </div>
       )}
       {selected && (
-        <div className="selection-toolbar">
-          <span className="token-dot" style={{ background: selected.color }} />
-          <strong>
-            {store.selectedIds.length > 1
-              ? `${store.selectedIds.length} tokens`
-              : selected.name.split(' · ')[0]}
-          </strong>
-          {store.selectedIds.length <= 1 && (
-            <TokenResource key={scene.id + selected.id} token={selected} sceneId={scene.id} />
-          )}
-          {store.self?.role === 'gm' && (
-            <>
-              <button
-                title="Edit token"
-                aria-label="Edit token"
-                onClick={() => store.set({ dialog: 'token' })}
-              >
-                <Pencil size={15} />
-              </button>
-              <button
-                title="Rotate token"
-                aria-label="Rotate token"
-                onClick={() =>
-                  send({
-                    type: 'TOKEN_UPDATE',
-                    sceneId: scene.id,
-                    token: { ...selected, rotation: (selected.rotation + 45) % 360 },
-                  })
-                }
-              >
-                <RotateCw size={15} />
-              </button>
-              <button
-                title="Duplicate token"
-                aria-label="Duplicate token"
-                onClick={duplicateSelection}
-              >
-                <Copy size={15} />
-              </button>
-              <button title="Delete token" aria-label="Delete token" onClick={deleteSelection}>
-                <Trash2 size={15} />
-              </button>
-              <button
-                aria-label="Save selected token template"
-                title="Save reusable token"
-                onClick={() =>
-                  send({ type: 'LIBRARY_SAVE', token: { ...selected, id: crypto.randomUUID() } })
-                }
-              >
-                <Save size={15} />
-              </button>
-              {store.selectedIds.length > 1 && (
-                <button aria-label="Group selected tokens" onClick={() => groupSelection(true)}>
-                  <Group size={15} />
+        <div className={`selection-toolbar ${compactControls ? 'controls-open' : ''}`}>
+          <span className="selected-token-status" role="status">
+            Selected: {selected.name.split(' · ')[0]} · {Math.round(selected.x)},{' '}
+            {Math.round(selected.y)} ·{' '}
+            {store.self && canControl(selected, store.self.id, store.self.role)
+              ? scene.grid.type === 'hex' && scene.grid.enabled && scene.grid.snap
+                ? 'Arrow keys move to neighbouring hex centres'
+                : 'Drag or use arrow keys to move'
+              : 'View only'}
+            {selected.resource && (
+              <small className="compact-resource-status">
+                {selected.resource.label || 'Resource'}: {selected.resource.value} /{' '}
+                {selected.resource.max}
+              </small>
+            )}
+          </span>
+          <button
+            className="compact-control-toggle"
+            aria-expanded={compactControls}
+            onClick={() => setCompactControls(!compactControls)}
+          >
+            {compactControls ? 'Hide controls' : 'Character controls'}
+          </button>
+          <div className="selection-controls">
+            <span className="token-dot" style={{ background: selected.color }} />
+            <strong>
+              {store.selectedIds.length > 1
+                ? `${store.selectedIds.length} tokens`
+                : selected.name.split(' · ')[0]}
+            </strong>
+            {store.selectedIds.length <= 1 && (
+              <TokenResource key={scene.id + selected.id} token={selected} sceneId={scene.id} />
+            )}
+            {store.self?.role === 'gm' && (
+              <>
+                <button
+                  title="Edit token"
+                  aria-label="Edit token"
+                  onClick={() => store.set({ dialog: 'token' })}
+                >
+                  <Pencil size={15} />
                 </button>
-              )}
-              {selected.groupId && (
-                <button aria-label="Ungroup selected tokens" onClick={() => groupSelection(false)}>
-                  <Ungroup size={15} />
+                <button
+                  title="Rotate token"
+                  aria-label="Rotate token"
+                  onClick={() =>
+                    send({
+                      type: 'TOKEN_UPDATE',
+                      sceneId: scene.id,
+                      token: { ...selected, rotation: (selected.rotation + 45) % 360 },
+                    })
+                  }
+                >
+                  <RotateCw size={15} />
                 </button>
-              )}
-            </>
-          )}
+                <button
+                  title="Duplicate token"
+                  aria-label="Duplicate token"
+                  onClick={duplicateSelection}
+                >
+                  <Copy size={15} />
+                </button>
+                <button title="Delete token" aria-label="Delete token" onClick={deleteSelection}>
+                  <Trash2 size={15} />
+                </button>
+                <button
+                  aria-label="Save selected token template"
+                  title="Save reusable token"
+                  onClick={() =>
+                    send({ type: 'LIBRARY_SAVE', token: { ...selected, id: crypto.randomUUID() } })
+                  }
+                >
+                  <Save size={15} />
+                </button>
+                {store.selectedIds.length > 1 && (
+                  <button aria-label="Group selected tokens" onClick={() => groupSelection(true)}>
+                    <Group size={15} />
+                  </button>
+                )}
+                {selected.groupId && (
+                  <button
+                    aria-label="Ungroup selected tokens"
+                    onClick={() => groupSelection(false)}
+                  >
+                    <Ungroup size={15} />
+                  </button>
+                )}
+              </>
+            )}
+          </div>
         </div>
       )}
       <ToolOptions finishPolygon={finishPolygon} clearDraft={clearDraft} />

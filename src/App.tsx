@@ -1,3 +1,6 @@
+import { FogActions } from './components/FogActions.js';
+import { CharacterList, FirstUseGuide, TurnAwareness } from './components/TableAwareness.js';
+import { FavoriteActions } from './components/FavoriteActions.js';
 import { useEffect, useState } from 'react';
 import {
   ArrowUpRight,
@@ -109,16 +112,7 @@ export function App() {
           </button>
         </div>
         <div className="header-actions">
-          <span
-            className={`connection ${s.status}`}
-            title={
-              s.status === 'demo'
-                ? 'Demo changes reset on reload'
-                : s.room.savedAt
-                  ? `Saved ${new Date(s.room.savedAt).toLocaleTimeString()}`
-                  : undefined
-            }
-          >
+          <span className={`connection ${s.status}`}>
             <span />
             {s.status === 'live'
               ? 'Live'
@@ -129,6 +123,30 @@ export function App() {
                   : s.status === 'demo'
                     ? 'Demo'
                     : ''}
+          </span>
+          <span className="save-status" role="status">
+            {s.status === 'demo' ? (
+              'Demo · changes stay in this session'
+            ) : s.self ? (
+              <>
+                {s.room.savedAt
+                  ? `Last saved ${new Date(s.room.savedAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' })}`
+                  : 'No successful save reported'}
+                <small>
+                  {s.status !== 'live'
+                    ? 'Save status unconfirmed'
+                    : s.savedRevision === null
+                      ? 'Waiting for save status'
+                      : s.pendingDurableActions ||
+                          s.savePending ||
+                          s.savedRevision < s.room.revision
+                        ? 'Newer changes awaiting save'
+                        : 'Saved to storage'}
+                </small>
+              </>
+            ) : (
+              ''
+            )}
           </span>
           {s.canGM && s.self && (
             <button
@@ -282,31 +300,7 @@ export function App() {
               </button>
             )}
           </div>
-          <div className="token-list">
-            {Object.values(scene.tokens).map((t) => (
-              <button
-                key={t.id}
-                className={`token-list-item ${s.selected === t.id ? 'selected' : ''}`}
-                onClick={() => s.set({ selected: t.id, selectedIds: [t.id], tool: 'select' })}
-              >
-                <AssetImage
-                  asset={t.image}
-                  referrerPolicy="no-referrer"
-                  alt=""
-                  style={{ borderColor: t.color }}
-                />
-                <span>
-                  {t.name.split(' · ')[0]}
-                  <small>{t.visibility === 'gm' ? 'GM only' : t.name.split(' · ')[1] || ''}</small>
-                </span>
-                {t.visibility === 'gm' ? (
-                  <Lock size={12} />
-                ) : (
-                  <span className="token-dot" style={{ background: t.color }} />
-                )}
-              </button>
-            ))}
-          </div>
+          <CharacterList />
           <div className="library-actions">
             <button
               className="subtle-button"
@@ -331,6 +325,17 @@ export function App() {
       )}
       <main className="table-area">
         <Tabletop />
+        <div className="table-awareness">
+          <TurnAwareness />
+          <FirstUseGuide />
+          {(s.status === 'reconnecting' || s.status === 'connecting') && (
+            <p className="connection-guidance" role="status">
+              {s.status === 'reconnecting'
+                ? 'Connection interrupted. Reconnecting automatically; wait for Live, then check the table before retrying an unconfirmed action.'
+                : 'Connecting to the table. Your last successful save is shown separately.'}
+            </p>
+          )}
+        </div>
         {!!s.sceneTransition && !s.reducedMotion && (
           <div key={s.sceneTransition} className="scene-transition" aria-hidden="true">
             <span className="eyebrow">A NEW CHAPTER</span>
@@ -347,22 +352,7 @@ export function App() {
           >
             <Map size={15} />
           </button>
-          {gm && (
-            <button
-              className={scene.fog.enabled ? 'enabled' : ''}
-              title={scene.fog.enabled ? 'Clear all fog' : 'Cover scene with fog'}
-              aria-label={scene.fog.enabled ? 'Clear all fog' : 'Cover scene with fog'}
-              onClick={() =>
-                send({
-                  type: 'FOG_UPDATE',
-                  sceneId: scene.id,
-                  fog: { enabled: !scene.fog.enabled, revealed: [] },
-                })
-              }
-            >
-              <Eye size={16} />
-            </button>
-          )}
+          <FogActions />
           <button
             title="Grid settings"
             aria-label="Grid settings"
@@ -582,10 +572,11 @@ function Chronicle() {
         )}
       </div>
       <div className="dice-workbench">
+        <FavoriteActions privateRoll={privateRoll} />
         <div className="macro-tools">
           <button aria-label="Macros · import .txt" onClick={() => s.set({ dialog: 'macros' })}>
             <Feather size={13} />
-            Macros
+            Manage macros
           </button>
           {s.discord.canManage && (
             <button onClick={() => s.set({ dialog: 'discord' })}>Discord webhook ↗</button>
@@ -598,9 +589,38 @@ function Chronicle() {
             aria-label="Dice presentation settings"
             onClick={() => s.set({ dialog: 'settings' })}
           >
-            <Settings2 size={15} />
+            <Settings2 size={15} /> Presentation
           </button>
         </div>
+        <details className="quick-dice-preferences">
+          <summary>Dice preferences</summary>
+          <label>
+            Presentation
+            <select
+              aria-label="Presentation"
+              value={s.dice.presentation}
+              onChange={(e) =>
+                s.set({
+                  dice: { ...s.dice, presentation: e.target.value as typeof s.dice.presentation },
+                })
+              }
+            >
+              <option value="arcane">Arcane gold</option>
+              <option value="moon">Moonlit silver</option>
+              <option value="ember">Ember</option>
+              <option value="minimal">Minimal · instant</option>
+            </select>
+          </label>
+          <label className="check-label">
+            <input
+              type="checkbox"
+              checked={s.reducedMotion}
+              onChange={(e) => s.set({ reducedMotion: e.target.checked })}
+            />
+            Reduced motion
+          </label>
+          <button onClick={() => s.set({ dialog: 'settings' })}>All dice preferences</button>
+        </details>
         <div className="dice-types">
           {[4, 6, 8, 10, 12, 20, 100].map((n) => (
             <button
@@ -638,12 +658,13 @@ function Chronicle() {
                 }
               }}
             >
-              <Star size={12} />
+              <Star size={14} /> Save preset
             </button>
           </label>
           <div className="expression-input">
             <input
               id="dice-expression"
+              aria-label="Dice expression"
               value={expression}
               onChange={(e) => setExpression(e.target.value)}
               maxLength={120}

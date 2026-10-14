@@ -76,6 +76,7 @@ jobs:
           - connection-cancellation
           - dialogs
           - improvements
+          - usability
           - macros
           - physical-dice
           - roll-presentation

@@ -166,7 +166,7 @@ for (const [name, settings, presets, rolls] of [
     await expect(page.getByRole('button', { name: 'Log in' })).toBeVisible();
     await expect(page.locator('.presets button')).toHaveText([...rolls]);
     await page.getByRole('button', { name: 'Settings', exact: true }).click();
-    await expect(page.getByLabel('Reduced motion')).toBeChecked();
+    await expect(page.getByRole('dialog').getByLabel('Reduced motion')).toBeChecked();
     await expect(page.getByRole('checkbox', { name: /Roll sound/ })).not.toBeChecked();
     expect(errors).toEqual([]);
   });
@@ -208,9 +208,9 @@ test('map/token URL preview, errors, resizing, and accessible preferences work',
   await page.getByLabel('Name', { exact: true }).fill('External wanderer');
   await page.getByLabel('Size (scene pixels)').fill('100');
   await page.getByRole('button', { name: 'Add to the table', exact: true }).click();
-  await expect(page.getByRole('button', { name: /External wanderer/ })).toBeVisible();
+  await expect(page.getByRole('button', { name: 'External wanderer', exact: true })).toBeVisible();
   await page.getByRole('button', { name: 'Settings', exact: true }).click();
-  await page.getByLabel('Reduced motion').check();
+  await page.getByRole('dialog').getByLabel('Reduced motion').check();
   await page.getByRole('button', { name: 'Done', exact: true }).click();
   await page.getByRole('button', { name: 'Roll the dice' }).click();
   await expect(page.getByTestId('roll-total')).toBeVisible();
@@ -244,7 +244,10 @@ test('a campaign owner can sign in as a player and keep that role on reconnect',
     0,
   );
   await page.getByRole('button', { name: 'Return to GM', exact: true }).click();
-  await page.getByRole('button', { name: 'Cover scene with fog', exact: true }).click();
+  await page.locator('.scene-options').getByText('Scene fog', { exact: true }).click();
+  page.once('dialog', (dialog) => void dialog.accept());
+  await page.getByRole('button', { name: 'Cover entire scene', exact: true }).click();
+  await page.locator('.scene-options').getByText('Scene fog', { exact: true }).click();
   await page.getByRole('button', { name: 'Play as player', exact: true }).click();
   await expect(page.locator('.scene-meta')).toContainText('0 tokens');
   await context.setOffline(true);
@@ -254,6 +257,9 @@ test('a campaign owner can sign in as a player and keep that role on reconnect',
   await expect(page.getByRole('button', { name: 'Return to GM', exact: true })).toBeVisible();
   await expect(page.locator('.scene-meta')).toContainText('0 tokens');
   await page.getByRole('button', { name: 'Return to GM', exact: true }).click();
-  await expect(page.getByRole('button', { name: 'Clear all fog', exact: true })).toBeVisible();
+  await page.locator('.scene-options').getByText('Scene fog', { exact: true }).click();
+  await expect(
+    page.getByRole('button', { name: 'Reveal entire scene', exact: true }),
+  ).toBeVisible();
   await expect(page.getByRole('button', { name: 'Invite party', exact: true })).toBeVisible();
 });
