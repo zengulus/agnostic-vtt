@@ -1,5 +1,32 @@
 # Tabletop usability review
 
+## Character and session workflow review — 16 October 2026
+
+The review covers entering a table, finding a character, manipulating scene tokens, choosing an action, consuming resources, recovering abilities, reading results, and sharing them with Discord. The previous typography pass helped legibility but left the core player workflow split across map tools, generic dice, macros and isolated token counters.
+
+| Finding                                                                  | Impact                                                                                | Change                                                                                                                                                                              |
+| ------------------------------------------------------------------------ | ------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Characters were represented primarily as scene tokens.                   | Resource state and available actions had no persistent home across scenes.            | Campaign character sheets have a dedicated workspace, navigation cards, ownership and optional token links.                                                                         |
+| Macros and counters were separate operations.                            | Players could forget to spend a slot or spend a resource without a successful action. | Ability use validates preparation, remaining uses, costs and numeric inputs before committing the resource change and result together.                                              |
+| Prepared, expended and recoverable abilities were not represented.       | Maneuvers and prepared spells required external bookkeeping.                          | Named ability groups show readiness and remaining uses, with preparation controls, search, availability filters and explicit recovery groups.                                       |
+| Character controls, history and dice competed for the same narrow panel. | A sheet would leave little room for its actions.                                      | Character is a separate activity workspace; its panel uses the full available height instead of sharing it with the dice workbench.                                                 |
+| Map tools relied on icon recognition.                                    | Common tools were hard to discover without hovering.                                  | Desktop tools have persistent captions and shortcuts remain available. Phone tools keep compact accessible names.                                                                   |
+| GM scene/grid editing entry points appeared in player mode.              | Players encountered controls they could not save.                                     | Player mode omits grid-editing entry points and names its read-only map entry Scene details. Characters have more prominence than scene thumbnails.                                 |
+| Onboarding covered the map, especially on phones.                        | Guidance blocked the space needed to play.                                            | The guide is collapsible and starts collapsed on compact layouts. It explains character abilities as well as token movement.                                                        |
+| A phone drawer covered map dice presentations.                           | A character action could hide its own result and dismiss control.                     | Phone character actions report results beside the ability; explicit history replay closes the drawer to show its map presentation.                                                  |
+| Sending an ability to Discord lacked character/resource context.         | Channel readers could see a roll without knowing the spent ability or remaining uses. | Public character results include their name, effect, uses and spent-pool state through the existing Discord settings. Text-only abilities can announce effects without a fake roll. |
+| Text replacement could overwrite live resource use.                      | Reimporting a sheet could silently restore spent slots.                               | Replacement and deletion compare the reviewed sheet digest. Export includes current counters; stale drafts remain available for review.                                             |
+
+The [example character](../public/examples/character.txt) is a reusable text template rather than a game-specific sheet. Its recovery tags are deliberately explicit: a table decides when Recovery, Encounter or Rest applies. Public sheets are readable by the party; only their owner and GMs can use or edit them. Resource spending, privacy projection, restart deduplication and Discord formatting run through the same shared action pipeline in live play and the offline demo.
+
+Remaining design work: the map/scene and token editors still expose large forms; staged setup would help new GMs. Character definitions are edited through text rather than a visual ability builder, and token resource bars are separate from sheet pools. Those boundaries are visible in the UI and documentation. Broad keyboard/screen-reader auditing and full touch-device testing remain useful follow-up work beyond Chromium viewport checks.
+
+Verification for this change: 390 unit/server tests pass, including character parsing, atomic costs, ownership and visibility, stale replacements, restart recovery, duplicate requests and Undo/Redo without another roll or Discord delivery. All 68 browser scenarios pass across suite runs. The combined run hit the existing shared-server HTTP request limit; affected suites were verified with fresh servers, matching CI. The character suite is included in the CI matrix.
+
+The production frontend/server build passes under `/agnostic-vtt/`, as do the cloud-blocked static-demo and mocked hosted-entry checks. The visual review captures 64 screens at six viewport sizes; reviewed panels fit their viewports with no browser or network errors. Discord delivery was tested with a mocked transport; no live channel was contacted.
+
+## Earlier implementation review
+
 Reviewed baseline: `b6d3f79596dc10319e0042cb9698b48c5e0dd25a`. The remote matched that commit and had no open pull requests when work began.
 
 ## Behavior

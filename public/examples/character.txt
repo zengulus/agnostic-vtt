@@ -1,0 +1,46 @@
+# A generic character template. Recovery labels are chosen by your table.
+# Stats bind matching numeric macro inputs. Extra inputs prompt on use.
+# Each prepared spell can have its own number of uses, even without dice.
+[character]
+name = Kael
+description = A wandering adept with a small prepared spellbook.
+
+[stats]
+ATTACK = 6
+DAMAGE = 4
+
+[resource focus]
+name = Focus
+current = 3
+max = 3
+refresh = encounter
+
+[resource spell-slots]
+name = Spell slots
+current = 2
+max = 2
+refresh = rest
+
+[ability sweeping-strike]
+name = Sweeping Strike
+group = Maneuvers
+text = Strike a nearby foe. Recover this maneuver when your table's recovery condition is met.
+uses = 1
+refresh = recovery
+cost = focus:1
+macro = [Sweeping Strike]([Attack Roll(1d20 + ATTACK)],[Damage Roll(2d6 + DAMAGE)])
+
+[ability ward]
+name = Prepared Ward
+group = Spells
+text = Grant a protective ward to an ally. The effect is announced without a dice roll.
+uses = 2
+refresh = rest
+cost = spell-slots:1
+
+[ability weapon-attack]
+name = Weapon Attack
+group = At will
+text = Make a weapon attack.
+uses = unlimited
+macro = [Weapon Attack]([Attack Roll(1d20 + ATTACK)],[Damage Roll(1d8 + DAMAGE)])

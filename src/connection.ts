@@ -6,7 +6,7 @@ import {
   type DiscordStatus,
   type ServerMessage,
 } from '../shared/protocol.js';
-import { useTable, notify } from './store.js';
+import { useTable, notify, presentRoll } from './store.js';
 import { demoState } from './store.js';
 import { applyChanges } from '../shared/state.js';
 import type { Asset, UploadedAsset } from '../shared/model.js';
@@ -516,6 +516,12 @@ function open() {
           store.room.id !== message.state.id ||
           store.self?.id !== message.self.id ||
           store.self?.role !== message.self.role;
+        const ownCharacter =
+          message.self.role === 'player'
+            ? Object.values(message.state.characters || {}).find(
+                (c) => c.ownerId === message.self.id,
+              )
+            : undefined;
         store.set({
           room: message.state,
           savedRevision: message.savedRevision ?? null,
@@ -535,6 +541,10 @@ function open() {
                 pings: [],
                 tool: 'select' as const,
                 dialog: null,
+                panel: ownCharacter ? ('character' as const) : ('chronicle' as const),
+                characterId: ownCharacter?.id || null,
+                characterEditId: null,
+                activityOpen: !!ownCharacter,
                 discord: {
                   configured: false,
                   enabled: false,
@@ -713,9 +723,7 @@ function open() {
         }
         break;
       case 'DICE_ROLL_RESULT':
-        if (store.presentation)
-          store.set({ rollQueue: [...store.rollQueue, message.roll].slice(-10) });
-        else store.set({ presentation: message.roll });
+        presentRoll(message.roll);
         break;
       case 'PING':
         store.set({

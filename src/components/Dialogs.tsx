@@ -25,6 +25,7 @@ import { TokenLibraryDialog, AssetManagerDialog, ObjectsDialog } from './Worksho
 import { DiceSettings } from './DiceSettings.js';
 import { MacroLibraryDialog } from './Macros.js';
 import { DiscordSettings } from './DiscordSettings.js';
+import { CharacterImportDialog } from './Characters.js';
 import { unlockSound } from '../sound.js';
 import type { Asset, Token } from '../../shared/model.js';
 import { saveTokenDraft } from '../tokenSave.js';
@@ -116,7 +117,7 @@ export function Dialogs() {
   if (!s.dialog) return null;
   const title = {
     launch: supabase ? 'Your campaigns' : 'Your table',
-    map: 'Scene',
+    map: s.self?.role === 'player' ? 'Scene details' : 'Scene',
     'new-scene': 'New Scene',
     token: 'Character',
     grid: 'Grid',
@@ -128,6 +129,7 @@ export function Dialogs() {
     objects: 'Regions, drawings & notes',
     macros: 'Macros',
     discord: 'Discord',
+    'character-import': 'Character text',
   }[s.dialog];
   return (
     <div
@@ -150,7 +152,9 @@ export function Dialogs() {
           </button>
         </div>
         <h2 id="modal-title">{title}</h2>
-        {s.dialog === 'launch' ? (
+        {s.dialog === 'character-import' ? (
+          <CharacterImportDialog key={s.room.id + s.characterEditId + s.self?.id + s.self?.role} />
+        ) : s.dialog === 'launch' ? (
           <Launch />
         ) : s.dialog === 'map' || s.dialog === 'new-scene' ? (
           <MapDialog key={s.dialog} create={s.dialog === 'new-scene'} />
@@ -994,6 +998,28 @@ function TokenDialog() {
             </select>
           </label>
         </div>
+        <label>
+          Character sheet
+          <select
+            aria-label="Linked character sheet"
+            value={token.characterId || ''}
+            disabled={!gm}
+            onChange={(e) => update({ characterId: e.target.value || null })}
+          >
+            <option value="">No linked sheet</option>
+            {token.characterId && !s.room.characters?.[token.characterId] && (
+              <option value={token.characterId}>Removed character · unlink to save</option>
+            )}
+            {Object.values(s.room.characters || {}).map((sheet) => (
+              <option key={sheet.id} value={sheet.id}>
+                {sheet.name}
+              </option>
+            ))}
+          </select>
+          <small>
+            A sheet keeps its resources across scenes. Its owner controls its abilities.
+          </small>
+        </label>
         <div className="form-row">
           <label>
             Resource label

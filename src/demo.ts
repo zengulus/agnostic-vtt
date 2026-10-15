@@ -3,7 +3,7 @@ import { projectRoom, type DurableRoom, type StateChange } from '../shared/model
 import { clientMessageSchema, type Action } from '../shared/protocol.js';
 import { applyChanges, inverseChanges } from '../shared/state.js';
 import { newRoom } from '../shared/sample.js';
-import { useTable } from './store.js';
+import { useTable, presentRoll } from './store.js';
 
 const identity = { id: 'demo-gm', name: 'Storykeeper' };
 let room: DurableRoom;
@@ -24,10 +24,24 @@ function publish(reset = false) {
   const s = useTable.getState();
   const self = { ...identity, role, color: '#d8b46c' };
   const projected = projectRoom(room, identity.id, role);
+  const contextChanged =
+    s.room.id !== projected.id || s.self?.id !== self.id || s.self?.role !== role;
+  const ownCharacter =
+    role === 'player'
+      ? Object.values(projected.characters || {}).find((c) => c.ownerId === self.id)
+      : undefined;
   const oldScene = s.room.scenes[s.room.activeSceneId],
     newScene = projected.scenes[projected.activeSceneId];
   s.set({
     room: projected,
+    ...(contextChanged
+      ? {
+          panel: ownCharacter ? ('character' as const) : ('chronicle' as const),
+          characterId: ownCharacter?.id || null,
+          characterEditId: null,
+          activityOpen: !!ownCharacter,
+        }
+      : {}),
     self,
     presence: [self],
     status: 'demo',
@@ -112,13 +126,14 @@ export function demoAction(action: Action) {
       changes.length &&
       !['DICE_ROLL_REQUEST', 'MACRO_ROLL_REQUEST', 'CHAT_SEND'].includes(m.type)
     ) {
+      const edits = changes.filter((change) => change.kind !== 'roll');
       const groupId = m.type === 'FOG_APPEND' ? m.groupId : undefined,
         last = undo.at(-1);
-      if (groupId && last?.groupId === groupId) last.forward.push(...changes);
+      if (groupId && last?.groupId === groupId) last.forward.push(...edits);
       else
         undo.push({
-          forward: changes,
-          inverse: inverseChanges(before, changes),
+          forward: edits,
+          inverse: inverseChanges(before, edits),
           label: m.type.toLowerCase().replaceAll('_', ' '),
           groupId,
         });
@@ -130,9 +145,7 @@ export function demoAction(action: Action) {
   publish(before.activeSceneId !== room.state.activeSceneId);
   for (const change of changes)
     if (change.kind === 'roll') {
-      const s = useTable.getState();
-      if (s.presentation) s.set({ rollQueue: [...s.rollQueue, change.roll].slice(-10) });
-      else s.set({ presentation: change.roll });
+      presentRoll(change.roll);
     }
   return m.actionId;
 }

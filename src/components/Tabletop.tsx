@@ -10,6 +10,7 @@ import {
   Group,
   Ungroup,
   Save,
+  BookOpen,
 } from 'lucide-react';
 import { useTable } from '../store.js';
 import { launchDemo, liveAvailable, send, sendAndWait } from '../connection.js';
@@ -25,6 +26,7 @@ import { SceneRenderer, conePoints, type Draft } from '../rendering.js';
 import { TokenResource } from './TokenResource.js';
 import { ToolOptions } from './Workshop.js';
 import { drawingsAlongBrush, zonesAlongBrush } from '../../shared/drawings.js';
+import { openCharacter } from './Characters.js';
 interface Drag {
   kind: 'pan' | 'token' | 'measure' | 'zone' | 'fog' | 'draw' | 'select' | 'erase';
   start: Point;
@@ -271,7 +273,7 @@ export function Tabletop() {
         st.dialog ||
         (e.target instanceof Element &&
           e.target.closest(
-            'input,textarea,select,button,a[href],[contenteditable]:not([contenteditable="false"]),[role="button"]',
+            'input,textarea,select,button,summary,a[href],[contenteditable]:not([contenteditable="false"]),[role="button"]',
           ))
       )
         return;
@@ -838,6 +840,15 @@ export function Tabletop() {
             {compactControls ? 'Hide controls' : 'Character controls'}
           </button>
           <div className="selection-controls">
+            {selected.characterId && store.room.characters?.[selected.characterId] && (
+              <button
+                title="Open character sheet"
+                aria-label="Open selected character sheet"
+                onClick={() => openCharacter(selected.characterId!)}
+              >
+                <BookOpen size={18} />
+              </button>
+            )}
             <span className="token-dot" style={{ background: selected.color }} />
             <strong>
               {store.selectedIds.length > 1

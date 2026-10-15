@@ -4,7 +4,7 @@
   --line: #bca16b24;
   --paper: #eee5d1;
   --ink: #453a2c;
-  --muted-ink: #796b55;
+  --muted-ink: #68573f;
   --rubric: #783e32;
   color: #e3d7bd;
   background: #25201a;
@@ -21,10 +21,12 @@
   border: 0 !important;
 }
 .app {
-  grid-template-rows: 72px minmax(0, 1fr);
+  grid-template-rows: auto minmax(0, 1fr);
   background: #28231c;
 }
 .app-header {
+  min-height: 80px;
+  padding-block: 10px;
   background: url('/assets/paper-grain.svg'), #29241e;
   border-bottom: 1px solid #bda16c40;
 }
@@ -35,7 +37,7 @@
   color: #e4d6b4;
 }
 .brand-small {
-  font: italic 14px var(--serif);
+  font: italic 1rem var(--serif);
   letter-spacing: 2px;
   margin-top: 3px;
   color: #bca785;
@@ -50,16 +52,18 @@
 }
 .campaign-title small {
   font:
-    11px 'DM Sans',
+    var(--text-md) 'DM Sans',
     sans-serif;
   color: #a99b82;
   margin-top: 5px;
 }
 .header-actions {
-  gap: 16px;
+  gap: 12px;
+  flex-wrap: wrap;
+  justify-content: flex-end;
 }
 .connection {
-  font-size: 11px;
+  font-size: var(--text-md);
   letter-spacing: 0;
   color: #ad9e83;
 }
@@ -78,7 +82,7 @@
   border-color: #a78d6038;
   background: transparent;
   border-radius: 3px;
-  font-size: 11px;
+  font-size: var(--text-md);
 }
 .role-switch:hover:not(:disabled),
 .invite-button:hover {
@@ -190,11 +194,11 @@
 }
 .token-list-item > span:not(.token-dot) {
   color: var(--ink);
-  font-size: 12px;
+  font-size: var(--text-base);
 }
 .token-list-item small {
-  font-size: 10px;
-  color: #827357;
+  font-size: var(--text-sm);
+  color: var(--muted-ink);
 }
 .token-list-item > img {
   width: 36px;
@@ -214,8 +218,8 @@
 }
 .library .subtle-button,
 .library .subtle-button:last-of-type {
-  color: #756246;
-  font-size: 11px;
+  color: #624d32;
+  font-size: var(--text-md);
 }
 .library button:hover:not(:disabled) {
   color: #783e32;
@@ -255,7 +259,7 @@
   color: #c5b58f;
 }
 .zoom-controls {
-  opacity: 0.65;
+  opacity: 1;
   transition: opacity 0.2s;
 }
 .zoom-controls:hover,
@@ -294,8 +298,8 @@
   font: italic 18px/1.6 var(--serif);
 }
 .table-welcome small {
-  color: #8d7c60;
-  font-size: 10px;
+  color: var(--muted-ink);
+  font-size: var(--text-md);
   margin-top: 12px;
 }
 .primary,
@@ -341,8 +345,8 @@
   gap: 8px;
 }
 .chronicle-tabs button {
-  font: 17px var(--serif);
-  color: #897451;
+  font: 20px var(--serif);
+  color: #705a39;
   gap: 0;
   padding: 15px 0 13px;
 }
@@ -367,7 +371,7 @@
   margin: 0 auto 15px;
 }
 .empty-chronicle p {
-  color: #927b58;
+  color: var(--muted-ink);
   font: italic 19px/1.5 var(--serif);
 }
 .history-card {
@@ -388,7 +392,7 @@
 .history-user small,
 .history-result small,
 .history-footer {
-  color: #8b7656;
+  color: var(--muted-ink);
 }
 .history-result > strong {
   color: #743c2e;
@@ -412,6 +416,7 @@
 }
 .dice-workbench .section-heading button {
   display: none;
+  color: var(--muted-ink);
 }
 .macro-tools {
   position: absolute;
@@ -420,12 +425,12 @@
   margin: 0;
 }
 .macro-tools button {
-  color: #806448;
+  color: #65492f;
   background: transparent;
   border: 0;
   padding: 0;
   border-radius: 0;
-  font-size: 11px;
+  font-size: var(--text-md);
 }
 .macro-tools button:hover {
   color: #783e32;
@@ -437,7 +442,7 @@
   display: none;
 }
 .dice-types > button {
-  color: #887147;
+  color: #654d29;
 }
 .dice-types > button.selected {
   color: #713f2e;
@@ -460,7 +465,7 @@
   right: 30px;
   top: 14px;
   z-index: 1;
-  color: #927850;
+  color: #654d32;
   opacity: 0;
 }
 .dice-workbench:hover .expression-label > button,
@@ -483,12 +488,12 @@
   font-size: 25px;
 }
 .expression-input button {
-  color: #a18a60;
+  color: #654d32;
 }
 .roll-options {
-  color: #8a7453;
+  color: #654d32;
   margin: 13px 0 20px;
-  font-size: 10px;
+  font-size: var(--text-sm);
 }
 .roll-options button.enabled {
   color: #783e32;
@@ -508,18 +513,21 @@
 .presets button {
   border: 0;
   background: transparent;
-  color: #8a724c;
+  color: #654d32;
   padding: 3px 0;
-  font-size: 10px;
+  font-size: var(--text-sm);
 }
 .chat-message {
   background: #92764d0a;
   border-color: #88724c25;
   color: #4f402e;
 }
+.chat-message p {
+  color: var(--ink);
+}
 .chat-message > span,
 .chat-message small {
-  color: #867253;
+  color: var(--muted-ink);
 }
 .chat-form input {
   background: #f4eddc;
@@ -570,11 +578,11 @@
 .dialog-intro,
 .macro-library .muted,
 .modal-discord .muted {
-  color: #79694f;
+  color: var(--muted-ink);
 }
 .modal .field-note,
 .modal small {
-  color: #8a7656;
+  color: var(--muted-ink);
 }
 .modal input,
 .modal textarea,
@@ -586,7 +594,7 @@
 }
 .modal input::placeholder,
 .modal textarea::placeholder {
-  color: #a59477;
+  color: #7d6a4e;
 }
 .modal input[type='range'] {
   background: transparent;
@@ -632,7 +640,14 @@
 }
 .macro-preview small,
 .macro-library-row small {
-  color: #897453;
+  color: var(--muted-ink);
+}
+.modal .macro-preview code,
+.modal .macro-repair {
+  color: var(--ink);
+}
+.history-card .macro-result-terms {
+  color: var(--muted-ink);
 }
 .roll-overlay {
   background: #282118ef;
@@ -655,7 +670,7 @@
 }
 @media (min-width: 1700px) {
   .app {
-    grid-template-rows: 76px minmax(0, 1fr);
+    grid-template-rows: auto minmax(0, 1fr);
   }
 }
 @media (max-width: 1150px) {
@@ -675,13 +690,13 @@
     font-size: 30px;
   }
   .scene-card-caption {
-    font-size: 15px;
+    font-size: var(--text-base);
   }
   .chronicle-tabs {
     padding-inline: 14px;
   }
   .chronicle-tabs button {
-    font-size: 16px;
+    font-size: 20px;
   }
   .dice-workbench {
     padding: 20px 16px;
@@ -694,7 +709,7 @@
 @media (max-width: 900px) {
   .app,
   .app.library-collapsed {
-    grid-template-rows: 65px minmax(0, 1fr);
+    grid-template-rows: auto minmax(0, 1fr);
   }
   .scene-heading h1 {
     font-size: 28px;
@@ -717,7 +732,7 @@
     letter-spacing: 0.3px;
   }
   .brand-small {
-    font-size: 11px;
+    font-size: var(--text-md);
     letter-spacing: 1px;
   }
   .brand img {
@@ -748,18 +763,18 @@
     font-size: 34px;
   }
   .table-welcome p {
-    font-size: 16px;
+    font-size: var(--text-base);
   }
   .table-welcome .primary {
     font-size: 18px;
     margin-top: 20px;
   }
   .table-welcome .subtle-button {
-    font-size: 16px;
+    font-size: var(--text-base);
     padding: 9px;
   }
   .table-welcome small {
-    font-size: 9px;
+    font-size: var(--text-sm);
     margin-top: 8px;
   }
   .dice-workbench {
@@ -908,7 +923,7 @@
   padding-bottom: 18px;
   border-bottom: 1px solid #aa906440;
   margin-bottom: 20px;
-  font-size: 11px;
+  font-size: var(--text-md);
   color: var(--muted-ink);
 }
 .account-summary > span {
@@ -918,7 +933,7 @@
 .account-summary > button {
   flex-shrink: 0;
   color: var(--rubric);
-  font-size: 11px;
+  font-size: var(--text-md);
 }
 .table-welcome .welcome-login {
   width: 100%;

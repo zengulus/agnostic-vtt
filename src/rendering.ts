@@ -293,7 +293,7 @@ export class SceneRenderer {
       ctx.stroke();
       ctx.globalAlpha = erasing ? 0.15 : 1;
       ctx.fillStyle = z.color;
-      ctx.font = `${13 / c.zoom}px sans-serif`;
+      ctx.font = `${16 / c.zoom}px sans-serif`;
       ctx.textAlign = 'left';
       ctx.fillText(z.label, z.x + 8 / c.zoom, z.y - 8 / c.zoom);
       ctx.restore();
@@ -433,13 +433,13 @@ export class SceneRenderer {
     ctx.stroke();
     ctx.restore();
     const label = t.name.split(' · ')[0];
-    ctx.font = `${13 / zoom}px Georgia`;
+    ctx.font = `${16 / zoom}px sans-serif`;
     ctx.textAlign = 'center';
     const tw = ctx.measureText(label).width;
     ctx.fillStyle = '#eadbbdec';
-    ctx.fillRect(p.x - tw / 2 - 7 / zoom, p.y + r + 6 / zoom, tw + 14 / zoom, 20 / zoom);
+    ctx.fillRect(p.x - tw / 2 - 8 / zoom, p.y + r + 6 / zoom, tw + 16 / zoom, 26 / zoom);
     ctx.fillStyle = '#483527';
-    ctx.fillText(label, p.x, p.y + r + 20 / zoom);
+    ctx.fillText(label, p.x, p.y + r + 25 / zoom);
     if (t.resource) {
       const bw = t.size * 0.7;
       ctx.fillStyle = '#10221c';

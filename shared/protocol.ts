@@ -14,10 +14,60 @@ import {
 } from './model.js';
 import type { StateChange, Point, Presence, Roll, RoomState } from './model.js';
 import { tokenEditSchema } from './tokenEdits.js';
+import { refreshSchema } from './characters.js';
 export const MAX_CLIENT_MESSAGE_BYTES = 256 * 1024;
 const base = { v: z.literal(VERSION), actionId: z.string().min(1).max(80) };
 const sceneId = idSchema;
 export const clientMessageSchema = z.discriminatedUnion('type', [
+  z.object({
+    ...base,
+    type: z.literal('CHARACTER_IMPORT'),
+    id: idSchema,
+    text: z.string().min(1).max(65536),
+    visibility: z.enum(['public', 'private']),
+    digest: z
+      .string()
+      .regex(/^[a-f0-9]{64}$/)
+      .optional(),
+  }),
+  z.object({
+    ...base,
+    type: z.literal('CHARACTER_DELETE'),
+    id: idSchema,
+    digest: z.string().regex(/^[a-f0-9]{64}$/),
+  }),
+  z.object({
+    ...base,
+    type: z.literal('CHARACTER_ASSIGN'),
+    id: idSchema,
+    ownerId: z.string().min(1).max(64),
+  }),
+  z.object({
+    ...base,
+    type: z.literal('CHARACTER_RESOURCE_ADJUST'),
+    id: idSchema,
+    resourceId: idSchema,
+    delta: z.number().int().min(-10000).max(10000),
+  }),
+  z.object({ ...base, type: z.literal('CHARACTER_REFRESH'), id: idSchema, refresh: refreshSchema }),
+  z.object({
+    ...base,
+    type: z.literal('CHARACTER_ABILITY_STATE'),
+    id: idSchema,
+    abilityId: idSchema,
+    operation: z.enum(['prepare', 'unprepare', 'recover']),
+  }),
+  z.object({
+    ...base,
+    type: z.literal('CHARACTER_ABILITY_USE'),
+    id: idSchema,
+    abilityId: idSchema,
+    variables: z.record(
+      z.string().regex(/^[A-Za-z][A-Za-z0-9_]{0,23}$/),
+      z.number().finite().min(-10000).max(10000),
+    ),
+    visibility: z.enum(['public', 'private']),
+  }),
   z.object({
     ...base,
     type: z.literal('JOIN_ROOM'),
@@ -54,7 +104,7 @@ export const clientMessageSchema = z.discriminatedUnion('type', [
     type: z.literal('TOKEN_PATCH'),
     sceneId,
     tokenId: idSchema,
-    edits: z.array(tokenEditSchema).min(1).max(12),
+    edits: z.array(tokenEditSchema).min(1).max(13),
   }),
   z.object({
     ...base,

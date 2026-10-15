@@ -21,6 +21,7 @@ export type Dialog =
   | 'objects'
   | 'macros'
   | 'discord'
+  | 'character-import'
   | null;
 export const demoState: RoomState = {
   version: 1,
@@ -48,7 +49,10 @@ interface UIState {
   selectedIds: string[];
   camera: Camera;
   fitNonce: number;
-  panel: 'chronicle' | 'chat' | 'tracker';
+  panel: 'chronicle' | 'chat' | 'tracker' | 'character';
+  characterId: string | null;
+  characterEditId: string | null;
+  activityOpen: boolean;
   dialog: Dialog;
   error: string | null;
   previews: Record<string, Point>;
@@ -110,6 +114,9 @@ export const useTable = create<UIState>((set, get) => ({
   camera: { x: 0, y: 0, zoom: 1 },
   fitNonce: 0,
   panel: 'chronicle',
+  characterId: null,
+  characterEditId: null,
+  activityOpen: false,
   dialog: null,
   error: null,
   previews: {},
@@ -168,4 +175,18 @@ useTable.subscribe((state, previous) => {
 });
 export function notify(message: string) {
   useTable.getState().set({ error: message });
+}
+/** A phone sheet reports its own actions inline; the drawer would cover a map presentation. */
+export function presentRoll(roll: Roll) {
+  const s = useTable.getState();
+  if (
+    roll.character &&
+    s.panel === 'character' &&
+    s.activityOpen &&
+    typeof window !== 'undefined' &&
+    window.innerWidth <= 620
+  )
+    return;
+  if (s.presentation) s.set({ rollQueue: [...s.rollQueue, roll].slice(-10) });
+  else s.set({ presentation: roll });
 }

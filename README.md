@@ -62,6 +62,42 @@ Player mode does not revoke account-level ownership or erase previously received
 
 Escape clears drafts/selection; Delete removes selected tokens. On tablets, the layers button opens scene, grid, image, library and undo controls. Two fingers pan and pinch to zoom.
 
+## Character sheets, prepared abilities and resources
+
+Open **Sheet** in the tool rail or **Character** in table activity. Import a `.txt` file, paste text, or choose **Use example character**, then review the preview. The [character template](public/examples/character.txt) includes a recoverable maneuver, prepared spell uses, shared resource pools and an unlimited weapon attack. Sheets belong to the campaign and keep their state across scene changes. In a token’s edit dialog, choose a **Character sheet** to open it directly from that token’s controls.
+
+```text
+[character]
+name = Kael
+description = A wandering adept.
+
+[stats]
+ATTACK = 6
+
+[resource focus]
+name = Focus
+current = 3
+max = 3
+refresh = encounter
+
+[ability sweeping-strike]
+name = Sweeping Strike
+group = Maneuvers
+text = Strike a nearby foe.
+uses = 1
+refresh = recovery
+cost = focus:1
+macro = [Sweeping Strike]([Attack Roll(1d20 + ATTACK)])
+```
+
+**Use** runs the ability’s macro and spends its remaining use and resource costs in one authoritative action. Matching numeric stats supply macro inputs; other inputs prompt before spending. Failed, unavailable and unauthorized actions spend nothing. Duplicate action IDs do not spend twice, including after a server restart. Abilities without a macro announce their text without a numeric roll. Desktop actions can animate on the map; phone sheet actions show their results beside the ability. Public results use the existing automatic/manual Discord delivery settings, including the character name and remaining resources. Private results cannot be forwarded to Discord.
+
+Use `uses = 2` for two prepared copies of a spell, `uses = unlimited` for an action without its own use limit, and `prepared = false` for an ability that is known but not currently available. `remaining` defaults to `uses`. Resource costs are optional and can reference multiple pools, such as `cost = focus:1, spell-slots:1`. Pool costs and ability uses are independent; configure the combination your table uses. These are generic counters, not a rules engine for a specific game.
+
+**Recover**, **Encounter**, and **Rest** restore only entries marked `recovery`, `encounter`, and `rest`, respectively. They do not automatically apply another group’s rules. Individual abilities also have **Recover** controls, and pools have amount-based Spend/Restore controls. A sheet’s owner and GMs manage its preparation, resources and actions; party visibility grants read access. GMs can assign ownership in **Character settings & text**. GM Undo/Redo restores resource changes while keeping action history; Redo never rerolls or resends a Discord message.
+
+**Export current character.txt** includes the current counters. **Edit character text** previews a replacement and refuses to overwrite a sheet changed since the editor opened. Imports accept comments, LF/CRLF/CR newlines, and JSON-quoted strings with `\n` for multiline descriptions. They are limited to 64 KiB, 30 numeric stats, 30 pools and 80 abilities per sheet; campaigns support 50 sheets and each person can create 20. Private sheets are visible only to their owner and GMs. A token’s existing resource bar remains a separate scene counter; linking a sheet does not silently merge those counters.
+
 ## Dice presentation
 
 The server uses cryptographic randomness for d4, d6, d8, d10, d12, d20 and percentiles, including mixed expressions and positive/negative modifiers. It sends structured contributions and the total; browser physics presents those outcomes.
@@ -209,4 +245,4 @@ Images load directly, with no Referer header. Players' IP addresses are visible 
 
 `shared/` defines versioned serializable models, bounded dice grammar, coordinate transforms, permissions, assets, and protocol. `server/` owns authentication, rooms, cryptographic randomness, rate limits, and persistence. `src/` handles local camera state, optimistic drag previews, smooth remote movement, reconnect/backoff, and independent roll presentation. The existing [Dice Box Three.js library](https://github.com/3d-dice/dice-box-threejs) provides collision physics and face forcing. `@3d-dice/dice-box` was considered; its Three.js sibling explicitly supports predetermined results. A small adapter corrects its d4 preliminary-result retention and manages resize listeners. Dice outcomes never depend on browser physics. Third-party license notices are included in `public/assets/`.
 
-See [the progress document](docs/PROGRESS.md) for verification and limits. Milestone 4 remains: generic character data, event hooks, token-linked macros, campaign import/export and extension interfaces. Walls, lighting, protected tiles, handouts and advanced dice conventions are future work.
+See [the progress document](docs/PROGRESS.md) for verification and limits. Generic character sheets, resource-aware ability macros and token-to-sheet links are available. Event hooks, full campaign import/export and extension interfaces remain future work, alongside walls, lighting, protected tiles, handouts and advanced dice conventions.

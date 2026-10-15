@@ -9,7 +9,7 @@
 .roll-options button,
 .dice-types small,
 .presets button {
-  font-size: 12px;
+  font-size: var(--text-md);
 }
 button:focus-visible,
 summary:focus-visible,
@@ -45,12 +45,12 @@ canvas:focus-visible {
   margin: 6px 0 10px;
 }
 .save-status {
-  font-size: 12px;
+  font-size: var(--text-md);
   color: #745636;
   line-height: 1.4;
 }
 .save-status small {
-  font-size: 11px;
+  font-size: var(--text-md);
 }
 .table-awareness {
   position: absolute;
@@ -59,6 +59,10 @@ canvas:focus-visible {
   right: 18px;
   z-index: 3;
   pointer-events: none;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 12px;
 }
 .table-awareness > * {
   pointer-events: auto;
@@ -76,11 +80,11 @@ canvas:focus-visible {
   border-radius: 5px;
   color: #513b2c;
   box-shadow: 0 3px 10px #0004;
-  font-size: 13px;
+  font-size: var(--text-base);
 }
 .turn-awareness small {
   color: #75583b;
-  font-size: 12px;
+  font-size: var(--text-md);
 }
 .turn-awareness strong {
   font-weight: 600;
@@ -95,16 +99,14 @@ canvas:focus-visible {
   border: 2px solid #9e672d;
 }
 .first-use-guide {
-  position: absolute;
-  right: 0;
-  top: 65px;
-  width: min(335px, 100%);
+  align-self: flex-end;
+  width: min(360px, 100%);
   color: #533d2d;
   background: #e8dbc2f5;
   border: 1px solid #96723f;
-  padding: 10px 12px;
+  padding: 14px 16px;
   border-radius: 5px;
-  font-size: 13px;
+  font-size: var(--text-base);
 }
 .first-use-guide > div {
   display: flex;
@@ -117,14 +119,19 @@ canvas:focus-visible {
   margin: 4px 0;
 }
 .first-use-guide button {
-  min-height: 34px;
+  min-height: 40px;
   padding: 6px;
   color: #6d3d29;
   text-decoration: underline;
 }
+.first-use-guide > div > button {
+  min-width: 40px;
+  font-size: 24px;
+  text-decoration: none;
+}
 .connection-guidance {
   max-width: 480px;
-  font-size: 13px;
+  font-size: var(--text-md);
   line-height: 1.5;
   padding: 10px;
   background: #e9d9bd;
@@ -147,7 +154,7 @@ canvas:focus-visible {
   border-radius: 4px;
   padding: 7px 9px;
   min-height: 36px;
-  font-size: 13px;
+  font-size: var(--text-md);
   color: #68472f;
   text-align: left;
   overflow-wrap: anywhere;
@@ -176,6 +183,7 @@ canvas:focus-visible {
 .dice-workbench {
   overflow-y: auto;
   max-height: 70%;
+  flex-shrink: 0;
 }
 .dice-workbench .macro-tools {
   position: static;
@@ -192,7 +200,7 @@ canvas:focus-visible {
   display: inline-flex;
   align-items: center;
   gap: 5px;
-  font-size: 12px;
+  font-size: var(--text-md);
 }
 .dice-workbench .expression-label {
   height: auto;
@@ -206,13 +214,13 @@ canvas:focus-visible {
   display: inline-flex;
   align-items: center;
   gap: 6px;
-  font-size: 12px;
+  font-size: var(--text-md);
   padding: 4px 8px;
   border: 1px solid #a98c5d66;
   border-radius: 4px;
 }
 .quick-dice-preferences {
-  font-size: 12px;
+  font-size: var(--text-md);
   color: #65492f;
   margin-bottom: 8px;
 }
@@ -231,11 +239,12 @@ canvas:focus-visible {
   flex-basis: 100%;
   text-align: center;
   white-space: normal;
-  font-size: 12px;
+  font-size: var(--text-md);
   line-height: 1.4;
 }
 .selection-toolbar {
   min-width: min(360px, 92%);
+  z-index: 4;
 }
 .grid-calibration {
   margin-top: 12px;
@@ -259,7 +268,7 @@ canvas:focus-visible {
   padding: 9px;
   border: 1px solid #b6a17c;
   border-radius: 4px;
-  font-size: 12px;
+  font-size: var(--text-md);
 }
 .calibration-tools button[aria-pressed='true'] {
   background: #9a794636;
@@ -290,12 +299,12 @@ canvas:focus-visible {
 }
 .campaign-image-picker span {
   display: block;
-  font-size: 12px;
+  font-size: var(--text-md);
   overflow-wrap: anywhere;
 }
 .fog-actions {
   position: relative;
-  font-size: 12px;
+  font-size: var(--text-md);
 }
 .fog-actions summary {
   padding: 10px 8px;
@@ -327,7 +336,7 @@ canvas:focus-visible {
   color: #71563c;
 }
 .tracker-add-selected {
-  font-size: 12px;
+  font-size: var(--text-md);
   padding: 8px 0;
 }
 .tracker-add-selected summary,
@@ -359,10 +368,10 @@ canvas:focus-visible {
   .save-status {
     display: block;
     max-width: 155px;
-    font-size: 11px;
+    font-size: var(--text-md);
   }
   .save-status small {
-    font-size: 11px;
+    font-size: var(--text-md);
   }
   .table-awareness {
     top: 84px;
@@ -372,7 +381,7 @@ canvas:focus-visible {
   .turn-awareness {
     gap: 8px;
     padding: 6px 8px;
-    font-size: 12px;
+    font-size: var(--text-md);
   }
   .turn-awareness > span {
     max-width: 145px;
@@ -382,20 +391,23 @@ canvas:focus-visible {
     min-height: 34px;
   }
   .first-use-guide {
-    top: 58px;
     width: min(310px, 100%);
-    padding: 7px 9px;
-    font-size: 12px;
+    padding: 10px 12px;
+    font-size: var(--text-md);
   }
   .first-use-guide p {
     max-height: 74px;
+    overflow-y: auto;
+  }
+  .first-use-guide ol {
+    max-height: 110px;
     overflow-y: auto;
   }
   .first-use-guide button {
     min-height: 34px;
   }
   .chronicle .dice-workbench {
-    max-height: 46dvh;
+    max-height: 44dvh;
     padding: 8px 14px;
   }
   .dice-workbench .section-heading {
@@ -485,10 +497,10 @@ canvas:focus-visible {
     line-height: 1.3;
   }
   .header-actions .connection {
-    font-size: 12px;
+    font-size: var(--text-md);
   }
   .header-actions .role-switch {
-    font-size: 11px;
+    font-size: var(--text-md);
     padding: 7px;
   }
   .header-actions .reset-demo {
@@ -575,14 +587,14 @@ canvas:focus-visible {
   }
   .compact-resource-status {
     display: block;
-    font-size: 12px;
+    font-size: var(--text-md);
   }
   .selection-toolbar .compact-control-toggle {
     display: block;
-    width: 85px;
+    width: 105px;
     min-height: 44px;
     white-space: normal;
-    font-size: 12px;
+    font-size: var(--text-md);
     line-height: 1.4;
   }
   .selection-controls {
@@ -599,5 +611,229 @@ canvas:focus-visible {
   .selection-controls > button {
     min-width: 40px;
     min-height: 40px;
+  }
+}
+
+/* Let controls grow with the readable type instead of squeezing their labels. */
+.modal input,
+.modal select,
+.modal textarea,
+.tracker-panel input,
+.tracker-panel select,
+.quick-dice-preferences select,
+.favorite-prompt input {
+  font-size: var(--text-base);
+}
+.modal h3 {
+  font-size: 24px;
+}
+.modal button,
+.chat-form button,
+.roll-options button,
+.presets button,
+.expression-input button,
+.quick-dice-preferences summary {
+  min-height: 40px;
+}
+.modal-header button,
+.expression-input button,
+.zoom-controls button {
+  min-width: 40px;
+  min-height: 40px;
+}
+.modal .segmented,
+.theme-presets {
+  flex-wrap: wrap;
+}
+.segmented > button,
+.theme-presets button {
+  flex-basis: 100px;
+}
+.modal .form-row {
+  flex-wrap: wrap;
+}
+.modal .form-row > label {
+  flex-basis: 140px;
+}
+.modal .form-row > label.check-label {
+  flex-basis: 100%;
+}
+.token-list-item > span,
+.saved-token > span {
+  overflow-wrap: anywhere;
+}
+.token-list-item small {
+  line-height: 1.5;
+}
+.scene-card-caption {
+  font-size: 19px;
+  line-height: 1.35;
+}
+.tracker-entries > div {
+  flex-wrap: wrap;
+}
+.dice-types > button {
+  min-width: 36px;
+  min-height: 44px;
+}
+.dice-types .die-icon {
+  width: 34px;
+  height: 36px;
+  font-family: 'DM Sans', sans-serif;
+  font-size: var(--text-base);
+}
+.dice-types .die-6 {
+  height: 32px;
+}
+.table-welcome {
+  z-index: 4;
+}
+.roll-options {
+  margin-block: 8px;
+}
+.presets > div {
+  gap: 8px;
+}
+.presets button {
+  padding-inline: 8px;
+}
+.tracker-panel .form-row {
+  flex-wrap: wrap;
+}
+.tracker-panel .form-row > label {
+  flex-basis: 100px;
+}
+.resource-actions {
+  flex-wrap: wrap;
+}
+
+@media (min-width: 621px) and (max-width: 1150px) {
+  .app-header {
+    height: auto;
+    flex-wrap: wrap;
+    gap: 10px 20px;
+    padding-block: 12px;
+  }
+  .app-header .brand {
+    min-width: 0;
+  }
+  .campaign-title {
+    flex: 1;
+  }
+  .header-actions {
+    width: 100%;
+    justify-content: flex-end;
+  }
+  .header-actions .save-status {
+    max-width: none;
+    margin-right: auto;
+  }
+}
+@media (min-width: 901px) and (max-width: 1150px) {
+  .table-awareness {
+    top: 150px;
+  }
+}
+@media (max-width: 620px) {
+  .app-header {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+  }
+  .app-header .brand {
+    margin-right: auto;
+  }
+  .header-actions {
+    display: contents;
+  }
+  .header-actions .connection {
+    order: 1;
+  }
+  .header-actions .save-status {
+    order: 1;
+    flex-basis: calc(100% - 75px);
+    margin-left: auto;
+    font-size: var(--text-sm);
+  }
+  .header-actions > button {
+    min-height: 40px;
+  }
+  .header-actions .role-switch {
+    font-size: var(--text-sm);
+  }
+  .turn-awareness {
+    flex-shrink: 0;
+    width: 100%;
+  }
+  .turn-awareness > span {
+    max-width: none;
+  }
+  .turn-awareness > span:first-child {
+    flex: 1;
+  }
+  .turn-awareness > span:nth-child(2) {
+    min-width: 65px;
+  }
+  .first-use-guide {
+    min-height: 0;
+    overflow-y: auto;
+  }
+  .first-use-guide ol {
+    max-height: none;
+    overflow: visible;
+  }
+  .scene-options {
+    top: 54px;
+  }
+  .scene-options > button {
+    min-width: 34px;
+  }
+  .scene-heading {
+    top: 12px;
+    left: 12px;
+    right: 12px;
+    max-width: none;
+  }
+  .scene-heading h1 {
+    font-size: 24px;
+    max-width: none;
+  }
+  .table-awareness {
+    top: 114px;
+    bottom: 70px;
+  }
+  .chronicle .dice-workbench {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+    gap: 6px 10px;
+    align-items: start;
+  }
+  .dice-workbench .favorite-actions,
+  .dice-workbench .dice-types,
+  .dice-workbench > form {
+    grid-column: 1 / -1;
+  }
+  .dice-workbench .favorite-actions:has(.favorite-strip > .field-note) {
+    display: none;
+  }
+  .dice-workbench .macro-tools {
+    grid-column: 1;
+  }
+  .quick-dice-preferences {
+    grid-column: 2;
+  }
+  .quick-dice-preferences[open] {
+    grid-column: 1 / -1;
+  }
+  .dice-types > button {
+    min-width: 32px;
+    padding: 0;
+  }
+  .dice-types .die-icon {
+    width: 30px;
+    height: 34px;
+  }
+  .dice-types .die-6 {
+    height: 30px;
   }
 }

@@ -73,6 +73,7 @@ jobs:
       fail-fast: false
       matrix:
         suite:
+          - characters
           - connection-cancellation
           - dialogs
           - improvements

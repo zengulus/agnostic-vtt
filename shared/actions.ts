@@ -17,6 +17,14 @@ import { sampleScene } from './sample.js';
 import { importMacros, parseMacro, evaluateMacro } from './macros.js';
 import { planMacroImport } from './macroImport.js';
 import { applyTokenEdits } from './tokenEdits.js';
+import {
+  parseCharacter,
+  characterDigest,
+  characterVisible,
+  characterControlled,
+  unavailableAbility,
+  type CharacterSheet,
+} from './characters.js';
 export function assertAsset(room: DurableRoom, asset: Token['image']) {
   validateAsset(asset);
   if (asset.kind === 'uploaded' && !room.state.assets?.[asset.url])
@@ -36,6 +44,19 @@ export function prepareAction(
   const gm = () => {
     if (role !== 'gm') throw new Error('Only the game master can change this.');
   };
+  const character = (id: string) => {
+    const sheet =
+      state.characters && Object.hasOwn(state.characters, id) ? state.characters[id] : undefined;
+    if (!sheet || !characterVisible(sheet, user.id, role)) throw new Error('Character not found.');
+    if (!characterControlled(sheet, user.id, role))
+      throw new Error('Only this character’s owner or a game master can change it.');
+    return sheet;
+  };
+  const sheetChange = (sheet: CharacterSheet): StateChange => ({
+    kind: 'character',
+    id: sheet.id,
+    character: sheet,
+  });
   const scene = (id: string) => {
     const s = state.scenes[id];
     if (!s) throw new Error('Scene not found.');
@@ -69,6 +90,12 @@ export function prepareAction(
       throw new Error('Duplicate token identifiers in batch.');
     return tokens.map((token) => {
       assertAsset(room, token.image);
+      if (
+        token.characterId &&
+        token.characterId !== s.tokens[token.id]?.characterId &&
+        !Object.hasOwn(state.characters || {}, token.characterId)
+      )
+        throw new Error('Linked character not found. Choose another sheet or unlink it.');
       return {
         kind: 'token',
         sceneId,
@@ -77,6 +104,173 @@ export function prepareAction(
     });
   };
   switch (m.type) {
+    case 'CHARACTER_IMPORT': {
+      const existing =
+        state.characters && Object.hasOwn(state.characters, m.id)
+          ? state.characters[m.id]
+          : undefined;
+      if (existing) {
+        character(m.id);
+        if (m.digest !== characterDigest(existing))
+          throw new Error(
+            'This character changed since the preview. Reload its current text before replacing it.',
+          );
+      } else {
+        if (m.digest)
+          throw new Error('This character was removed. Import as a new character instead.');
+        const sheets = Object.values(state.characters || {});
+        if (sheets.length >= 50 || sheets.filter((s) => s.ownerId === user.id).length >= 20)
+          throw new Error('Save at most 20 characters per person and 50 per campaign.');
+      }
+      const definition = parseCharacter(m.text);
+      return [
+        sheetChange({
+          ...definition,
+          id: m.id,
+          ownerId: existing?.ownerId || user.id,
+          visibility: m.visibility,
+        }),
+      ];
+    }
+    case 'CHARACTER_DELETE': {
+      const sheet = character(m.id);
+      if (m.digest !== characterDigest(sheet))
+        throw new Error('This character changed. Review it before deleting.');
+      return [{ kind: 'character', id: m.id, character: null }];
+    }
+    case 'CHARACTER_ASSIGN': {
+      gm();
+      const sheet = character(m.id);
+      if (!Object.hasOwn(room.members, m.ownerId))
+        throw new Error('Choose a current campaign member.');
+      return [sheetChange({ ...sheet, ownerId: m.ownerId })];
+    }
+    case 'CHARACTER_RESOURCE_ADJUST': {
+      const sheet = character(m.id);
+      if (!sheet.resources.some((r) => r.id === m.resourceId))
+        throw new Error('Resource not found.');
+      return [
+        sheetChange({
+          ...sheet,
+          resources: sheet.resources.map((r) =>
+            r.id === m.resourceId
+              ? { ...r, current: Math.max(0, Math.min(r.max, r.current + m.delta)) }
+              : r,
+          ),
+        }),
+      ];
+    }
+    case 'CHARACTER_REFRESH': {
+      const sheet = character(m.id);
+      return [
+        sheetChange({
+          ...sheet,
+          resources: sheet.resources.map((r) =>
+            r.refresh === m.refresh ? { ...r, current: r.max } : r,
+          ),
+          abilities: sheet.abilities.map((a) =>
+            a.refresh === m.refresh ? { ...a, remainingUses: a.maxUses } : a,
+          ),
+        }),
+      ];
+    }
+    case 'CHARACTER_ABILITY_STATE': {
+      const sheet = character(m.id);
+      if (!sheet.abilities.some((a) => a.id === m.abilityId)) throw new Error('Ability not found.');
+      return [
+        sheetChange({
+          ...sheet,
+          abilities: sheet.abilities.map((a) =>
+            a.id !== m.abilityId
+              ? a
+              : m.operation === 'recover'
+                ? { ...a, remainingUses: a.maxUses }
+                : { ...a, prepared: m.operation === 'prepare' },
+          ),
+        }),
+      ];
+    }
+    case 'CHARACTER_ABILITY_USE': {
+      const sheet = character(m.id),
+        ability = sheet.abilities.find((a) => a.id === m.abilityId);
+      if (!ability) throw new Error('Ability not found.');
+      const unavailable = unavailableAbility(sheet, ability);
+      if (unavailable) throw new Error(`${ability.name}: ${unavailable}.`);
+      const definition = ability.macro ? parseMacro(ability.macro) : null;
+      const variables = Object.fromEntries(
+        (definition?.variables || []).map((name) => [
+          name,
+          Object.hasOwn(sheet.stats, name) ? sheet.stats[name] : m.variables[name],
+        ]),
+      );
+      if (
+        Object.keys(m.variables).some(
+          (name) => !definition?.variables.includes(name) || Object.hasOwn(sheet.stats, name),
+        )
+      )
+        throw new Error('Supply only the action’s unbound numeric inputs.');
+      const result = definition
+        ? evaluateMacro(definition, variables, randomInt)
+        : {
+            name: ability.name,
+            variables: {},
+            groups: [
+              {
+                name: 'Effect',
+                terms: [],
+                contributions: [],
+                total: 0,
+                selections: [ability.text || ability.name],
+              },
+            ],
+          };
+      const remainingUses = ability.maxUses ? ability.remainingUses - 1 : 0;
+      const resources = sheet.resources.map((r) => ({
+        ...r,
+        current: r.current - (ability.costs.find((c) => c.resourceId === r.id)?.amount || 0),
+      }));
+      return [
+        sheetChange({
+          ...sheet,
+          resources,
+          abilities: sheet.abilities.map((a) =>
+            a.id === ability.id ? { ...a, remainingUses } : a,
+          ),
+        }),
+        {
+          kind: 'roll',
+          roll: {
+            id: randomUUID(),
+            actionId: m.actionId,
+            userId: user.id,
+            userName: user.name,
+            expression: ability.name,
+            terms: result.groups.flatMap((g) => g.terms),
+            total: result.groups[0].total,
+            macro: { ...result, name: ability.name },
+            visibility: m.visibility,
+            createdAt: new Date().toISOString(),
+            character: {
+              characterId: sheet.id,
+              abilityId: ability.id,
+              name: sheet.name,
+              ability: ability.name,
+              text: ability.text,
+              remainingUses: ability.maxUses ? remainingUses : null,
+              maxUses: ability.maxUses,
+              resources: resources
+                .filter((r) => ability.costs.some((c) => c.resourceId === r.id))
+                .map((r) => ({
+                  name: r.name,
+                  current: r.current,
+                  max: r.max,
+                  spent: ability.costs.find((c) => c.resourceId === r.id)!.amount,
+                })),
+            },
+          },
+        },
+      ];
+    }
     case 'MACRO_IMPORT': {
       const imported = importMacros(m.text);
       if (imported.errors.length)

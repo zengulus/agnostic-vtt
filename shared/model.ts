@@ -1,5 +1,6 @@
 import { z } from 'zod';
 import type { Macro, MacroResult } from './macros.js';
+import { characterVisible, type CharacterSheet, type CharacterUse } from './characters.js';
 
 export const VERSION = 2 as const;
 export const idSchema = z
@@ -37,6 +38,7 @@ export const tokenSchema = z.object({
   color: z.string().regex(/^#[0-9a-fA-F]{6}$/),
   owners: z.array(z.string().max(64)).max(10),
   visibility: z.enum(['public', 'gm']),
+  characterId: idSchema.nullable().optional(),
   resource: z
     .object({
       label: z.string().max(16),
@@ -185,6 +187,7 @@ export interface Roll {
   visibility: 'public' | 'private';
   createdAt: string;
   macro?: MacroResult;
+  character?: CharacterUse;
 }
 export interface Chat {
   id: string;
@@ -213,6 +216,7 @@ export interface RoomState {
   tracker?: Tracker;
   assets?: Record<string, UploadedAsset>;
   macros?: Record<string, Macro>;
+  characters?: Record<string, CharacterSheet>;
 }
 /** Server-only fields are NEVER included in ROOM_SNAPSHOT. */
 export interface DurableRoom {
@@ -248,7 +252,11 @@ export type TableChange =
   | { kind: 'scene-delete'; sceneId: string }
   | { kind: 'assets'; assets: Record<string, UploadedAsset> };
 export type MacroChange = { kind: 'macro'; id: string; macro: Macro | null };
-export type StateChange = Change | TableChange | MacroChange;
+export type StateChange =
+  | Change
+  | TableChange
+  | MacroChange
+  | { kind: 'character'; id: string; character: CharacterSheet | null };
 
 export function canControl(token: Token, userId: string, role: 'gm' | 'player') {
   return (
@@ -298,6 +306,11 @@ export function projectRoom(
     assets: projectAssets(room.state, role === 'gm', role),
     macros: Object.fromEntries(
       Object.entries(room.state.macros || {}).filter(([, m]) => macroVisible(m, userId, role)),
+    ),
+    characters: Object.fromEntries(
+      Object.entries(room.state.characters || {}).filter(([, sheet]) =>
+        characterVisible(sheet, userId, role),
+      ),
     ),
   };
 }

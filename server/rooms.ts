@@ -657,7 +657,9 @@ export class RoomManager {
     const key = `${peer.identity.id}:${message.actionId}`;
     if (
       room.seen.has(key) ||
-      (['DICE_ROLL_REQUEST', 'MACRO_ROLL_REQUEST'].includes(message.type) &&
+      (['DICE_ROLL_REQUEST', 'MACRO_ROLL_REQUEST', 'CHARACTER_ABILITY_USE'].includes(
+        message.type,
+      ) &&
         data.state.rolls.some(
           (r) => r.actionId === message.actionId && r.userId === peer.identity.id,
         ))
@@ -773,14 +775,15 @@ export class RoomManager {
         changes.length &&
         !['DICE_ROLL_REQUEST', 'MACRO_ROLL_REQUEST', 'CHAT_SEND'].includes(message.type)
       ) {
-        const inverse = inverseChanges(before, changes);
+        const edits = changes.filter((change) => change.kind !== 'roll');
+        const inverse = inverseChanges(before, edits);
         const groupId = message.type === 'FOG_APPEND' ? message.groupId : undefined,
           last = room.undo.at(-1);
         if (groupId && last?.groupId === groupId && last.authorId === peer.identity.id)
-          last.forward.push(...changes);
+          last.forward.push(...edits);
         else
           room.undo.push({
-            forward: changes,
+            forward: edits,
             inverse,
             label: message.type.toLowerCase().replaceAll('_', ' '),
             groupId,

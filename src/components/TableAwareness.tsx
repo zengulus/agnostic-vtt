@@ -1,7 +1,9 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { useTable } from '../store.js';
 import { AssetImage } from '../assets.js';
 import { canControl, emptyTracker, type Token } from '../../shared/model.js';
+import { ChevronDown } from 'lucide-react';
+import { openCharacter } from './Characters.js';
 
 export function focusCharacter(id: string) {
   const s = useTable.getState(),
@@ -84,6 +86,10 @@ export function FirstUseGuide() {
   const s = useTable(),
     key = `aether-first-use:${s.self?.id}:${s.self?.role}`;
   const [dismissed, setDismissed] = useState('');
+  const [expanded, setExpanded] = useState(() => window.innerWidth > 1150);
+  useEffect(() => {
+    if (!['select', 'pan'].includes(s.tool)) setExpanded(false);
+  }, [s.tool]);
   let stored = false;
   try {
     stored = localStorage.getItem(key) === 'dismissed';
@@ -92,14 +98,22 @@ export function FirstUseGuide() {
   }
   if (!s.self || stored || dismissed === key) return null;
   return (
-    <div className="first-use-guide" aria-label="Getting started">
-      <div>
+    <details
+      className="first-use-guide"
+      aria-label="Getting started"
+      open={expanded}
+      onToggle={(e) => setExpanded(e.currentTarget.open)}
+    >
+      <summary>
+        <ChevronDown size={16} />
         <strong>
           {s.self.role === 'gm' ? 'Welcome, game master' : 'Your first turn at the table'}
         </strong>
         <button
           aria-label="Dismiss getting started"
-          onClick={() => {
+          onClick={(e) => {
+            e.preventDefault();
+            e.stopPropagation();
             setDismissed(key);
             try {
               localStorage.setItem(key, 'dismissed');
@@ -110,19 +124,20 @@ export function FirstUseGuide() {
         >
           ×
         </button>
-      </div>
+      </summary>
       <ol>
         <li>
           {s.self.role === 'gm'
             ? 'Choose a character; assign player control in Edit token.'
-            : 'Find My characters in the library; ask your GM if none is assigned.'}
+            : 'Open a character sheet for your prepared spells, maneuvers and resources.'}
         </li>
         <li>Move a character you control: drag it or select it and use arrow keys.</li>
-        <li>Roll with a favorite action or the Dice controls.</li>
+        <li>Use an ability to spend its resources and roll. Recover uses when appropriate.</li>
       </ol>
-      <button onClick={() => s.set({ dialog: 'library' })}>Find your character</button>
+      <button onClick={() => openCharacter()}>Open character sheet</button>
+      <button onClick={() => s.set({ dialog: 'library' })}>Find scene tokens</button>
       <button onClick={() => s.set({ dialog: 'help' })}>Detailed table guide</button>
-    </div>
+    </details>
   );
 }
 export function TurnAwareness() {

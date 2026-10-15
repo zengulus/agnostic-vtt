@@ -1,4 +1,5 @@
 import { macroDigest } from '../shared/macroDigest.js';
+import { readFileSync } from 'node:fs';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
@@ -63,6 +64,10 @@ class Client {
   }
 }
 describe('macros and campaign Discord over real HTTP/WebSockets', () => {
+  const characterText = readFileSync(
+    new URL('../public/examples/character.txt', import.meta.url),
+    'utf8',
+  );
   let dir: string,
     storage: FilePersistence,
     manager: RoomManager,
@@ -515,6 +520,83 @@ describe('macros and campaign Discord over real HTTP/WebSockets', () => {
     await restored.wait('ROOM_SNAPSHOT');
     expect(restored.state.rolls).toHaveLength(1);
     expect(transport).not.toHaveBeenCalled();
+  });
+  it('spends character resources atomically, shares macro effects, protects private sheets and deduplicates after restart', async () => {
+    const gm = await client(),
+      pc = await client(player),
+      spectator = await client(other);
+    await configure();
+    const imported = await pc.commit({
+      type: 'CHARACTER_IMPORT',
+      id: 'kael',
+      text: characterText,
+      visibility: 'private',
+    });
+    await gm.wait('STATE_PATCH', (m) => m.actionId === imported.actionId);
+    await spectator.wait('STATE_PATCH', (m) => m.actionId === imported.actionId);
+    expect(gm.state.characters!.kael.ownerId).toBe(player.id);
+    expect(spectator.state.characters).toEqual({});
+    const denied = spectator.send({
+      type: 'CHARACTER_ABILITY_USE',
+      id: 'kael',
+      abilityId: 'ward',
+      variables: {},
+      visibility: 'public',
+    });
+    await spectator.wait('ERROR', (m) => m.actionId === denied);
+    const action: Action = {
+      type: 'CHARACTER_ABILITY_USE',
+      id: 'kael',
+      abilityId: 'ward',
+      variables: {},
+      visibility: 'public',
+    };
+    const patch = await pc.commit(action);
+    await gm.wait('STATE_PATCH', (m) => m.actionId === patch.actionId);
+    const result = await pc.wait('DICE_ROLL_RESULT');
+    await spectator.wait('DICE_ROLL_RESULT');
+    expect(pc.state.characters!.kael.resources[1].current).toBe(1);
+    expect(pc.state.characters!.kael.abilities[1].remainingUses).toBe(1);
+    expect(spectator.state.characters).toEqual({});
+    expect(spectator.state.rolls[0].character).toMatchObject({ name: 'Kael', remainingUses: 1 });
+    await manager.discordDelivery.idle();
+    expect(transport).toHaveBeenCalledTimes(1);
+    const payload = JSON.parse(transport.mock.calls[0][1]!.body as string);
+    expect(payload.embeds[0].fields[0].value).toContain('Spell slots: 1 / 2');
+    expect(payload.embeds[0].fields[1].value).toContain('protective ward');
+    const privatePatch = await pc.commit({ ...action, visibility: 'private' });
+    await pc.wait('DICE_ROLL_RESULT', (m) => m.roll.visibility === 'private');
+    await spectator.wait('STATE_PATCH', (m) => m.actionId === privatePatch.actionId);
+    expect(spectator.state.rolls).toHaveLength(1);
+    await manager.discordDelivery.idle();
+    expect(transport).toHaveBeenCalledTimes(1);
+    await gm.commit({ type: 'UNDO' });
+    expect(gm.state.characters!.kael.resources[1].current).toBe(1);
+    expect(gm.state.rolls).toHaveLength(2);
+    const redo = await gm.commit({ type: 'REDO' });
+    await pc.wait('STATE_PATCH', (m) => m.actionId === redo.actionId);
+    expect(pc.state.characters!.kael.resources[1].current).toBe(0);
+    expect(pc.state.rolls).toHaveLength(2);
+    await manager.discordDelivery.idle();
+    expect(transport).toHaveBeenCalledTimes(1);
+    const depleted = pc.send(action);
+    await pc.wait('ERROR', (m) => m.actionId === depleted && /Expended/.test(m.message));
+    clients.forEach((c) => c.ws.terminate());
+    clients.length = 0;
+    await app.close();
+    await start();
+    const restored = await client(player);
+    expect(restored.state.characters!.kael.resources[1].current).toBe(0);
+    expect(restored.state.characters!.kael.abilities[1].remainingUses).toBe(0);
+    expect(restored.state.rolls[0]).toEqual(result.roll);
+    restored.send(action, patch.actionId);
+    await restored.wait('ROOM_SNAPSHOT');
+    expect(restored.state.rolls).toHaveLength(2);
+    expect(restored.state.characters!.kael.resources[1].current).toBe(0);
+    expect(transport).toHaveBeenCalledTimes(1);
+    await restored.commit({ type: 'CHARACTER_REFRESH', id: 'kael', refresh: 'rest' });
+    expect(restored.state.characters!.kael.abilities[1].remainingUses).toBe(2);
+    expect(restored.state.characters!.kael.resources[1].current).toBe(2);
   });
   it('rolls back failed settings persistence', async () => {
     await client();

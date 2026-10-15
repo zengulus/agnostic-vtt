@@ -418,7 +418,8 @@ test('separate GM/player contexts protect linked enemies, private art and macros
       /Unseen adversary|enemy-turn|Secret altar|Private ritual|Secret formula/,
     );
     expect(delivered.join('\n')).not.toContain(secret.id);
-    await pc.getByRole('button', { name: 'Map settings', exact: true }).click();
+    await expect(pc.getByRole('button', { name: 'Map settings', exact: true })).toHaveCount(0);
+    await pc.getByRole('button', { name: 'Scene details', exact: true }).click();
     await pc.getByRole('button', { name: 'Campaign images', exact: true }).click();
     await expect(
       pc.getByRole('button', { name: 'Choose image Party portrait.png', exact: true }),

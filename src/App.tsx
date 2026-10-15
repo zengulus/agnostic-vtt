@@ -1,6 +1,12 @@
 import { FogActions } from './components/FogActions.js';
 import { CharacterList, FirstUseGuide, TurnAwareness } from './components/TableAwareness.js';
 import { FavoriteActions } from './components/FavoriteActions.js';
+import {
+  CharacterNavigation,
+  CharacterWorkspace,
+  CharacterActionDetails,
+  openCharacter,
+} from './components/Characters.js';
 import { useEffect, useState } from 'react';
 import {
   ArrowUpRight,
@@ -33,6 +39,8 @@ import {
   Type,
   Flag,
   FolderOpen,
+  BookOpen,
+  Dices,
   Image as ImageIcon,
 } from 'lucide-react';
 import { useTable } from './store.js';
@@ -82,7 +90,7 @@ export function App() {
   }, [s.error, s.set]);
   return (
     <div
-      className={`app ${library ? '' : 'library-collapsed'}`}
+      className={`app ${library ? '' : 'library-collapsed'} ${s.self?.role === 'player' ? 'is-player' : ''}`}
       onPointerDown={() => {
         if (s.sound) unlockSound();
       }}
@@ -210,7 +218,30 @@ export function App() {
           }
         >
           <Layers size={21} />
+          <span className="rail-caption">Library</span>
         </button>
+        {s.self && (
+          <button
+            className={`rail-button ${s.panel === 'character' ? 'active' : ''}`}
+            aria-label="Character sheets"
+            title="Character sheets, resources & abilities"
+            onClick={() => openCharacter(s.characterId)}
+          >
+            <BookOpen size={21} />
+            <span className="rail-caption">Sheet</span>
+          </button>
+        )}
+        {s.self && (
+          <button
+            className="rail-button"
+            aria-label="Dice & macros"
+            title="Dice & macros"
+            onClick={() => s.set({ panel: 'chronicle', activityOpen: false })}
+          >
+            <Dices size={21} />
+            <span className="rail-caption">Dice</span>
+          </button>
+        )}
         <div className="rail-divider" />
         {tools
           .filter((t) => !t.gm || gm || !s.self)
@@ -223,6 +254,21 @@ export function App() {
               onClick={() => s.set({ tool: t.id })}
             >
               <t.icon size={20} />
+              <span className="rail-caption">
+                {
+                  {
+                    select: 'Move',
+                    pan: 'Pan',
+                    measure: 'Ruler',
+                    ping: 'Ping',
+                    zone: 'Areas',
+                    fog: 'Fog',
+                    draw: 'Draw',
+                    text: 'Text',
+                    erase: 'Erase',
+                  }[t.id]
+                }
+              </span>
               <span className="tool-tooltip">
                 {t.label}
                 <kbd>{t.key}</kbd>
@@ -230,14 +276,17 @@ export function App() {
             </button>
           ))}
         <div className="rail-spacer" />
-        <button
-          className="rail-button"
-          title="Configure grid"
-          aria-label="Configure grid"
-          onClick={() => s.set({ dialog: 'grid' })}
-        >
-          <Grid3X3 size={20} />
-        </button>
+        {(gm || !s.self) && (
+          <button
+            className="rail-button"
+            title="Configure grid"
+            aria-label="Configure grid"
+            onClick={() => s.set({ dialog: 'grid' })}
+          >
+            <Grid3X3 size={20} />
+            <span className="rail-caption">Grid</span>
+          </button>
+        )}
         <button
           className="rail-button"
           title="Tabletop guide"
@@ -245,10 +294,12 @@ export function App() {
           onClick={() => s.set({ dialog: 'help' })}
         >
           <HelpCircle size={20} />
+          <span className="rail-caption">Guide</span>
         </button>
       </aside>
       {library && (
         <aside className="library">
+          <CharacterNavigation />
           <div className="section-heading">
             <h2>Scenes</h2>
             {(gm || !s.self) && (
@@ -289,7 +340,7 @@ export function App() {
           </div>
           <div className="library-divider" />
           <div className="section-heading">
-            <h2>Characters</h2>
+            <h2>Scene tokens</h2>
             {gm && (
               <button
                 aria-label="Add token"
@@ -326,7 +377,7 @@ export function App() {
       <main className="table-area">
         <Tabletop />
         <div className="table-awareness">
-          <TurnAwareness />
+          {s.self && <TurnAwareness />}
           <FirstUseGuide />
           {(s.status === 'reconnecting' || s.status === 'connecting') && (
             <p className="connection-guidance" role="status">
@@ -346,20 +397,23 @@ export function App() {
         {s.presentation && <RollPresentation key={s.presentation.id} roll={s.presentation} />}
         <div className="scene-options">
           <button
-            title="Map settings"
-            aria-label="Map settings"
+            title={gm || !s.self ? 'Map settings' : 'Scene details'}
+            aria-label={gm || !s.self ? 'Map settings' : 'Scene details'}
             onClick={() => s.set({ dialog: 'map' })}
           >
             <Map size={15} />
+            {s.self && !gm && <span>Scene details</span>}
           </button>
           <FogActions />
-          <button
-            title="Grid settings"
-            aria-label="Grid settings"
-            onClick={() => s.set({ dialog: 'grid' })}
-          >
-            <Grid3X3 size={15} />
-          </button>
+          {(gm || !s.self) && (
+            <button
+              title="Grid settings"
+              aria-label="Grid settings"
+              onClick={() => s.set({ dialog: 'grid' })}
+            >
+              <Grid3X3 size={15} />
+            </button>
+          )}
         </div>
       </main>
       <Chronicle />
@@ -380,7 +434,6 @@ function Chronicle() {
   const [expression, setExpression] = useState('1d20 + 5 - 2'),
     [privateRoll, setPrivate] = useState(false),
     [chat, setChat] = useState(''),
-    [drawer, setDrawer] = useState(false),
     [pending, setPending] = useState(false),
     [presets, setPresets] = useState<string[]>(() => {
       const defaults = ['1d20 + 5', '2d6', '1d100'];
@@ -430,17 +483,26 @@ function Chronicle() {
     }
   };
   return (
-    <aside className={`chronicle ${drawer ? 'drawer-open' : ''}`}>
+    <aside
+      className={`chronicle ${s.activityOpen ? 'drawer-open' : ''} ${s.panel === 'character' ? 'sheet-view' : ''}`}
+    >
       <button
         className="mobile-activity-toggle"
-        aria-expanded={drawer}
+        aria-expanded={s.activityOpen}
         aria-controls="table-activity"
-        onClick={() => setDrawer(!drawer)}
+        onClick={() => s.set({ activityOpen: !s.activityOpen })}
       >
-        <MessageSquare size={16} /> {drawer ? 'Close table activity' : 'Chat, turns & history'}
-        {drawer ? <ChevronDown size={16} /> : <ChevronRight size={16} />}
+        <MessageSquare size={16} />{' '}
+        {s.activityOpen ? 'Close table activity' : 'Chat, turns & history'}
+        {s.activityOpen ? <ChevronDown size={16} /> : <ChevronRight size={16} />}
       </button>
       <div className="chronicle-tabs">
+        <button
+          className={s.panel === 'character' ? 'active' : ''}
+          onClick={() => s.set({ panel: 'character' })}
+        >
+          Character
+        </button>
         <button
           className={s.panel === 'chronicle' ? 'active' : ''}
           onClick={() => s.set({ panel: 'chronicle' })}
@@ -464,7 +526,9 @@ function Chronicle() {
         </button>
       </div>
       <div className="activity-panel" id="table-activity">
-        {s.panel === 'tracker' ? (
+        {s.panel === 'character' ? (
+          <CharacterWorkspace />
+        ) : s.panel === 'tracker' ? (
           <TrackerPanel />
         ) : s.panel === 'chronicle' ? (
           <>
@@ -480,7 +544,13 @@ function Chronicle() {
                     <button
                       className="history-replay"
                       aria-label={`Replay ${r.expression}`}
-                      onClick={() => s.set({ presentation: r, rollQueue: [] })}
+                      onClick={() =>
+                        s.set({
+                          presentation: r,
+                          rollQueue: [],
+                          activityOpen: window.innerWidth <= 620 ? false : s.activityOpen,
+                        })
+                      }
                     >
                       <span className="history-user">
                         <span>{r.userName}</span>
@@ -492,6 +562,7 @@ function Chronicle() {
                           })}
                         </small>
                       </span>
+                      <CharacterActionDetails roll={r} />
                       {r.macro ? (
                         <>
                           <strong className="macro-history-name">{r.macro.name}</strong>

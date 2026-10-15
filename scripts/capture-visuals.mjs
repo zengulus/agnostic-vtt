@@ -175,6 +175,30 @@ try {
       }
       await page.getByRole('button', { name: 'Chronicle', exact: true }).click();
     }
+    await page.getByRole('button', { name: 'Character sheets', exact: true }).click();
+    await capture('character-empty');
+    await page.getByRole('button', { name: 'Import character text', exact: true }).click();
+    await page.getByRole('button', { name: 'Use example character', exact: true }).click();
+    await expect(page.locator('.character-import-preview')).toContainText('3 abilities');
+    await capture('character-import');
+    await page
+      .getByRole('dialog')
+      .getByRole('button', { name: 'Import character', exact: true })
+      .click();
+    await page.locator('.activity-panel').evaluate((el) => {
+      el.scrollTop = 0;
+    });
+    await page.locator('.library').evaluateAll((els) =>
+      els.forEach((el) => {
+        el.scrollTop = 0;
+      }),
+    );
+    await capture('character-sheet');
+    await page.getByRole('button', { name: 'Use Sweeping Strike', exact: true }).click();
+    await expect(page.locator('.sheet-last-action')).toContainText('Attack Roll');
+    if (width > 620) await page.getByRole('button', { name: 'Continue', exact: true }).click();
+    await page.locator('.sheet-last-action').scrollIntoViewIfNeeded();
+    await capture('character-action');
     await page.getByRole('button', { name: 'Play as player' }).click();
     await capture('player');
     await context.close();

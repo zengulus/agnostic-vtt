@@ -32,13 +32,39 @@ const escapeMarkdown = (text: string) =>
   text.replace(/[\\*_`~|<>]/g, '\\$&').replace(/@/g, '@\u200b');
 export function discordPayload(roll: Roll, campaign: string) {
   if (roll.visibility !== 'public') throw new Error('Private rolls cannot be sent to Discord.');
+  const characterFields = roll.character
+    ? [
+        {
+          name: 'Character & resources',
+          value: escapeMarkdown(
+            `${roll.character.name}\n${roll.character.remainingUses === null ? 'At will' : `${roll.character.remainingUses} / ${roll.character.maxUses} uses remaining`}${roll.character.resources.map((r) => `\n${r.name}: ${r.current} / ${r.max} (spent ${r.spent})`).join('')}`,
+          ).slice(0, 1000),
+          inline: false,
+        },
+        ...(roll.character.text &&
+        !roll.macro?.groups.some((g) => g.selections?.includes(roll.character!.text))
+          ? [
+              {
+                name: 'Effect',
+                value: escapeMarkdown(roll.character.text).slice(0, 1000),
+                inline: false,
+              },
+            ]
+          : []),
+      ]
+    : [];
   const groups = roll.macro?.groups || [
       { name: 'Roll', total: roll.total, contributions: [], terms: roll.terms },
     ],
     names = groups.map((group) => escapeMarkdown(group.name).slice(0, 128)),
     budget = Math.min(
       1000,
-      Math.floor((5500 - names.reduce((sum, name) => sum + name.length, 0)) / groups.length),
+      Math.floor(
+        (5500 -
+          characterFields.reduce((sum, field) => sum + field.name.length + field.value.length, 0) -
+          names.reduce((sum, name) => sum + name.length, 0)) /
+          groups.length,
+      ),
     );
   return {
     allowed_mentions: { parse: [] },
@@ -48,22 +74,25 @@ export function discordPayload(roll: Roll, campaign: string) {
         description: `${escapeMarkdown(roll.userName)} · ${escapeMarkdown(campaign)}`.slice(0, 256),
         color: 0xd8b46c,
         timestamp: roll.createdAt,
-        fields: groups.map((group, index) => {
-          const value = roll.macro
-              ? `${formatMacroGroup(group)}${group.terms.some((t) => t.kept || t.rerolls) ? `\n${formatRollBreakdown(group.terms)}` : ''}`
-              : `${roll.expression}\n${roll.terms.map((t) => `${t.sign < 0 ? '−' : '+'}${formatRollValues(t)}`).join(' ')} = ${roll.total}`,
-            safe = group.selections
-              ? group.selections.map((entry) => `• ${discordTableEntry(entry)}`).join('\n')
-              : escapeMarkdown(value);
-          return {
-            name: names[index],
-            value:
-              safe.length <= budget
-                ? safe
-                : `${safe.slice(0, budget - 40)}…${group.selections ? '' : ` = ${group.total}`}`,
-            inline: false,
-          };
-        }),
+        fields: [
+          ...characterFields,
+          ...groups.map((group, index) => {
+            const value = roll.macro
+                ? `${formatMacroGroup(group)}${group.terms.some((t) => t.kept || t.rerolls) ? `\n${formatRollBreakdown(group.terms)}` : ''}`
+                : `${roll.expression}\n${roll.terms.map((t) => `${t.sign < 0 ? '−' : '+'}${formatRollValues(t)}`).join(' ')} = ${roll.total}`,
+              safe = group.selections
+                ? group.selections.map((entry) => `• ${discordTableEntry(entry)}`).join('\n')
+                : escapeMarkdown(value);
+            return {
+              name: names[index],
+              value:
+                safe.length <= budget
+                  ? safe
+                  : `${safe.slice(0, budget - 40)}…${group.selections ? '' : ` = ${group.total}`}`,
+              inline: false,
+            };
+          }),
+        ],
       },
     ],
   };

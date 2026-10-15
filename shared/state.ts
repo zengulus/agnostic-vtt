@@ -9,6 +9,7 @@ import {
   type StateChange,
   type Token,
 } from './model.js';
+import { characterVisible } from './characters.js';
 /** Structural sharing keeps token commits independent of history size and scene size. */
 export function applyChanges(state: RoomState, changes: StateChange[]): RoomState {
   let next = state;
@@ -58,6 +59,11 @@ export function applyChanges(state: RoomState, changes: StateChange[]): RoomStat
       continue;
     }
     switch (c.kind) {
+      case 'character':
+        next.characters = { ...next.characters };
+        if (c.character) next.characters[c.id] = c.character;
+        else delete next.characters[c.id];
+        break;
       case 'macro':
         next.macros = { ...next.macros };
         if (c.macro) next.macros[c.id] = c.macro;
@@ -100,6 +106,9 @@ export function inverseChanges(state: RoomState, changes: StateChange[]): StateC
   for (const c of changes) {
     const scene = 'sceneId' in c ? current.scenes[c.sceneId] : undefined;
     switch (c.kind) {
+      case 'character':
+        inverse.unshift({ ...c, character: current.characters?.[c.id] || null });
+        break;
       case 'macro':
         inverse.unshift({ ...c, macro: current.macros?.[c.id] || null });
         break;
@@ -188,6 +197,13 @@ export function projectChanges(
     fogScenes = new Set<string>();
   const clean = (t: Token) => (role === 'gm' ? t : { ...t, note: undefined });
   for (const c of changes) {
+    if (c.kind === 'character') {
+      const old = before.characters?.[c.id];
+      if (c.character && characterVisible(c.character, userId, role)) projected.push(c);
+      else if (old && characterVisible(old, userId, role))
+        projected.push({ ...c, character: null });
+      continue;
+    }
     if (c.kind === 'macro') {
       const old = before.macros?.[c.id];
       if (c.macro && macroVisible(c.macro, userId, role)) projected.push(c);

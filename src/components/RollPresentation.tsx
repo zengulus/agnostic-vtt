@@ -5,6 +5,7 @@ import { physicalDice } from '../../shared/dice.js';
 import { startRollAnimation } from '../rollAnimation.js';
 import type { Roll } from '../../shared/model.js';
 import { MacroResults } from './Macros.js';
+import { CharacterActionDetails } from './Characters.js';
 export function RollPresentation({ roll }: { roll: Roll }) {
   const { reducedMotion: reduce, sound, dice, finishRoll } = useTable();
   const reducedMotion =
@@ -92,6 +93,7 @@ export function RollPresentation({ roll }: { roll: Roll }) {
       {phase !== 'rolling' &&
         (roll.macro ? (
           <div className="arithmetic macro-arithmetic">
+            <CharacterActionDetails roll={roll} />
             <MacroResults result={roll.macro} details reveal={phase === 'total'} />
           </div>
         ) : (

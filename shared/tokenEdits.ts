@@ -14,6 +14,7 @@ export const tokenEditSchema = z.discriminatedUnion('field', [
   edit('color', tokenSchema.shape.color),
   edit('owners', tokenSchema.shape.owners),
   edit('visibility', tokenSchema.shape.visibility),
+  edit('characterId', tokenSchema.shape.characterId.unwrap()),
   edit('note', tokenSchema.shape.note.unwrap()),
   edit('statuses', tokenSchema.shape.statuses.unwrap()),
   edit('resource.label', resource.label),
