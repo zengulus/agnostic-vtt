@@ -31,7 +31,6 @@ export const demoState: RoomState = {
   activeSceneId: 'hollow',
   scenes: { hollow: sampleScene(), sanctuary: sampleScene('sanctuary', 'The Astral Sanctuary') },
   rolls: [],
-  chat: [],
   savedAt: null,
 };
 interface UIState {
@@ -49,10 +48,13 @@ interface UIState {
   selectedIds: string[];
   camera: Camera;
   fitNonce: number;
-  panel: 'chronicle' | 'chat' | 'tracker' | 'character';
+  frameTokensNonce: number;
+  panel: 'chronicle' | 'tracker' | 'character';
   characterId: string | null;
   characterEditId: string | null;
   activityOpen: boolean;
+  focusTable: boolean;
+  sessionNonce: number;
   dialog: Dialog;
   error: string | null;
   previews: Record<string, Point>;
@@ -113,10 +115,13 @@ export const useTable = create<UIState>((set, get) => ({
   selectedIds: [],
   camera: { x: 0, y: 0, zoom: 1 },
   fitNonce: 0,
+  frameTokensNonce: 0,
   panel: 'chronicle',
   characterId: null,
   characterEditId: null,
   activityOpen: false,
+  focusTable: false,
+  sessionNonce: 0,
   dialog: null,
   error: null,
   previews: {},
@@ -176,7 +181,7 @@ useTable.subscribe((state, previous) => {
 export function notify(message: string) {
   useTable.getState().set({ error: message });
 }
-/** A phone sheet reports its own actions inline; the drawer would cover a map presentation. */
+/** Compact sheets report their actions inline; their drawer would cover a map presentation. */
 export function presentRoll(roll: Roll) {
   const s = useTable.getState();
   if (
@@ -184,9 +189,11 @@ export function presentRoll(roll: Roll) {
     s.panel === 'character' &&
     s.activityOpen &&
     typeof window !== 'undefined' &&
-    window.innerWidth <= 620
+    window.innerWidth <= 1000
   )
     return;
+  if (typeof window !== 'undefined' && window.innerWidth <= 1000 && roll.userId === s.self?.id)
+    s.set({ activityOpen: false });
   if (s.presentation) s.set({ rollQueue: [...s.rollQueue, roll].slice(-10) });
   else s.set({ presentation: roll });
 }

@@ -1,3 +1,4 @@
+import { desktopWorkspace, openDice, openLibrary } from './helpers/workspace.js';
 import { expect, test, type Page } from '@playwright/test';
 import type { Action } from '../../shared/protocol.js';
 import type { RoomState } from '../../shared/model.js';
@@ -25,12 +26,14 @@ async function demo(page: Page, player = false) {
       exact: true,
     })
     .click();
+  await desktopWorkspace(page);
 }
 async function create(page: Page) {
   await page.goto('/');
   await page.getByRole('button', { name: 'Log in', exact: true }).click();
   await page.getByRole('button', { name: 'Create campaign', exact: true }).click();
   await expect(page.getByText('Live', { exact: true })).toBeVisible();
+  await desktopWorkspace(page);
 }
 async function dismissGuide(page: Page) {
   const button = page.getByRole('button', { name: 'Dismiss getting started' });
@@ -38,7 +41,7 @@ async function dismissGuide(page: Page) {
 }
 async function character(page: Page) {
   if ((await page.getByRole('button', { name: 'Kael Wanderer', exact: true }).count()) === 0)
-    await page.getByRole('button', { name: 'Toggle library', exact: true }).click();
+    await openLibrary(page);
   await page.getByRole('button', { name: 'Kael Wanderer', exact: true }).click();
   if (await page.getByRole('dialog').count())
     await page.getByRole('button', { name: 'Close dialog' }).click();
@@ -62,7 +65,7 @@ for (const player of [false, true])
         await expect(page.locator('.token-resource')).toContainText('8 / 10');
         await page.getByRole('button', { name: 'Hide controls', exact: true }).click();
       }
-      await expect(page.getByLabel('Turn awareness')).toBeVisible();
+      await expect(page.getByLabel('Turn awareness')).toHaveCount(0);
       await expect(page.locator('.selected-token-status')).toContainText('arrow keys');
       const before = (await state(page)).scenes.hollow.tokens.ranger;
       await page.locator('.tabletop canvas').focus();
@@ -71,9 +74,11 @@ for (const player of [false, true])
         .poll(async () => (await state(page)).scenes.hollow.tokens.ranger.x)
         .toBeGreaterThan(before.x);
       const moved = (await state(page)).scenes.hollow.tokens.ranger.x;
+      await openDice(page);
       await page.getByLabel('Dice expression', { exact: true }).focus();
       await page.keyboard.press('ArrowLeft');
       expect((await state(page)).scenes.hollow.tokens.ranger.x).toBe(moved);
+      await openDice(page);
       await page.getByRole('button', { name: 'Macros · import .txt' }).click();
       await page.getByRole('dialog').focus();
       await page.keyboard.press('ArrowRight');
@@ -93,10 +98,12 @@ for (const player of [false, true])
       await page.getByRole('button', { name: 'Roll action', exact: true }).click();
       await expect.poll(async () => (await state(page)).rolls.length).toBe(1);
       await page.getByRole('button', { name: 'Continue', exact: true }).click();
+      await openDice(page);
       await page.getByRole('button', { name: 'Roll Ready', exact: true }).click();
       await expect.poll(async () => (await state(page)).rolls.length).toBe(2);
       await expect(page.getByLabel('Action input X')).toHaveCount(0);
       await page.getByRole('button', { name: 'Continue', exact: true }).click();
+      await openDice(page);
       await expect(
         page.getByRole('button', { name: 'Save roll preset', exact: true }),
       ).toBeVisible();
@@ -144,6 +151,7 @@ test('edited and deleted favorites invalidate prepared inputs without losing oth
     text: '[Strike]([Roll(d6 + X)])',
     visibility: 'private',
   });
+  await openDice(page);
   await page.getByRole('button', { name: 'Macros · import .txt' }).click();
   await page.getByRole('button', { name: 'Favorite Strike', exact: true }).click();
   await page.getByRole('button', { name: 'Close dialog' }).click();
@@ -173,6 +181,7 @@ test('edited and deleted favorites invalidate prepared inputs without losing oth
   await page.getByRole('button', { name: 'Roll action', exact: true }).click();
   expect((await state(page)).rolls[0].visibility).toBe('private');
   await page.getByRole('button', { name: 'Continue', exact: true }).click();
+  await openDice(page);
   await action(page, { type: 'MACRO_DELETE', id: macro.id });
   await expect(page.getByRole('button', { name: 'Roll Strike', exact: true })).toHaveCount(0);
 });
@@ -291,7 +300,7 @@ test('selected tracker links are preserved, quick-add previews hidden enemies, a
   await page.getByRole('button', { name: 'Add participant', exact: true }).click();
   expect((await state(page)).tracker?.entries[0].tokenId).toBe('ranger');
   await expect(page.getByLabel('Turn awareness')).toContainText('Your turn');
-  await page.getByRole('button', { name: 'Chronicle', exact: true }).click();
+  await page.getByRole('button', { name: 'Dice & history', exact: true }).click();
   await page.getByRole('button', { name: 'Focus character', exact: true }).click();
   await expect(page.locator('.selected-token-status')).toContainText('Kael');
   await page.getByRole('button', { name: 'Turns', exact: true }).click();
@@ -474,7 +483,7 @@ test('separate GM/player contexts protect linked enemies, private art and macros
     await pc.locator('.tabletop canvas').focus();
     await pc.keyboard.press('ArrowRight');
     expect((await state(pc)).scenes.hollow.tokens.ranger.x).toBe(before.x);
-    await pc.getByRole('button', { name: 'Toggle library', exact: true }).click();
+    await openLibrary(pc);
     // Remove the other shared assignments too, to exercise the empty ownership message.
     for (const token of Object.values((await state(gm)).scenes.hollow.tokens))
       if (token.owners.length)
@@ -517,7 +526,12 @@ test('durable-save time follows SAVED revisions independently of acknowledgement
   await dismissGuide(page);
   await expect(page.locator('.save-status')).toContainText('Last saved');
   await expect(page.locator('.save-status')).toContainText('Saved to storage');
-  await action(page, { type: 'CHAT_SEND', text: 'First unsaved edit' });
+  await action(page, {
+    type: 'TOKEN_MOVE_COMMIT',
+    sceneId: 'hollow',
+    tokenId: 'ranger',
+    position: { x: 440, y: 440 },
+  });
   await expect(page.locator('.save-status')).toContainText('Newer changes awaiting save');
   const room = await state(page),
     earlier = { v: 2, type: 'SAVED', revision: room.revision, savedAt: '2099-01-01T00:00:00.000Z' };
@@ -527,7 +541,12 @@ test('durable-save time follows SAVED revisions independently of acknowledgement
   await expect(page.locator('.save-status')).toContainText('Newer changes awaiting save');
   proxy!.send(JSON.stringify({ ...earlier, pending: false }));
   await expect(page.locator('.save-status')).toContainText('Saved to storage');
-  await action(page, { type: 'CHAT_SEND', text: 'Newer edit' });
+  await action(page, {
+    type: 'TOKEN_MOVE_COMMIT',
+    sceneId: 'hollow',
+    tokenId: 'ranger',
+    position: { x: 520, y: 520 },
+  });
   proxy!.send(JSON.stringify(earlier));
   await expect(page.locator('.save-status')).toContainText('Newer changes awaiting save');
   // Reconnect replaces the synthetic timestamp with authoritative snapshot status.
@@ -535,6 +554,7 @@ test('durable-save time follows SAVED revisions independently of acknowledgement
   await expect(page.getByText('Reconnecting', { exact: true })).toBeVisible();
   await expect(page.locator('.save-status')).toContainText('Save status unconfirmed');
   await expect(page.getByText('Live', { exact: true })).toBeVisible();
+  await desktopWorkspace(page);
   await expect(page.locator('.save-status')).toContainText('Last saved');
   void heldSave;
 });

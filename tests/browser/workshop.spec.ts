@@ -1,3 +1,4 @@
+import { desktopWorkspace, openLibrary } from './helpers/workspace.js';
 import { expect, test, type Page } from '@playwright/test';
 import { pausePresentationClock } from './helpers/clock.js';
 import sharp from 'sharp';
@@ -22,6 +23,7 @@ async function create(page: Page) {
   await page.getByRole('button', { name: 'Log in' }).click();
   await page.getByRole('button', { name: 'Create campaign' }).click();
   await expect(page.getByText('Live', { exact: true })).toBeVisible();
+  await desktopWorkspace(page);
   const guide = page.getByRole('button', { name: 'Dismiss getting started' });
   if (await guide.count()) await guide.click();
 }
@@ -161,6 +163,7 @@ test('geometry, drawing layers, hidden turns, hex settings and scene changes syn
   await pc.getByLabel('Your name').fill('Observer');
   await pc.getByRole('button', { name: 'Join your party', exact: true }).click();
   await expect(pc.getByText('Live', { exact: true })).toBeVisible();
+  await desktopWorkspace(pc);
   await gm.getByRole('button', { name: 'Text annotation', exact: true }).click();
   await gm.getByLabel('Annotation text').fill('Private route');
   await gm.getByRole('combobox', { name: 'Layer', exact: true }).selectOption('gm');
@@ -322,7 +325,7 @@ test('dice themes persist, minimal arithmetic remains authoritative, and tablet 
   await page.getByRole('button', { name: 'Done', exact: true }).click();
   await create(page);
   await page.setViewportSize({ width: 820, height: 1180 });
-  await page.getByRole('button', { name: 'Toggle library', exact: true }).click();
+  await openLibrary(page);
   await expect(page.getByRole('button', { name: 'Scene settings', exact: true })).toBeVisible();
   await expect(page.getByRole('button', { name: 'Manage images', exact: true })).toBeVisible();
   await page.getByRole('button', { name: 'Grid settings', exact: true }).click();

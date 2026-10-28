@@ -517,26 +517,7 @@
   padding: 3px 0;
   font-size: var(--text-sm);
 }
-.chat-message {
-  background: #92764d0a;
-  border-color: #88724c25;
-  color: #4f402e;
-}
-.chat-message p {
-  color: var(--ink);
-}
-.chat-message > span,
-.chat-message small {
-  color: var(--muted-ink);
-}
-.chat-form input {
-  background: #f4eddc;
-  color: #493928;
-  border-color: #88724c40;
-}
-.chat-form button {
-  color: #7b513a;
-}
+
 .modal {
   position: relative;
   background: url('/assets/paper-grain.svg'), #eee4ce;

@@ -1408,58 +1408,6 @@ i {
   font-size: var(--text-sm);
   margin-top: 16px;
 }
-.chat-messages {
-  flex: 1;
-  padding-bottom: 10px;
-}
-.chat-message {
-  background: #ffffff03;
-  border: 1px solid #c8b98712;
-  border-radius: 5px;
-  padding: 10px;
-  margin-bottom: 10px;
-}
-.chat-message.own {
-  background: #c8b98708;
-}
-.chat-message > span {
-  display: flex;
-  justify-content: space-between;
-  font-size: var(--text-sm);
-  color: #c4b98e;
-}
-.chat-message small {
-  font-size: var(--text-sm);
-  color: #75896d;
-}
-.chat-message p {
-  font-size: var(--text-base);
-  line-height: 1.65;
-  margin-top: 7px;
-  overflow-wrap: anywhere;
-  white-space: pre-wrap;
-  color: #b9c5ac;
-}
-.chat-form {
-  display: flex;
-  margin: 8px 0 18px;
-  border: 1px solid #c8b98725;
-  border-radius: 4px;
-  background: #142016;
-  align-items: center;
-}
-.chat-form input {
-  border: 0;
-  background: none;
-  font-size: var(--text-base);
-  padding: 12px 10px;
-  box-shadow: none;
-  min-width: 0;
-}
-.chat-form button {
-  padding: 10px;
-  color: #bfa66f;
-}
 .status-bar {
   grid-column: 1/-1;
   display: flex;

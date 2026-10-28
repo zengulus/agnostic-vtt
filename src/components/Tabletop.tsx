@@ -11,6 +11,9 @@ import {
   Ungroup,
   Save,
   BookOpen,
+  Maximize2,
+  Minimize2,
+  ScanSearch,
 } from 'lucide-react';
 import { useTable } from '../store.js';
 import { launchDemo, liveAvailable, send, sendAndWait } from '../connection.js';
@@ -27,6 +30,7 @@ import { TokenResource } from './TokenResource.js';
 import { ToolOptions } from './Workshop.js';
 import { drawingsAlongBrush, zonesAlongBrush } from '../../shared/drawings.js';
 import { openCharacter } from './Characters.js';
+import { frameTokens } from '../camera.js';
 interface Drag {
   kind: 'pan' | 'token' | 'measure' | 'zone' | 'fog' | 'draw' | 'select' | 'erase';
   start: Point;
@@ -189,30 +193,50 @@ export function Tabletop() {
 
   useEffect(() => {
     const element = canvas.current!;
-    const fit = () => {
+    const fit = (tokens = false) => {
       const { w, h } = dimensions.current,
         s = useTable.getState().room.scenes[useTable.getState().room.activeSceneId];
       const zoom = Math.max(0.08, Math.min(3, (w - 70) / s.width, (h - 70) / s.height));
-      useTable
-        .getState()
-        .set({ camera: { zoom, x: (w - s.width * zoom) / 2, y: (h - s.height * zoom) / 2 } });
+      const framed = tokens ? frameTokens(Object.values(s.tokens), w, h) : null;
+      useTable.getState().set({
+        camera: framed || { zoom, x: (w - s.width * zoom) / 2, y: (h - s.height * zoom) / 2 },
+      });
     };
     const observer = new ResizeObserver((entries) => {
       const { width: w, height: h } = entries[0].contentRect;
+      const previous = dimensions.current;
       dimensions.current = { w, h };
       const dpr = Math.min(devicePixelRatio, 2);
       element.width = w * dpr;
       element.height = h * dpr;
-      fit();
+      if (previous.w <= 1 || previous.h <= 1) fit(w <= 620 && !!useTable.getState().self);
+      else {
+        const s = useTable.getState();
+        s.set({
+          camera: {
+            ...s.camera,
+            x: s.camera.x + (w - previous.w) / 2,
+            y: s.camera.y + (h - previous.h) / 2,
+          },
+        });
+      }
       redraw();
     });
     observer.observe(element);
+    const context = (s: ReturnType<typeof useTable.getState>) =>
+      `${s.room.id}:${s.room.activeSceneId}:${s.self?.id}:${s.self?.role}:${s.sessionNonce}`;
     let previousFit = useTable.getState().fitNonce,
+      previousFrame = useTable.getState().frameTokensNonce,
+      previousContext = context(useTable.getState()),
       previousTool = useTable.getState().tool;
     const unsubscribe = useTable.subscribe((s) => {
-      if (s.fitNonce !== previousFit) {
+      const changedScene = context(s) !== previousContext;
+      const requestedTokens = s.frameTokensNonce !== previousFrame;
+      if (s.fitNonce !== previousFit || changedScene || requestedTokens) {
         previousFit = s.fitNonce;
-        fit();
+        previousFrame = s.frameTokensNonce;
+        previousContext = context(s);
+        fit(requestedTokens || (changedScene && dimensions.current.w <= 620 && !!s.self));
         clearDraft();
       }
       if (s.tool !== previousTool) {
@@ -269,6 +293,7 @@ export function Tabletop() {
     const down = (e: KeyboardEvent) => {
       const st = useTable.getState();
       if (
+        e.defaultPrevented ||
         e.isComposing ||
         st.dialog ||
         (e.target instanceof Element &&
@@ -278,6 +303,12 @@ export function Tabletop() {
       )
         return;
       const key = e.key.toLowerCase();
+      if (key === 'escape' && st.activityOpen) return;
+      if (key === 'escape' && st.focusTable) {
+        e.preventDefault();
+        st.set({ focusTable: false });
+        return;
+      }
       if ((e.ctrlKey || e.metaKey) && (key === 'z' || key === 'y')) {
         e.preventDefault();
         if (st.self?.role === 'gm') send({ type: key === 'y' || e.shiftKey ? 'REDO' : 'UNDO' });
@@ -342,7 +373,12 @@ export function Tabletop() {
         t: 'text',
         e: 'erase',
       } as const;
-      if (key in tools) st.set({ tool: tools[key as keyof typeof tools] });
+      if (key in tools) {
+        const tool = tools[key as keyof typeof tools];
+        if (['zone', 'fog', 'draw', 'text', 'erase'].includes(tool) && st.self?.role === 'player')
+          return;
+        st.set({ tool });
+      }
     };
     const up = (e: KeyboardEvent) => {
       if (e.code === 'Space') space.current = false;
@@ -919,6 +955,22 @@ export function Tabletop() {
       )}
       <ToolOptions finishPolygon={finishPolygon} clearDraft={clearDraft} />
       <div className="zoom-controls">
+        <button
+          aria-label={store.focusTable ? 'Exit focus mode' : 'Focus tabletop'}
+          aria-pressed={store.focusTable}
+          title={store.focusTable ? 'Exit focus mode (Escape)' : 'Focus tabletop · hide interface'}
+          onClick={() => store.set({ focusTable: !store.focusTable })}
+        >
+          {store.focusTable ? <Minimize2 size={17} /> : <Maximize2 size={17} />}
+        </button>
+        <button
+          aria-label="Focus scene tokens"
+          title="Focus scene tokens"
+          disabled={!Object.keys(scene.tokens).length}
+          onClick={() => store.set({ frameTokensNonce: store.frameTokensNonce + 1 })}
+        >
+          <ScanSearch size={17} />
+        </button>
         <button aria-label="Zoom out" onClick={() => zoomBy(0.8)}>
           <Minus size={15} />
         </button>
@@ -926,7 +978,6 @@ export function Tabletop() {
         <button aria-label="Zoom in" onClick={() => zoomBy(1.25)}>
           <Plus size={15} />
         </button>
-        <i />
         <button
           aria-label="Fit map to screen"
           onClick={() => store.set({ fitNonce: store.fitNonce + 1 })}

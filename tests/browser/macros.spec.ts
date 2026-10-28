@@ -1,3 +1,4 @@
+import { desktopWorkspace, openDice } from './helpers/workspace.js';
 import { expect, test, type Browser, type BrowserContext, type Page } from '@playwright/test';
 import { pausePresentationClock } from './helpers/clock.js';
 import { macroText } from '../../shared/macros.js';
@@ -9,6 +10,7 @@ test('formatted table picks appear identically in party presentations and histor
   browser,
 }) => {
   await withParty(browser, async (gm, pc) => {
+    await openDice(gm);
     await gm.getByRole('button', { name: 'Macros · import .txt' }).click();
     await gm
       .getByLabel('Macro definitions')
@@ -19,6 +21,7 @@ test('formatted table picks appear identically in party presentations and histor
     await expect(gm.getByRole('button', { name: 'Prepare Grant Maneuvers' })).toBeVisible();
     await gm.getByRole('button', { name: 'Close dialog' }).click();
     await expect.poll(async () => Object.keys((await roomState(pc)).macros || {}).length).toBe(1);
+    await openDice(pc);
     await pc.getByRole('button', { name: 'Macros · import .txt' }).click();
     await pc.getByRole('button', { name: 'Prepare Grant Maneuvers' }).click();
     await expect(pc.locator('.macro-inputs input')).toHaveCount(0);
@@ -50,6 +53,7 @@ async function create(page: Page) {
   await page.getByRole('button', { name: 'Log in' }).click();
   await page.getByRole('button', { name: 'Create campaign' }).click();
   await expect(page.getByText('Live', { exact: true })).toBeVisible();
+  await desktopWorkspace(page);
 }
 
 test('keep, drop and reroll results appear in party dice, macro displays and history', async ({
@@ -75,6 +79,7 @@ test('keep, drop and reroll results appear in party dice, macro displays and his
       }
       await pc.clock.runFor(950);
     }
+    await openDice(pc);
     await pc.getByRole('button', { name: 'Macros · import .txt' }).click();
     await pc.getByLabel('Macro definitions').fill('[Advantage]([Attack Roll(2d20kh1 + X)])');
     await pc.getByRole('button', { name: 'Import 1 macro', exact: true }).click();
@@ -121,6 +126,7 @@ async function withParty(browser: Browser, run: (gm: Page, pc: Page) => Promise<
     await pc.getByLabel('Your name').fill('Macro player');
     await pc.getByRole('button', { name: 'Join your party', exact: true }).click();
     await expect(pc.getByText('Live', { exact: true })).toBeVisible();
+    await desktopWorkspace(pc);
     await run(gm, pc);
     expect(errors).toEqual([]);
   } finally {
@@ -133,6 +139,7 @@ test('newline file import, numeric inputs and generic results synchronize indepe
   browser,
 }) => {
   await withParty(browser, async (gm, pc) => {
+    await openDice(gm);
     await gm.getByRole('button', { name: 'Macros · import .txt' }).click();
     await gm.getByLabel('Import macro.txt', { exact: true }).setInputFiles({
       name: 'macro.txt',
@@ -148,6 +155,7 @@ test('newline file import, numeric inputs and generic results synchronize indepe
     ).toBeVisible();
     await expect.poll(async () => Object.keys((await roomState(pc)).macros || {}).length).toBe(2);
     await gm.getByRole('button', { name: 'Close dialog' }).click();
+    await openDice(pc);
     await pc.getByRole('button', { name: 'Macros · import .txt' }).click();
     await pc.getByRole('button', { name: 'Prepare Attack Name', exact: true }).click();
     await pc.getByLabel('Numeric input X').fill('5');
@@ -167,6 +175,7 @@ test('newline file import, numeric inputs and generic results synchronize indepe
       await page.getByRole('button', { name: 'Dismiss roll' }).click();
       await expect(page.locator('.history-card .macro-results')).toContainText('Fire damage');
     }
+    await openDice(pc);
     await pc.getByRole('button', { name: 'Macros · import .txt' }).click();
     await pc.getByRole('button', { name: 'Prepare Restoration', exact: true }).click();
     await pc.getByRole('button', { name: 'Roll macro', exact: true }).click();
@@ -180,6 +189,7 @@ test('private macro definitions and results stay private after another player re
   browser,
 }) => {
   await withParty(browser, async (gm, pc) => {
+    await openDice(gm);
     await gm.getByRole('button', { name: 'Macros · import .txt' }).click();
     await gm.getByLabel('Macro definitions').fill('[Party check]([Check(3)])');
     await gm.getByRole('button', { name: 'Import 1 macro', exact: true }).click();
@@ -209,6 +219,8 @@ test('private macro definitions and results stay private after another player re
     await pc.reload();
     await pc.getByRole('button', { name: 'Join your party', exact: true }).click();
     await expect(pc.getByText('Live', { exact: true })).toBeVisible();
+    await desktopWorkspace(pc);
+    await openDice(pc);
     await pc.getByRole('button', { name: 'Macros · import .txt' }).click();
     await expect(
       pc.getByRole('button', { name: 'Prepare Party check', exact: true }),
@@ -232,6 +244,7 @@ test('invalid imports and named numeric inputs remain usable in the mobile playe
   await page.goto('/');
   await page.getByRole('button', { name: 'Try the player demo', exact: true }).click();
   await expect(page.getByText('Demo', { exact: true })).toBeVisible();
+  await openDice(page);
   await page.getByRole('button', { name: 'Macros · import .txt' }).click();
   await page.getByLabel('Macro definitions').fill('[Good]([Check(1)])\n[Bad]([Check(d7)])');
   await expect(page.getByText('Line 2:', { exact: false })).toBeVisible();

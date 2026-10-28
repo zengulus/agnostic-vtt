@@ -16,7 +16,7 @@ beforeEach(async () => {
   demo.startDemo();
 });
 afterEach(() => vi.unstubAllGlobals());
-it('supports edits, undo, macros, rolls and chat without network access', () => {
+it('supports edits, undo, macros and rolls without network access', () => {
   const initial = table.useTable.getState().room.scenes.hollow.tokens.ranger;
   demo.demoAction({
     type: 'TOKEN_MOVE_COMMIT',
@@ -40,8 +40,6 @@ it('supports edits, undo, macros, rolls and chat without network access', () => 
   expect(roll.total).toBeGreaterThanOrEqual(6);
   expect(roll.total).toBeLessThanOrEqual(25);
   expect(table.useTable.getState().presentation).toEqual(roll);
-  demo.demoAction({ type: 'CHAT_SEND', text: 'Browser only' });
-  expect(table.useTable.getState().room.chat[0].text).toBe('Browser only');
   expect(fetch).not.toHaveBeenCalled();
 });
 it('filters player content, denies GM edits, and restores GM state when switching back', () => {

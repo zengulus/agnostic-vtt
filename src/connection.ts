@@ -544,7 +544,8 @@ function open() {
                 panel: ownCharacter ? ('character' as const) : ('chronicle' as const),
                 characterId: ownCharacter?.id || null,
                 characterEditId: null,
-                activityOpen: !!ownCharacter,
+                activityOpen: false,
+                focusTable: false,
                 discord: {
                   configured: false,
                   enabled: false,
@@ -622,8 +623,6 @@ function open() {
               sceneChanged = true;
               break;
             case 'roll':
-              break;
-            case 'chat':
               break;
           }
         }

@@ -189,13 +189,6 @@ export interface Roll {
   macro?: MacroResult;
   character?: CharacterUse;
 }
-export interface Chat {
-  id: string;
-  userId: string;
-  userName: string;
-  text: string;
-  createdAt: string;
-}
 export interface Presence {
   id: string;
   name: string;
@@ -210,7 +203,6 @@ export interface RoomState {
   activeSceneId: string;
   scenes: Record<string, Scene>;
   rolls: Roll[];
-  chat: Chat[];
   savedAt: string | null;
   tokenLibrary?: Record<string, Token>;
   tracker?: Tracker;
@@ -224,7 +216,10 @@ export interface DurableRoom {
   saveVersion?: number;
   /** Private, durable Storage cleanup intents, never included in room projections. */
   assetCleanup?: Record<string, { after: string }>;
-  state: RoomState;
+  state: RoomState & {
+    /** Retained only in pre-removal snapshots; never projected to clients. */
+    chat?: unknown[];
+  };
   ownerId: string;
   inviteCode: string;
   members: Record<string, { name: string; role: 'gm' | 'player' }>;
@@ -237,8 +232,7 @@ export type Change =
   | { kind: 'token-delete'; sceneId: string; tokenId: string }
   | { kind: 'scene'; scene: Scene }
   | { kind: 'scene-active'; sceneId: string }
-  | { kind: 'roll'; roll: Roll }
-  | { kind: 'chat'; chat: Chat };
+  | { kind: 'roll'; roll: Roll };
 export type TableChange =
   | { kind: 'fog-operation'; sceneId: string; operation: FogOperation }
   | { kind: 'grid'; sceneId: string; grid: Grid }
@@ -289,8 +283,9 @@ export function projectRoom(
   userId: string,
   role = room.members[userId]?.role || 'player',
 ): RoomState {
+  const { chat: _legacyChat, ...state } = room.state;
   return {
-    ...room.state,
+    ...state,
     scenes: Object.fromEntries(
       Object.entries(room.state.scenes).map(([id, s]) => [id, projectScene(s, role)]),
     ),

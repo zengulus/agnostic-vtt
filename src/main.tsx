@@ -4,4 +4,5 @@ import './styles.css';
 import './fantasy.css';
 import './usability.css';
 import './characters.css';
+import './session.css';
 createRoot(document.getElementById('root')!).render(<App />);

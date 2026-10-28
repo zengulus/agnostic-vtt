@@ -67,7 +67,6 @@ export function newRoom(
         sanctuary: sampleScene('sanctuary', 'The Astral Sanctuary'),
       },
       rolls: [],
-      chat: [],
       savedAt: null,
     },
   };

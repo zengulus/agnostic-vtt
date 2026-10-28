@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { BookOpen, Download, Plus, RefreshCw, Upload } from 'lucide-react';
 import { useTable } from '../store.js';
 import { sendAndWait } from '../connection.js';
@@ -19,7 +19,9 @@ import { MacroResults } from './Macros.js';
 import { DiscordShare } from './DiscordSettings.js';
 
 export function openCharacter(id: string | null = null) {
-  useTable.getState().set({ characterId: id, panel: 'character', activityOpen: true });
+  useTable
+    .getState()
+    .set({ characterId: id, panel: 'character', activityOpen: true, focusTable: false });
 }
 export function importCharacter(id: string | null = null) {
   useTable.getState().set({ characterEditId: id, dialog: 'character-import' });
@@ -188,6 +190,8 @@ export function CharacterWorkspace() {
     );
   const sheet = sheets.find((c) => c.id === s.characterId) || sheets[0];
   const controlled = !!sheet && !!s.self && characterControlled(sheet, s.self.id, s.self.role);
+  const abilitiesRef = useRef<HTMLElement>(null),
+    resourcesRef = useRef<HTMLElement>(null);
   const [busy, setBusy] = useState(false),
     [error, setError] = useState(''),
     [filter, setFilter] = useState(''),
@@ -244,6 +248,25 @@ export function CharacterWorkspace() {
       setPrepared(null);
   };
   const latest = [...s.room.rolls].reverse().find((r) => r.character?.characterId === sheet?.id);
+  const lastAction = useRef<HTMLDivElement>(null);
+  const previousAction = useRef({ sheetId: sheet?.id, rollId: latest?.id });
+  useEffect(() => {
+    const previous = previousAction.current;
+    previousAction.current = { sheetId: sheet?.id, rollId: latest?.id };
+    if (
+      previous.sheetId !== sheet?.id ||
+      previous.rollId === latest?.id ||
+      !latest ||
+      latest.userId !== s.self?.id ||
+      !s.activityOpen ||
+      !matchMedia('(max-width: 1000px)').matches
+    )
+      return;
+    const frame = requestAnimationFrame(() =>
+      lastAction.current?.scrollIntoView({ block: 'nearest' }),
+    );
+    return () => cancelAnimationFrame(frame);
+  }, [sheet?.id, latest?.id, s.self?.id, s.activityOpen]);
   if (!sheet)
     return (
       <div className="sheet-empty">
@@ -274,7 +297,10 @@ export function CharacterWorkspace() {
     : [];
   const owners = [...new Map([...s.members, ...s.presence].map((p) => [p.id, p])).values()];
   return (
-    <div className="character-workspace" aria-label="Character sheet">
+    <div
+      className={`character-workspace ${sheets.length === 1 ? 'single-sheet' : ''}`}
+      aria-label="Character sheet"
+    >
       <div className="sheet-picker">
         <label>
           Character
@@ -302,31 +328,38 @@ export function CharacterWorkspace() {
         <div>
           <h2>{sheet.name}</h2>
           <small>
-            {controlled
-              ? 'You can use and manage this character'
-              : 'View only · controlled by its owner'}{' '}
-            · {sheet.visibility === 'private' ? 'Private sheet' : 'Party sheet'}
+            {controlled ? 'You control this sheet' : 'View only · owner controls actions'} ·{' '}
+            {sheet.visibility === 'private' ? 'Private sheet' : 'Party sheet'}
           </small>
         </div>
       </div>
-      {(sheet.description || Object.keys(sheet.stats).length > 0) && (
-        <details className="sheet-overview">
-          <summary>Stats & character notes</summary>
-          {sheet.description && <p className="sheet-description">{sheet.description}</p>}
-          {Object.keys(sheet.stats).length > 0 && (
-            <dl className="sheet-stats">
-              {Object.entries(sheet.stats).map(([key, value]) => (
-                <div key={key}>
-                  <dt>{key}</dt>
-                  <dd>{value}</dd>
-                </div>
-              ))}
-            </dl>
-          )}
-        </details>
-      )}
+      <nav className="sheet-sections" aria-label="Character sections">
+        <button
+          aria-label="Jump to abilities"
+          onClick={() => {
+            abilitiesRef.current?.scrollIntoView({ block: 'start' });
+            abilitiesRef.current?.focus({ preventScroll: true });
+          }}
+        >
+          Abilities{' '}
+          <span aria-hidden="true">
+            {sheet.abilities.filter((a) => !unavailableAbility(sheet, a)).length} ready
+          </span>
+        </button>
+        {sheet.resources.length > 0 && (
+          <button
+            aria-label="Jump to resources"
+            onClick={() => {
+              resourcesRef.current?.scrollIntoView({ block: 'start' });
+              resourcesRef.current?.focus({ preventScroll: true });
+            }}
+          >
+            Resources
+          </button>
+        )}
+      </nav>
       {sheet.resources.length > 0 && (
-        <section aria-label="Character resources">
+        <section ref={resourcesRef} tabIndex={-1} aria-label="Character resources">
           <h3>Resources</h3>
           <div className="sheet-resources">
             {sheet.resources.map((r) => (
@@ -361,10 +394,15 @@ export function CharacterWorkspace() {
                 {kind === 'recovery' ? 'Recover' : kind === 'encounter' ? 'Encounter' : 'Rest'}
               </button>
             ))}
-          <small>Each button restores only its matching refresh group.</small>
+          <small className="sr-only">Each button restores only its matching refresh group.</small>
         </div>
       )}
-      <section className="sheet-abilities" aria-label="Character abilities">
+      <section
+        ref={abilitiesRef}
+        tabIndex={-1}
+        className="sheet-abilities"
+        aria-label="Character abilities"
+      >
         <h3>Actions & abilities</h3>
         <div className="sheet-filters">
           <input
@@ -426,7 +464,6 @@ export function CharacterWorkspace() {
                           : ' · at will'}
                       </span>
                     </div>
-                    {ability.text && <p>{ability.text}</p>}
                     <small>
                       {ability.costs
                         .map(
@@ -479,6 +516,7 @@ export function CharacterWorkspace() {
                         )}
                       </div>
                     )}
+                    {ability.text && <p>{ability.text}</p>}
                     {prepared?.id === ability.id && (
                       <form
                         className="sheet-inputs"
@@ -518,6 +556,7 @@ export function CharacterWorkspace() {
                     )}
                     {latest?.character?.abilityId === ability.id && (
                       <div
+                        ref={lastAction}
                         className="sheet-last-action"
                         aria-label="Last character action"
                         role="status"
@@ -543,6 +582,22 @@ export function CharacterWorkspace() {
         <p className="connection-guidance">
           Reconnecting. Resource changes and abilities are unavailable until the table is connected.
         </p>
+      )}
+      {(sheet.description || Object.keys(sheet.stats).length > 0) && (
+        <details className="sheet-overview">
+          <summary>Stats & character notes</summary>
+          {sheet.description && <p className="sheet-description">{sheet.description}</p>}
+          {Object.keys(sheet.stats).length > 0 && (
+            <dl className="sheet-stats">
+              {Object.entries(sheet.stats).map(([key, value]) => (
+                <div key={key}>
+                  <dt>{key}</dt>
+                  <dd>{value}</dd>
+                </div>
+              ))}
+            </dl>
+          )}
+        </details>
       )}
       <details className="sheet-management">
         <summary>Character settings & text</summary>
@@ -664,7 +719,13 @@ export function CharacterImportDialog() {
             digest: original ? characterDigest(original) : undefined,
           });
           if (validContext())
-            s.set({ characterId: id, panel: 'character', activityOpen: true, dialog: null });
+            s.set({
+              characterId: id,
+              panel: 'character',
+              activityOpen: true,
+              focusTable: false,
+              dialog: null,
+            });
         } catch (error) {
           setError((error as Error).message);
         } finally {

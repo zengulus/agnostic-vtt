@@ -131,7 +131,7 @@
 }
 .character-workspace h3 {
   font: 500 25px/1.2 var(--serif);
-  margin: 24px 0 12px;
+  margin: 14px 0 8px;
   color: #513928;
 }
 .character-workspace small {
@@ -161,7 +161,7 @@
   display: flex;
   gap: 8px;
   align-items: flex-end;
-  margin-bottom: 20px;
+  margin-bottom: 8px;
 }
 .sheet-picker label {
   flex: 1;
@@ -214,7 +214,7 @@
 .sheet-resource {
   border: 1px solid #aa906450;
   border-radius: 5px;
-  padding: 12px;
+  padding: 10px;
   background: #fff8e744;
 }
 .sheet-resource:has(details[open]) {
@@ -246,7 +246,7 @@
   display: block;
   width: 100%;
   height: 8px;
-  margin: 10px 0;
+  margin: 6px 0;
   accent-color: #783e32;
 }
 .sheet-resource progress::-webkit-progress-bar {
@@ -301,7 +301,7 @@
   width: 100%;
 }
 .sheet-visibility {
-  margin-top: 12px !important;
+  margin-top: 8px !important;
   display: flex;
   align-items: center;
   gap: 12px;
@@ -314,7 +314,7 @@
 .sheet-ability-group h4 {
   font-size: var(--text-md);
   color: #684b33;
-  margin: 22px 0 8px;
+  margin: 14px 0 8px;
 }
 .sheet-ability {
   padding: 14px;
@@ -499,8 +499,8 @@
   background: #cbb48718;
   border: 1px solid #aa906440;
   border-radius: 5px;
-  padding: 14px;
-  margin-top: 18px;
+  padding: 8px;
+  margin-top: 10px;
 }
 .character-import-preview ul {
   padding-left: 20px;
@@ -582,4 +582,33 @@
   .sheet-filters select {
     width: 100%;
   }
+}
+
+/* Keep common actions near the top; notes and maintenance remain available below. */
+.single-sheet .sheet-heading h2 {
+  display: none;
+}
+.sheet-sections {
+  position: sticky;
+  top: -20px;
+  z-index: 2;
+  display: flex;
+  gap: 8px;
+  padding-block: 6px;
+  margin-block: 6px;
+  background: #eee4cf;
+  border-bottom: 1px solid #aa906440;
+}
+.sheet-sections button {
+  padding: 6px 10px;
+  border: 1px solid #aa906450;
+  border-radius: 4px;
+}
+.sheet-sections button span {
+  font-size: var(--text-sm);
+  color: var(--muted-ink);
+}
+.character-workspace > section {
+  scroll-margin-top: 52px;
+  outline-offset: -2px;
 }

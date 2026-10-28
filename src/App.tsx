@@ -1,6 +1,6 @@
 import { FogActions } from './components/FogActions.js';
 import { CharacterList, FirstUseGuide, TurnAwareness } from './components/TableAwareness.js';
-import { FavoriteActions } from './components/FavoriteActions.js';
+import { DiceWorkbench } from './components/DiceWorkbench.js';
 import {
   CharacterNavigation,
   CharacterWorkspace,
@@ -19,7 +19,6 @@ import {
   Layers,
   Lock,
   Map,
-  MessageSquare,
   MousePointer2,
   Move,
   Plus,
@@ -29,10 +28,7 @@ import {
   Settings2,
   Sparkles,
   Square,
-  Star,
   Users,
-  Volume2,
-  VolumeX,
   X,
   Pencil,
   Eraser,
@@ -47,7 +43,7 @@ import { useTable } from './store.js';
 import { inviteUrl, launchDemo, liveAvailable, send } from './connection.js';
 import { AssetImage } from './assets.js';
 import { HistoryControls, TrackerPanel } from './components/Workshop.js';
-import { formatRollValues, parseDice } from '../shared/dice.js';
+import { formatRollValues } from '../shared/dice.js';
 import { Tabletop } from './components/Tabletop.js';
 import { RollPresentation } from './components/RollPresentation.js';
 import { Dialogs } from './components/Dialogs.js';
@@ -55,6 +51,8 @@ import { MacroResults } from './components/Macros.js';
 import { DiscordShare } from './components/DiscordSettings.js';
 import type { Tool } from './store.js';
 import { unlockSound } from './sound.js';
+import { useMediaQuery } from './useMediaQuery.js';
+import { useActivityFocus } from './useActivityFocus.js';
 
 const tools: Array<{
   id: Tool;
@@ -77,10 +75,25 @@ export function App() {
   const s = useTable(),
     scene = s.room.scenes[s.room.activeSceneId],
     gm = s.self?.role === 'gm';
-  const [library, setLibrary] = useState(true);
+  const [library, setLibrary] = useState(false);
+  const singlePanel = useMediaQuery('(max-width: 1199px)');
+  useEffect(() => {
+    if (singlePanel && s.activityOpen) setLibrary(false);
+  }, [singlePanel, s.activityOpen]);
   useEffect(() => {
     const params = new URLSearchParams(location.search);
     if (params.has('room')) useTable.getState().set({ dialog: 'launch' });
+  }, []);
+  useEffect(() => {
+    const restore = (event: KeyboardEvent) => {
+      const state = useTable.getState();
+      if (event.defaultPrevented || event.key !== 'Escape' || state.dialog) return;
+      if (state.focusTable) state.set({ focusTable: false });
+      else if (state.activityOpen) state.set({ activityOpen: false });
+      else setLibrary(false);
+    };
+    window.addEventListener('keydown', restore);
+    return () => window.removeEventListener('keydown', restore);
   }, []);
   useEffect(() => {
     if (s.error) {
@@ -90,7 +103,7 @@ export function App() {
   }, [s.error, s.set]);
   return (
     <div
-      className={`app ${library ? '' : 'library-collapsed'} ${s.self?.role === 'player' ? 'is-player' : ''}`}
+      className={`app ${library ? '' : 'library-collapsed'} ${s.self?.role === 'player' ? 'is-player' : ''} ${s.focusTable ? 'table-focused' : ''} ${s.activityOpen ? '' : 'activity-collapsed'}`}
       onPointerDown={() => {
         if (s.sound) unlockSound();
       }}
@@ -210,19 +223,25 @@ export function App() {
       </header>
       <aside className="tool-rail">
         <button
-          className={`rail-button ${library ? 'active' : ''}`}
+          className={`rail-button workspace-button ${library && !s.focusTable ? 'active' : ''}`}
           title="Scene & token library"
           aria-label="Toggle library"
-          onClick={() =>
-            window.innerWidth <= 900 ? s.set({ dialog: 'library' }) : setLibrary(!library)
-          }
+          aria-pressed={library && !s.focusTable}
+          onClick={() => {
+            s.set({ focusTable: false });
+            if (window.innerWidth <= 1000) s.set({ dialog: 'library' });
+            else {
+              if (singlePanel) s.set({ activityOpen: false });
+              setLibrary(!library);
+            }
+          }}
         >
           <Layers size={21} />
           <span className="rail-caption">Library</span>
         </button>
         {s.self && (
           <button
-            className={`rail-button ${s.panel === 'character' ? 'active' : ''}`}
+            className={`rail-button workspace-button ${s.activityOpen && s.panel === 'character' ? 'active' : ''}`}
             aria-label="Character sheets"
             title="Character sheets, resources & abilities"
             onClick={() => openCharacter(s.characterId)}
@@ -233,13 +252,24 @@ export function App() {
         )}
         {s.self && (
           <button
-            className="rail-button"
+            className={`rail-button workspace-button ${s.activityOpen && s.panel === 'chronicle' ? 'active' : ''}`}
             aria-label="Dice & macros"
             title="Dice & macros"
-            onClick={() => s.set({ panel: 'chronicle', activityOpen: false })}
+            onClick={() => s.set({ panel: 'chronicle', activityOpen: true, focusTable: false })}
           >
             <Dices size={21} />
             <span className="rail-caption">Dice</span>
+          </button>
+        )}
+        {s.self && (
+          <button
+            className={`rail-button workspace-button ${s.activityOpen && s.panel === 'tracker' ? 'active' : ''}`}
+            aria-label="Turn tracker"
+            title="Turn tracker"
+            onClick={() => s.set({ panel: 'tracker', activityOpen: true, focusTable: false })}
+          >
+            <Flag size={21} />
+            <span className="rail-caption">Turns</span>
           </button>
         )}
         <div className="rail-divider" />
@@ -251,6 +281,7 @@ export function App() {
               className={`rail-button ${s.tool === t.id ? 'active' : ''}`}
               title={`${t.label} (${t.key})`}
               aria-label={t.label}
+              aria-pressed={s.tool === t.id}
               onClick={() => s.set({ tool: t.id })}
             >
               <t.icon size={20} />
@@ -302,6 +333,13 @@ export function App() {
           <CharacterNavigation />
           <div className="section-heading">
             <h2>Scenes</h2>
+            <button
+              aria-label="Close library"
+              title="Close library"
+              onClick={() => setLibrary(false)}
+            >
+              <X size={16} />
+            </button>
             {(gm || !s.self) && (
               <button
                 aria-label="New scene"
@@ -416,7 +454,7 @@ export function App() {
           )}
         </div>
       </main>
-      <Chronicle />
+      <Chronicle key={`${s.room.id}:${s.self?.id}:${s.self?.role}:${s.sessionNonce}`} />
       {s.error && (
         <div className="toast" role="alert">
           <span>{s.error}</span>
@@ -431,93 +469,66 @@ export function App() {
 }
 function Chronicle() {
   const s = useTable();
-  const [expression, setExpression] = useState('1d20 + 5 - 2'),
-    [privateRoll, setPrivate] = useState(false),
-    [chat, setChat] = useState(''),
-    [pending, setPending] = useState(false),
-    [presets, setPresets] = useState<string[]>(() => {
-      const defaults = ['1d20 + 5', '2d6', '1d100'];
-      try {
-        const stored: unknown = JSON.parse(localStorage.getItem('aether-presets') || 'null');
-        if (!Array.isArray(stored)) return defaults;
-        return [
-          ...new Set(
-            stored.filter((value): value is string => {
-              if (typeof value !== 'string' || value.length > 120) return false;
-              try {
-                parseDice(value);
-                return true;
-              } catch {
-                return false;
-              }
-            }),
-          ),
-        ].slice(-6);
-      } catch {
-        return defaults;
-      }
-    });
-  useEffect(() => {
-    if (pending) {
-      const timer = setTimeout(() => setPending(false), 900);
-      return () => clearTimeout(timer);
-    }
-  }, [pending]);
-  const roll = () => {
-    if (!s.self) {
-      s.set({ dialog: 'launch' });
-      return;
-    }
-    try {
-      parseDice(expression);
-      if (
-        send({
-          type: 'DICE_ROLL_REQUEST',
-          expression,
-          visibility: privateRoll ? 'private' : 'public',
-        })
-      )
-        setPending(true);
-    } catch (e) {
-      s.set({ error: e instanceof Error ? e.message : 'Invalid expression.' });
-    }
-  };
+  const compact = useMediaQuery('(max-width: 1000px)');
+  const ref = useActivityFocus(s.activityOpen && !s.focusTable, compact);
   return (
     <aside
-      className={`chronicle ${s.activityOpen ? 'drawer-open' : ''} ${s.panel === 'character' ? 'sheet-view' : ''}`}
+      ref={ref}
+      className={`chronicle ${s.activityOpen ? 'drawer-open' : ''} ${s.panel === 'character' ? 'sheet-view' : ''} ${s.panel === 'chronicle' ? 'dice-view' : ''}`}
+      hidden={!s.activityOpen || s.focusTable}
+      aria-label="Table activity"
     >
-      <button
-        className="mobile-activity-toggle"
-        aria-expanded={s.activityOpen}
-        aria-controls="table-activity"
-        onClick={() => s.set({ activityOpen: !s.activityOpen })}
-      >
-        <MessageSquare size={16} />{' '}
-        {s.activityOpen ? 'Close table activity' : 'Chat, turns & history'}
-        {s.activityOpen ? <ChevronDown size={16} /> : <ChevronRight size={16} />}
-      </button>
-      <div className="chronicle-tabs">
+      <div className="activity-header">
+        <strong>Table tools</strong>
         <button
+          aria-label="Back to map"
+          title="Close table activity (Escape)"
+          onClick={() => s.set({ activityOpen: false })}
+        >
+          <X size={18} />
+          <span>Back to map</span>
+        </button>
+      </div>
+      <div
+        className="chronicle-tabs"
+        role="group"
+        aria-label="Table activity"
+        onKeyDown={(event) => {
+          if (!['ArrowLeft', 'ArrowRight', 'Home', 'End'].includes(event.key)) return;
+          const buttons = [...event.currentTarget.querySelectorAll('button')];
+          const index = buttons.indexOf(document.activeElement as HTMLButtonElement);
+          if (index < 0) return;
+          event.preventDefault();
+          const next =
+            event.key === 'Home'
+              ? 0
+              : event.key === 'End'
+                ? buttons.length - 1
+                : (index + (event.key === 'ArrowRight' ? 1 : -1) + buttons.length) % buttons.length;
+          buttons[next].click();
+          buttons[next].focus();
+        }}
+      >
+        <button
+          aria-pressed={s.panel === 'character'}
+          aria-controls="table-activity"
           className={s.panel === 'character' ? 'active' : ''}
           onClick={() => s.set({ panel: 'character' })}
         >
           Character
         </button>
         <button
+          aria-pressed={s.panel === 'chronicle'}
+          aria-controls="table-activity"
           className={s.panel === 'chronicle' ? 'active' : ''}
           onClick={() => s.set({ panel: 'chronicle' })}
         >
           <Sparkles size={15} />
-          Chronicle
+          Dice &amp; history
         </button>
         <button
-          className={s.panel === 'chat' ? 'active' : ''}
-          onClick={() => s.set({ panel: 'chat' })}
-        >
-          <MessageSquare size={15} />
-          Party chat
-        </button>
-        <button
+          aria-pressed={s.panel === 'tracker'}
+          aria-controls="table-activity"
           className={s.panel === 'tracker' ? 'active' : ''}
           onClick={() => s.set({ panel: 'tracker' })}
         >
@@ -548,7 +559,7 @@ function Chronicle() {
                         s.set({
                           presentation: r,
                           rollQueue: [],
-                          activityOpen: window.innerWidth <= 620 ? false : s.activityOpen,
+                          activityOpen: window.innerWidth <= 1000 ? false : s.activityOpen,
                         })
                       }
                     >
@@ -592,204 +603,9 @@ function Chronicle() {
               </div>
             )}
           </>
-        ) : (
-          <>
-            <div className="chat-messages">
-              {!s.room.chat.length && (
-                <div className="empty-chronicle">
-                  <p>A quiet table. Say hello.</p>
-                </div>
-              )}
-              {s.room.chat.map((c) => (
-                <div key={c.id} className={`chat-message ${c.userId === s.self?.id ? 'own' : ''}`}>
-                  <span>
-                    {c.userName}
-                    <small>
-                      {new Date(c.createdAt).toLocaleTimeString([], {
-                        hour: '2-digit',
-                        minute: '2-digit',
-                      })}
-                    </small>
-                  </span>
-                  <p>{c.text}</p>
-                </div>
-              ))}
-            </div>
-            <form
-              className="chat-form"
-              onSubmit={(e) => {
-                e.preventDefault();
-                if (!s.self) {
-                  s.set({ dialog: 'launch' });
-                  return;
-                }
-                if (chat.trim()) {
-                  if (send({ type: 'CHAT_SEND', text: chat })) setChat('');
-                }
-              }}
-            >
-              <input
-                aria-label="Message your party"
-                placeholder="Message your party…"
-                value={chat}
-                onChange={(e) => setChat(e.target.value)}
-                maxLength={1000}
-              />
-              <button aria-label="Send message">
-                <ArrowUpRight size={17} />
-              </button>
-            </form>
-          </>
-        )}
+        ) : null}
       </div>
-      <div className="dice-workbench">
-        <FavoriteActions privateRoll={privateRoll} />
-        <div className="macro-tools">
-          <button aria-label="Macros · import .txt" onClick={() => s.set({ dialog: 'macros' })}>
-            <Feather size={13} />
-            Manage macros
-          </button>
-          {s.discord.canManage && (
-            <button onClick={() => s.set({ dialog: 'discord' })}>Discord webhook ↗</button>
-          )}
-        </div>
-        <div className="section-heading">
-          <h2>Dice</h2>
-          <button
-            title="Dice presentation settings"
-            aria-label="Dice presentation settings"
-            onClick={() => s.set({ dialog: 'settings' })}
-          >
-            <Settings2 size={15} /> Presentation
-          </button>
-        </div>
-        <details className="quick-dice-preferences">
-          <summary>Dice preferences</summary>
-          <label>
-            Presentation
-            <select
-              aria-label="Presentation"
-              value={s.dice.presentation}
-              onChange={(e) =>
-                s.set({
-                  dice: { ...s.dice, presentation: e.target.value as typeof s.dice.presentation },
-                })
-              }
-            >
-              <option value="arcane">Arcane gold</option>
-              <option value="moon">Moonlit silver</option>
-              <option value="ember">Ember</option>
-              <option value="minimal">Minimal · instant</option>
-            </select>
-          </label>
-          <label className="check-label">
-            <input
-              type="checkbox"
-              checked={s.reducedMotion}
-              onChange={(e) => s.set({ reducedMotion: e.target.checked })}
-            />
-            Reduced motion
-          </label>
-          <button onClick={() => s.set({ dialog: 'settings' })}>All dice preferences</button>
-        </details>
-        <div className="dice-types">
-          {[4, 6, 8, 10, 12, 20, 100].map((n) => (
-            <button
-              key={n}
-              aria-label={`Select d${n}`}
-              className={expression.replace(/\s/g, '').startsWith(`1d${n}`) ? 'selected' : ''}
-              onClick={() => setExpression(`1d${n}`)}
-            >
-              <span className={`die-icon die-${n}`}>{n === 100 ? '%' : n}</span>
-              <small>d{n === 100 ? '%' : n}</small>
-            </button>
-          ))}
-        </div>
-        <form
-          onSubmit={(e) => {
-            e.preventDefault();
-            roll();
-          }}
-        >
-          <label className="expression-label" htmlFor="dice-expression">
-            <span className="sr-only">Dice expression</span>
-            <button
-              type="button"
-              title="Save this roll preset"
-              aria-label="Save roll preset"
-              onClick={() => {
-                try {
-                  parseDice(expression);
-                  const next = [...new Set([...presets, expression])].slice(-6);
-                  setPresets(next);
-                  localStorage.setItem('aether-presets', JSON.stringify(next));
-                  s.set({ error: 'Roll preset saved.' });
-                } catch (e) {
-                  s.set({ error: (e as Error).message });
-                }
-              }}
-            >
-              <Star size={14} /> Save preset
-            </button>
-          </label>
-          <div className="expression-input">
-            <input
-              id="dice-expression"
-              aria-label="Dice expression"
-              value={expression}
-              onChange={(e) => setExpression(e.target.value)}
-              maxLength={120}
-              autoComplete="off"
-              spellCheck={false}
-            />
-            <button
-              type="button"
-              aria-label="Expression help"
-              onClick={() => s.set({ dialog: 'help' })}
-            >
-              <HelpCircle size={14} />
-            </button>
-          </div>
-          <div className="roll-options">
-            <button
-              type="button"
-              className={privateRoll ? 'enabled' : ''}
-              onClick={() => setPrivate(!privateRoll)}
-            >
-              {privateRoll ? <Lock size={12} /> : <Users size={12} />}{' '}
-              {privateRoll ? 'Private' : 'Party'}
-              <ChevronDown size={12} />
-            </button>
-            <button
-              type="button"
-              title={s.sound ? 'Mute roll sound' : 'Enable roll sound'}
-              aria-label={s.sound ? 'Mute roll sound' : 'Enable roll sound'}
-              onClick={() => {
-                unlockSound();
-                s.set({ sound: !s.sound });
-              }}
-            >
-              {s.sound ? <Volume2 size={14} /> : <VolumeX size={14} />}
-            </button>
-          </div>
-          <button
-            aria-label="Roll the dice"
-            className="roll-button"
-            disabled={pending || s.status === 'reconnecting' || s.status === 'connecting'}
-          >
-            {pending ? 'Rolling…' : 'Roll'}
-          </button>
-        </form>
-        <div className="presets">
-          <div>
-            {presets.map((p) => (
-              <button key={p} title={`Use ${p}`} onClick={() => setExpression(p)}>
-                {p}
-              </button>
-            ))}
-          </div>
-        </div>
-      </div>
+      <DiceWorkbench />
     </aside>
   );
 }

@@ -78,9 +78,11 @@ jobs:
           - dialogs
           - improvements
           - usability
+          - ux-review
           - macros
           - physical-dice
           - roll-presentation
+          - session
           - tabletop
           - workshop
     steps:

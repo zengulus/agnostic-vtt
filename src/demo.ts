@@ -39,7 +39,8 @@ function publish(reset = false) {
           panel: ownCharacter ? ('character' as const) : ('chronicle' as const),
           characterId: ownCharacter?.id || null,
           characterEditId: null,
-          activityOpen: !!ownCharacter,
+          activityOpen: false,
+          focusTable: false,
         }
       : {}),
     self,
@@ -86,6 +87,8 @@ export function startDemo(roleChoice: 'gm' | 'player' = 'gm') {
   role = roleChoice;
   undo = [];
   redo = [];
+  const s = useTable.getState();
+  s.set({ sessionNonce: s.sessionNonce + 1, focusTable: false });
   publish(true);
 }
 export function demoAction(action: Action) {
@@ -122,10 +125,7 @@ export function demoAction(action: Action) {
     target.push(edit);
   } else {
     changes = prepareAction(room, identity, m, randomInt, role);
-    if (
-      changes.length &&
-      !['DICE_ROLL_REQUEST', 'MACRO_ROLL_REQUEST', 'CHAT_SEND'].includes(m.type)
-    ) {
+    if (changes.length && !['DICE_ROLL_REQUEST', 'MACRO_ROLL_REQUEST'].includes(m.type)) {
       const edits = changes.filter((change) => change.kind !== 'roll');
       const groupId = m.type === 'FOG_APPEND' ? m.groupId : undefined,
         last = undo.at(-1);

@@ -1,3 +1,4 @@
+import { openDice } from './helpers/workspace.js';
 import { expect, test } from '@playwright/test';
 import { pausePresentationClock } from './helpers/clock.js';
 
@@ -11,13 +12,13 @@ test('minimal totals advance queued rolls only after their full display interval
   await page.goto('/');
   await page.getByRole('button', { name: 'Open a demo table' }).click();
   await expect(page.getByText('Demo', { exact: true })).toBeVisible();
+  await openDice(page);
   await pausePresentationClock(page);
   const expression = page.getByRole('textbox', { name: 'DICE EXPRESSION' });
   await expression.fill('1d20');
   await page.getByRole('button', { name: 'Roll the dice' }).click();
   await expect(page.getByTestId('roll-total')).toBeVisible();
-  // The roll button has a separate 900ms repeat-click guard. Release it without
-  // consuming the first presentation's complete 2800ms display interval.
+  // Advance partway through the first presentation's complete 2800ms interval.
   await page.clock.runFor(900);
   await expect(page.getByRole('button', { name: 'Roll the dice' })).toBeEnabled();
   await expression.fill('1d4+100');

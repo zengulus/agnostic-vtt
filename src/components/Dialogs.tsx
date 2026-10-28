@@ -80,9 +80,23 @@ export function Dialogs() {
     if (!s.dialog) return;
     const previous = document.activeElement as HTMLElement;
     const el = ref.current;
+    const backdrop = el?.parentElement;
+    const background = backdrop?.parentElement
+      ? [...backdrop.parentElement.children].filter(
+          (node): node is HTMLElement => node instanceof HTMLElement && node !== backdrop,
+        )
+      : [];
+    const inertStates = background.map((node) => node.inert);
+    background.forEach((node) => {
+      node.inert = true;
+    });
     (el?.querySelector<HTMLElement>('input,button') || el)?.focus();
     const key = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') s.set({ dialog: null });
+      if (e.key === 'Escape') {
+        e.preventDefault();
+        e.stopPropagation();
+        s.set({ dialog: null });
+      }
       if (e.key === 'Tab' && el) {
         const items = [
           ...el.querySelectorAll<HTMLElement>(
@@ -111,6 +125,9 @@ export function Dialogs() {
     document.addEventListener('keydown', key);
     return () => {
       document.removeEventListener('keydown', key);
+      background.forEach((node, index) => {
+        node.inert = inertStates[index];
+      });
       if (previous?.isConnected) previous.focus();
     };
   }, [s.dialog, s.set]);
@@ -119,7 +136,7 @@ export function Dialogs() {
     launch: supabase ? 'Your campaigns' : 'Your table',
     map: s.self?.role === 'player' ? 'Scene details' : 'Scene',
     'new-scene': 'New Scene',
-    token: 'Character',
+    token: 'Token',
     grid: 'Grid',
     invite: 'Your party',
     settings: 'Preferences',
@@ -883,6 +900,7 @@ function TokenDialog() {
   const update = (value: Partial<Token>) => setToken((current) => ({ ...current, ...value }));
   return (
     <form
+      className="token-dialog-form"
       onSubmit={async (e) => {
         e.preventDefault();
         if (!gm || saving || assetBusy || !currentScene()) return;
@@ -914,240 +932,254 @@ function TokenDialog() {
         }
       }}
     >
-      <fieldset disabled={saving} style={{ border: 0, padding: 0, margin: 0, minWidth: 0 }}>
-        <AssetPicker
-          purpose="token"
-          asset={token.image}
-          onChange={(image) => update({ image })}
-          onBusyChange={setAssetBusy}
-        />
-        <label>
-          Name
-          <input
-            value={token.name}
-            onChange={(e) => update({ name: e.target.value })}
-            maxLength={48}
-            required
-            disabled={!gm}
-          />
-        </label>
-        <div className="form-row">
+      <fieldset
+        className="token-fields"
+        disabled={saving}
+        style={{ border: 0, padding: 0, margin: 0, minWidth: 0 }}
+      >
+        <div className="token-form-body">
           <label>
-            Size (scene pixels)
+            Name
             <input
-              type="number"
-              value={token.size}
-              onChange={(e) => update({ size: Number(e.target.value) })}
-              min={24}
-              max={240}
+              value={token.name}
+              onChange={(e) => update({ name: e.target.value })}
+              maxLength={48}
               required
               disabled={!gm}
             />
           </label>
-          <label>
-            Rotation
-            <input
-              type="number"
-              value={token.rotation}
-              onChange={(e) => update({ rotation: Number(e.target.value) })}
-              min={-360}
-              max={360}
-              required
-              disabled={!gm}
-            />
-          </label>
-          <label>
-            Ring colour
-            <input
-              type="color"
-              value={token.color}
-              onChange={(e) => update({ color: e.target.value })}
-              disabled={!gm}
-            />
-          </label>
-        </div>
-        <div className="form-row">
-          <label>
-            Visibility
-            <select
-              value={token.visibility}
-              onChange={(e) => update({ visibility: e.target.value as Token['visibility'] })}
-              disabled={!gm}
-            >
-              <option value="public">Visible to party</option>
-              <option value="gm">Game master only</option>
-            </select>
-          </label>
-          <label>
-            Who can move it?
-            <select
-              value={token.owners.includes('*') ? '*' : token.owners[0] || 'gm'}
-              onChange={(e) => update({ owners: e.target.value === 'gm' ? [] : [e.target.value] })}
-              disabled={!gm}
-            >
-              <option value="*">Everyone</option>
-              <option value="gm">Game master only</option>
-              {[...new Map([...s.presence, ...s.members].map((p) => [p.id, p])).values()].map(
-                (p) => (
-                  <option key={p.id} value={p.id}>
-                    {p.name}
-                    {s.presence.some((online) => online.id === p.id) ? '' : ' (offline)'}
-                  </option>
-                ),
-              )}
-            </select>
-          </label>
-        </div>
-        <label>
-          Character sheet
-          <select
-            aria-label="Linked character sheet"
-            value={token.characterId || ''}
-            disabled={!gm}
-            onChange={(e) => update({ characterId: e.target.value || null })}
-          >
-            <option value="">No linked sheet</option>
-            {token.characterId && !s.room.characters?.[token.characterId] && (
-              <option value={token.characterId}>Removed character · unlink to save</option>
-            )}
-            {Object.values(s.room.characters || {}).map((sheet) => (
-              <option key={sheet.id} value={sheet.id}>
-                {sheet.name}
-              </option>
-            ))}
-          </select>
-          <small>
-            A sheet keeps its resources across scenes. Its owner controls its abilities.
-          </small>
-        </label>
-        <div className="form-row">
-          <label>
-            Resource label
-            <input
-              value={token.resource?.label || ''}
-              onChange={(e) =>
-                update({
-                  resource: {
-                    label: e.target.value,
-                    value: token.resource?.value || 0,
-                    max: token.resource?.max || 10,
-                  },
-                })
-              }
-              maxLength={16}
-              disabled={!gm}
-            />
-          </label>
-          <label>
-            Current
-            <input
-              type="number"
-              min={0}
-              max={10000}
-              value={token.resource?.value || 0}
-              onChange={(e) =>
-                update({ resource: { ...token.resource!, value: Number(e.target.value) } })
-              }
-              disabled={!gm}
-            />
-          </label>
-          <label>
-            Maximum
-            <input
-              type="number"
-              min={1}
-              max={10000}
-              value={token.resource?.max || 10}
-              onChange={(e) =>
-                update({ resource: { ...token.resource!, max: Number(e.target.value) } })
-              }
-              disabled={!gm}
-            />
-          </label>
-        </div>
-        {gm && (
-          <div className="status-editor">
-            <span className="eyebrow">TOKEN STATUSES</span>
-            <div className="status-chips">
-              {(token.statuses || []).map((status) => (
-                <button
-                  key={status.id}
-                  type="button"
-                  onClick={() =>
-                    update({ statuses: token.statuses!.filter((t) => t.id !== status.id) })
-                  }
-                  style={{ color: status.color }}
-                >
-                  {status.label} ×
-                </button>
-              ))}
-            </div>
-            <div className="form-row">
-              <label>
-                Status label
-                <input
-                  value={statusLabel}
-                  onChange={(e) => setStatusLabel(e.target.value)}
-                  maxLength={24}
-                />
-              </label>
-              <label>
-                Symbol
-                <select
-                  value={statusIcon}
-                  onChange={(e) => setStatusIcon(e.target.value as typeof statusIcon)}
-                >
-                  {['star', 'shield', 'flame', 'eye', 'circle'].map((v) => (
-                    <option key={v}>{v}</option>
-                  ))}
-                </select>
-              </label>
-              <button
-                type="button"
-                aria-label="Add status"
-                disabled={!statusLabel.trim() || (token.statuses?.length || 0) >= 8}
-                onClick={() => {
-                  update({
-                    statuses: [
-                      ...(token.statuses || []),
-                      {
-                        id: crypto.randomUUID(),
-                        label: statusLabel.trim(),
-                        color: token.color,
-                        icon: statusIcon,
-                      },
-                    ],
-                  });
-                  setStatusLabel('');
-                }}
+          <div className="form-row">
+            <label>
+              Visibility
+              <select
+                value={token.visibility}
+                onChange={(e) => update({ visibility: e.target.value as Token['visibility'] })}
+                disabled={!gm}
               >
-                <Plus size={16} />
-              </button>
-            </div>
-            <label className="check-label">
-              <input
-                type="checkbox"
-                checked={saveTemplate}
-                onChange={(e) => setSaveTemplate(e.target.checked)}
-              />
-              Also save a reusable token template
+                <option value="public">Visible to party</option>
+                <option value="gm">Game master only</option>
+              </select>
+            </label>
+            <label>
+              Who can move it?
+              <select
+                value={token.owners.includes('*') ? '*' : token.owners[0] || 'gm'}
+                onChange={(e) =>
+                  update({ owners: e.target.value === 'gm' ? [] : [e.target.value] })
+                }
+                disabled={!gm}
+              >
+                <option value="*">Everyone</option>
+                <option value="gm">Game master only</option>
+                {[...new Map([...s.presence, ...s.members].map((p) => [p.id, p])).values()].map(
+                  (p) => (
+                    <option key={p.id} value={p.id}>
+                      {p.name}
+                      {s.presence.some((online) => online.id === p.id) ? '' : ' (offline)'}
+                    </option>
+                  ),
+                )}
+              </select>
             </label>
           </div>
-        )}
-        {gm && (
-          <>
+          <label>
+            Character sheet
+            <select
+              aria-label="Linked character sheet"
+              value={token.characterId || ''}
+              disabled={!gm}
+              onChange={(e) => update({ characterId: e.target.value || null })}
+            >
+              <option value="">No linked sheet</option>
+              {token.characterId && !s.room.characters?.[token.characterId] && (
+                <option value={token.characterId}>Removed character · unlink to save</option>
+              )}
+              {Object.values(s.room.characters || {}).map((sheet) => (
+                <option key={sheet.id} value={sheet.id}>
+                  {sheet.name}
+                </option>
+              ))}
+            </select>
+            <small>
+              A sheet keeps its resources across scenes. Its owner controls its abilities.
+            </small>
+          </label>
+          <h3>Appearance</h3>
+          <AssetPicker
+            purpose="token"
+            asset={token.image}
+            onChange={(image) => update({ image })}
+            onBusyChange={setAssetBusy}
+          />
+          <div className="form-row">
             <label>
-              GM note
-              <textarea
-                value={token.note || ''}
-                onChange={(e) => update({ note: e.target.value })}
-                maxLength={2000}
-                rows={2}
+              Size (scene pixels)
+              <input
+                type="number"
+                value={token.size}
+                onChange={(e) => update({ size: Number(e.target.value) })}
+                min={24}
+                max={240}
+                required
+                disabled={!gm}
               />
             </label>
-            <p className="field-note">
-              <Lock size={11} /> GM notes and hidden tokens are filtered on the server.
-            </p>
+            <label>
+              Rotation
+              <input
+                type="number"
+                value={token.rotation}
+                onChange={(e) => update({ rotation: Number(e.target.value) })}
+                min={-360}
+                max={360}
+                required
+                disabled={!gm}
+              />
+            </label>
+            <label>
+              Ring colour
+              <input
+                type="color"
+                value={token.color}
+                onChange={(e) => update({ color: e.target.value })}
+                disabled={!gm}
+              />
+            </label>
+          </div>
+          <h3>Scene resource & statuses</h3>
+          <div className="form-row">
+            <label>
+              Resource label
+              <input
+                value={token.resource?.label || ''}
+                onChange={(e) =>
+                  update({
+                    resource: {
+                      label: e.target.value,
+                      value: token.resource?.value || 0,
+                      max: token.resource?.max || 10,
+                    },
+                  })
+                }
+                maxLength={16}
+                disabled={!gm}
+              />
+            </label>
+            <label>
+              Current
+              <input
+                type="number"
+                min={0}
+                max={10000}
+                value={token.resource?.value || 0}
+                onChange={(e) =>
+                  update({ resource: { ...token.resource!, value: Number(e.target.value) } })
+                }
+                disabled={!gm}
+              />
+            </label>
+            <label>
+              Maximum
+              <input
+                type="number"
+                min={1}
+                max={10000}
+                value={token.resource?.max || 10}
+                onChange={(e) =>
+                  update({ resource: { ...token.resource!, max: Number(e.target.value) } })
+                }
+                disabled={!gm}
+              />
+            </label>
+          </div>
+          {gm && (
+            <div className="status-editor">
+              <span className="eyebrow">TOKEN STATUSES</span>
+              <div className="status-chips">
+                {(token.statuses || []).map((status) => (
+                  <button
+                    key={status.id}
+                    type="button"
+                    onClick={() =>
+                      update({ statuses: token.statuses!.filter((t) => t.id !== status.id) })
+                    }
+                    style={{ color: status.color }}
+                  >
+                    {status.label} ×
+                  </button>
+                ))}
+              </div>
+              <div className="form-row">
+                <label>
+                  Status label
+                  <input
+                    value={statusLabel}
+                    onChange={(e) => setStatusLabel(e.target.value)}
+                    maxLength={24}
+                  />
+                </label>
+                <label>
+                  Symbol
+                  <select
+                    value={statusIcon}
+                    onChange={(e) => setStatusIcon(e.target.value as typeof statusIcon)}
+                  >
+                    {['star', 'shield', 'flame', 'eye', 'circle'].map((v) => (
+                      <option key={v}>{v}</option>
+                    ))}
+                  </select>
+                </label>
+                <button
+                  type="button"
+                  aria-label="Add status"
+                  disabled={!statusLabel.trim() || (token.statuses?.length || 0) >= 8}
+                  onClick={() => {
+                    update({
+                      statuses: [
+                        ...(token.statuses || []),
+                        {
+                          id: crypto.randomUUID(),
+                          label: statusLabel.trim(),
+                          color: token.color,
+                          icon: statusIcon,
+                        },
+                      ],
+                    });
+                    setStatusLabel('');
+                  }}
+                >
+                  <Plus size={16} />
+                </button>
+              </div>
+              <label className="check-label">
+                <input
+                  type="checkbox"
+                  checked={saveTemplate}
+                  onChange={(e) => setSaveTemplate(e.target.checked)}
+                />
+                Also save a reusable token template
+              </label>
+            </div>
+          )}
+          {gm && (
+            <>
+              <label>
+                GM note
+                <textarea
+                  value={token.note || ''}
+                  onChange={(e) => update({ note: e.target.value })}
+                  maxLength={2000}
+                  rows={2}
+                />
+              </label>
+              <p className="field-note">
+                <Lock size={11} /> GM notes and hidden tokens are filtered on the server.
+              </p>
+            </>
+          )}
+        </div>
+        {gm && (
+          <div className="token-form-actions">
             {saveError && (
               <>
                 <p className="form-error" role="alert">
@@ -1174,7 +1206,7 @@ function TokenDialog() {
               {saving ? 'Saving…' : existing ? 'Save token' : 'Add to the table'}
               <Check size={16} />
             </button>
-          </>
+          </div>
         )}
       </fieldset>
     </form>
@@ -1573,7 +1605,7 @@ function Help() {
           [
             'CTRL Z',
             'Undo & redo',
-            'GM: undo the last table edit. Ctrl/Cmd+Shift+Z or Ctrl/Cmd+Y redoes it. Dice and chat stay in history.',
+            'GM: undo the last table edit. Ctrl/Cmd+Shift+Z or Ctrl/Cmd+Y redoes it. Dice stay in history.',
           ],
           ['DEL', 'Remove a token', 'GM: select a token and press Delete or Backspace.'],
         ].map(([key, title, desc]) => (

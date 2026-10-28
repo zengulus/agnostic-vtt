@@ -1,3 +1,4 @@
+import { openLibrary } from './helpers/workspace.js';
 import { test, expect, type Page } from '@playwright/test';
 import { readFileSync } from 'node:fs';
 import type { RoomState } from '../../shared/model.js';
@@ -106,9 +107,10 @@ for (const width of [1440, 390]) {
       true,
     );
     if (width === 390) {
-      await page.getByRole('button', { name: 'Close table activity', exact: true }).click();
+      await page.getByRole('button', { name: 'Back to map', exact: true }).click();
       await page.getByRole('button', { name: 'Dice & macros', exact: true }).click();
       await expect(page.getByRole('button', { name: 'Roll the dice', exact: true })).toBeVisible();
+      await page.getByRole('button', { name: 'Back to map', exact: true }).click();
       await page.getByRole('button', { name: 'Character sheets', exact: true }).click();
       await expect(page.getByLabel('Character sheet', { exact: true })).toBeVisible();
     }
@@ -132,6 +134,7 @@ test('example import previews, stale text edits retain drafts, and token links o
     /name = My draft/,
   );
   await page.getByRole('button', { name: 'Close dialog', exact: true }).click();
+  await openLibrary(page);
   await page.getByRole('button', { name: 'Kael Wanderer', exact: true }).click();
   await page.getByRole('button', { name: 'Edit token', exact: true }).click();
   await page.getByLabel('Linked character sheet').selectOption(id);

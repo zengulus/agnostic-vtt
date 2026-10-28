@@ -592,19 +592,6 @@ export function prepareAction(
           },
         },
       ];
-    case 'CHAT_SEND':
-      return [
-        {
-          kind: 'chat',
-          chat: {
-            id: randomUUID(),
-            userId: user.id,
-            userName: user.name,
-            text: m.text,
-            createdAt: new Date().toISOString(),
-          },
-        },
-      ];
     default:
       throw new Error('Unsupported state action.');
   }

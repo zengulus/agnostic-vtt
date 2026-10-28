@@ -126,7 +126,16 @@ try {
     await capture('welcome');
     await page.getByRole('button', { name: 'Open a demo table' }).click();
     await capture('gm');
+    await page.getByRole('button', { name: 'Focus tabletop', exact: true }).click();
+    await capture('focused');
+    await page.getByRole('button', { name: 'Exit focus mode', exact: true }).click();
+    if (width > 1000)
+      await page.getByRole('button', { name: 'Toggle library', exact: true }).click();
+    await page.getByRole('button', { name: 'Dice & macros', exact: true }).click();
+    await capture('dice-workspace');
+    await page.getByRole('button', { name: 'Back to map', exact: true }).click();
     if (['desktop', 'tablet', 'mobile'].includes(name)) {
+      await page.getByRole('button', { name: 'Dice & macros', exact: true }).click();
       await page.getByRole('button', { name: 'Macros · import .txt' }).click();
       await capture('macros');
       if (name === 'desktop') {
@@ -144,6 +153,7 @@ try {
         await page.getByRole('button', { name: 'Macros · import .txt' }).click();
       }
       await page.getByRole('button', { name: 'Close dialog' }).click();
+      await page.getByRole('button', { name: 'Back to map', exact: true }).click();
       await page.getByRole('button', { name: 'Settings', exact: true }).click();
       await capture('settings');
       await page.getByRole('button', { name: 'Done' }).scrollIntoViewIfNeeded();
@@ -152,10 +162,13 @@ try {
         el.scrollTop = 0;
       });
       await page.getByRole('button', { name: 'Close dialog' }).click();
+      await page.getByRole('button', { name: 'Dice & macros', exact: true }).click();
       await page.getByRole('button', { name: 'Roll the dice' }).click();
       await expect(page.getByTestId('roll-total')).toBeVisible();
       await capture('roll');
       await page.getByRole('button', { name: 'Dismiss roll' }).click();
+      if (width > 1000)
+        await page.getByRole('button', { name: 'Back to map', exact: true }).click();
     }
     if (name === 'desktop') {
       for (const [state, label] of [
@@ -169,11 +182,9 @@ try {
         await capture(state);
         await page.getByRole('button', { name: 'Close dialog' }).click();
       }
-      for (const label of ['Party chat', 'Turns']) {
-        await page.getByRole('button', { name: label, exact: true }).click();
-        await capture(label === 'Turns' ? 'turns' : 'chat');
-      }
-      await page.getByRole('button', { name: 'Chronicle', exact: true }).click();
+      await page.getByRole('button', { name: 'Turn tracker', exact: true }).click();
+      await capture('turns');
+      await page.getByRole('button', { name: 'Back to map', exact: true }).click();
     }
     await page.getByRole('button', { name: 'Character sheets', exact: true }).click();
     await capture('character-empty');
@@ -196,9 +207,10 @@ try {
     await capture('character-sheet');
     await page.getByRole('button', { name: 'Use Sweeping Strike', exact: true }).click();
     await expect(page.locator('.sheet-last-action')).toContainText('Attack Roll');
-    if (width > 620) await page.getByRole('button', { name: 'Continue', exact: true }).click();
+    if (width > 1000) await page.getByRole('button', { name: 'Continue', exact: true }).click();
     await page.locator('.sheet-last-action').scrollIntoViewIfNeeded();
     await capture('character-action');
+    await page.getByRole('button', { name: 'Back to map', exact: true }).click();
     await page.getByRole('button', { name: 'Play as player' }).click();
     await capture('player');
     await context.close();

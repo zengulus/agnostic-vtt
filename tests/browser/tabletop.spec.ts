@@ -1,3 +1,4 @@
+import { desktopWorkspace, openDice } from './helpers/workspace.js';
 import { expect, test, type Page } from '@playwright/test';
 import { pausePresentationClock } from './helpers/clock.js';
 import type { ServerMessage } from '../../shared/protocol.js';
@@ -19,10 +20,9 @@ async function create(page: Page) {
   await page.getByRole('button', { name: 'Log in' }).click();
   await page.getByRole('button', { name: 'Create campaign' }).click();
   await expect(page.getByText('Live', { exact: true })).toBeVisible();
+  await desktopWorkspace(page);
 }
-test('independent browser clients move tokens, share dice/chat, and reconnect', async ({
-  browser,
-}) => {
+test('independent browser clients move tokens, share dice, and reconnect', async ({ browser }) => {
   const a = await browser.newContext(),
     b = await browser.newContext();
   for (const context of [a, b])
@@ -88,22 +88,10 @@ test('independent browser clients move tokens, share dice/chat, and reconnect', 
   await gm.getByRole('button', { name: 'Dismiss roll' }).click();
   await pc.getByRole('button', { name: 'Dismiss roll' }).click();
   await Promise.all([gm.clock.resume(), pc.clock.resume()]);
-  await pc.getByRole('button', { name: 'Party chat', exact: true }).click();
-  await pc.getByRole('textbox', { name: 'Message your party' }).fill('The crossing looks safe.');
-  await pc.getByRole('button', { name: 'Send message' }).click();
-  await gm.getByRole('button', { name: 'Party chat', exact: true }).click();
-  await expect(gm.getByText('The crossing looks safe.', { exact: true })).toBeVisible();
   await b.setOffline(true);
   await expect(pc.getByText('Reconnecting', { exact: true })).toBeVisible({ timeout: 15000 });
-  const draft = pc.getByRole('textbox', { name: 'Message your party' });
-  await draft.fill('Keep this draft until we reconnect.');
-  await pc.getByRole('button', { name: 'Send message' }).click();
-  await expect(draft).toHaveValue('Keep this draft until we reconnect.');
   await b.setOffline(false);
   await expect(pc.getByText('Live', { exact: true })).toBeVisible({ timeout: 20000 });
-  await pc.getByRole('button', { name: 'Send message' }).click();
-  await expect(draft).toHaveValue('');
-  await expect(gm.getByText('Keep this draft until we reconnect.', { exact: true })).toBeVisible();
   expect(errors).toEqual([]);
   await a.close();
   await b.close();
@@ -128,6 +116,7 @@ test('keyboard activation works alongside tabletop shortcuts', async ({ page }) 
   await expect(page.getByText('Demo', { exact: true })).toBeVisible();
   // Test keyboard dismissal without racing the minimal result's 2.8s auto-dismiss.
   await pausePresentationClock(page);
+  await openDice(page);
   await page.getByRole('button', { name: 'Roll the dice' }).focus();
   await page.keyboard.press('Enter');
   await expect(page.getByTestId('roll-total')).toBeVisible();
@@ -239,6 +228,7 @@ test('a campaign owner can sign in as a player and keep that role on reconnect',
   await page.getByLabel('Enter table as').selectOption('player');
   await page.getByRole('button', { name: 'Create campaign', exact: true }).click();
   await expect(page.getByText('Live', { exact: true })).toBeVisible();
+  await desktopWorkspace(page);
   await expect(page.getByRole('button', { name: 'Return to GM', exact: true })).toBeVisible();
   await expect(page.getByRole('button', { name: 'Fog reveal / conceal', exact: true })).toHaveCount(
     0,

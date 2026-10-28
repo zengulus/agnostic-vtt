@@ -133,7 +133,6 @@ export const clientMessageSchema = z.discriminatedUnion('type', [
     expression: z.string().min(1).max(120),
     visibility: z.enum(['public', 'private']),
   }),
-  z.object({ ...base, type: z.literal('CHAT_SEND'), text: z.string().trim().min(1).max(1000) }),
   z.object({ ...base, type: z.literal('PING'), position: pointSchema }),
   z.object({ ...base, type: z.literal('FOG_UPDATE'), sceneId, fog: fogSchema }),
   z.object({ ...base, type: z.literal('ZONE_UPDATE'), sceneId, zone: zoneSchema }),

@@ -1,0 +1,367 @@
+/* The map owns the workspace; panels occupy space only while in use. */
+.app {
+  --rail-width: 56px;
+  --library-width: 248px;
+  --activity-width: 360px;
+}
+.app,
+.app.library-collapsed,
+.app.activity-collapsed {
+  grid-template-columns: var(--rail-width) var(--library-width) minmax(0, 1fr) var(--activity-width);
+  grid-template-rows: auto minmax(0, 1fr);
+  min-height: 0;
+}
+.app.library-collapsed {
+  grid-template-columns: var(--rail-width) minmax(0, 1fr) var(--activity-width);
+}
+.app.activity-collapsed {
+  grid-template-columns: var(--rail-width) var(--library-width) minmax(0, 1fr);
+}
+.app.library-collapsed.activity-collapsed {
+  grid-template-columns: var(--rail-width) minmax(0, 1fr);
+}
+.app-header {
+  min-height: 60px;
+  padding: 8px 14px;
+  gap: 18px;
+}
+.app-header .brand {
+  min-width: 150px;
+  gap: 8px;
+}
+.brand > span {
+  font-size: 23px;
+}
+.brand-small {
+  font-size: 12px;
+}
+.brand img {
+  width: 25px;
+  height: 33px;
+}
+.campaign-title {
+  font-size: 18px;
+}
+.campaign-title small {
+  margin-top: 2px;
+  font-size: var(--text-sm);
+}
+.header-actions {
+  gap: 8px;
+}
+.save-status,
+.save-status small {
+  font-size: var(--text-sm);
+}
+.app > .tool-rail {
+  grid-column: 1;
+  grid-row: 2;
+  padding: 6px 3px;
+  gap: 3px;
+}
+.rail-button {
+  width: 48px;
+  min-height: 44px;
+  padding: 3px 1px;
+  gap: 2px;
+}
+.rail-caption {
+  font-size: 11px;
+}
+.app > .library {
+  grid-column: 2;
+  grid-row: 2;
+  padding: 18px 14px;
+}
+.app > .table-area {
+  grid-column: 3;
+  grid-row: 2;
+  min-width: 0;
+}
+.app.library-collapsed > .table-area {
+  grid-column: 2;
+}
+.app > .chronicle {
+  grid-column: 4;
+  grid-row: 2;
+}
+.app.library-collapsed > .chronicle {
+  grid-column: 3;
+}
+.chronicle[hidden] {
+  display: none !important;
+}
+.activity-header {
+  display: flex;
+  flex-shrink: 0;
+  align-items: center;
+  justify-content: space-between;
+  padding: 5px 12px 5px 18px;
+  border-bottom: 1px solid #a2875b40;
+}
+.activity-header strong {
+  font-size: var(--text-sm);
+  font-weight: 500;
+  color: var(--muted-ink);
+}
+.activity-header button {
+  width: 36px;
+  height: 36px;
+  color: #704b32;
+}
+.chronicle-tabs {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  padding-top: 0;
+}
+.chronicle:not(.dice-view) .dice-workbench {
+  display: none;
+}
+.scene-heading h1 {
+  font-size: clamp(22px, 2.2vw, 30px);
+}
+.scene-options {
+  z-index: 4;
+}
+.chronicle .empty-chronicle {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  padding: 12px 0;
+}
+.chronicle .empty-chronicle > svg {
+  flex-shrink: 0;
+  margin: 0;
+}
+.chronicle .empty-chronicle p {
+  font-size: 18px;
+}
+.first-use-guide:not([open]) {
+  width: fit-content;
+  max-width: 100%;
+}
+.first-use-guide summary {
+  gap: 8px;
+}
+.first-use-guide summary > strong {
+  min-width: 0;
+}
+.expression-input:has(input[aria-invalid='true']) {
+  border-color: #a34c36;
+}
+.expression-error {
+  font-size: var(--text-sm);
+  line-height: 1.4;
+  color: #8c3628;
+  margin-top: 6px;
+}
+@media (min-width: 1600px) {
+  .app {
+    --activity-width: 400px;
+    --library-width: 272px;
+  }
+}
+@media (min-width: 621px) and (max-width: 1150px) {
+  .app-header {
+    flex-wrap: wrap;
+    gap: 6px 16px;
+  }
+  .header-actions {
+    width: auto;
+    flex: 1;
+  }
+}
+@media (max-width: 1000px) {
+  .app,
+  .app.library-collapsed,
+  .app.activity-collapsed,
+  .app.library-collapsed.activity-collapsed {
+    grid-template-columns: var(--rail-width) minmax(0, 1fr);
+  }
+  .app > .library {
+    display: none;
+  }
+  .app > .table-area {
+    grid-column: 2;
+  }
+  .app > .chronicle.drawer-open {
+    position: fixed;
+    inset: 0 0 0 auto;
+    width: min(400px, 100%);
+    height: 100dvh;
+    max-height: none;
+    z-index: 30;
+    border-left: 1px solid #a2875b;
+    border-top: 0;
+    box-shadow: -10px 0 40px #0005;
+  }
+  .chronicle.drawer-open .chronicle-tabs {
+    display: grid;
+  }
+  .chronicle.drawer-open .activity-panel {
+    display: flex;
+    min-height: 100px;
+    padding: 18px 16px 0;
+  }
+  .chronicle.drawer-open.sheet-view .activity-panel {
+    padding: 18px 16px;
+  }
+  .chronicle.drawer-open.dice-view .dice-workbench {
+    display: block;
+    max-height: 65dvh;
+    padding: 14px 16px;
+    overflow-y: auto;
+  }
+  .chronicle .dice-workbench .section-heading {
+    display: flex;
+  }
+}
+@media (max-width: 620px) {
+  .app {
+    --rail-width: 44px;
+  }
+  .app-header {
+    min-height: 56px;
+    gap: 5px;
+    padding: 6px 10px;
+  }
+  .app-header .brand {
+    min-width: 0;
+  }
+  .header-actions > button {
+    min-height: 36px;
+  }
+  .app > .tool-rail {
+    padding-inline: 2px;
+  }
+  .rail-button {
+    width: 38px;
+    min-height: 40px;
+  }
+  .rail-caption {
+    display: none;
+  }
+  .zoom-controls {
+    gap: 0;
+  }
+}
+/* Focus mode also removes the header and tool rail, leaving an exit on the map. */
+.app.table-focused,
+.app.table-focused.library-collapsed,
+.app.table-focused.activity-collapsed {
+  grid-template-columns: minmax(0, 1fr);
+  grid-template-rows: minmax(0, 1fr);
+}
+.app.table-focused > .app-header,
+.app.table-focused > .tool-rail,
+.app.table-focused > .library,
+.app.table-focused > .chronicle,
+.app.table-focused .first-use-guide {
+  display: none;
+}
+.app.table-focused > .table-area {
+  grid-column: 1;
+  grid-row: 1;
+}
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    scroll-behavior: auto !important;
+  }
+}
+
+/* Screenshot review: improve framing, discoverability and the route back to play. */
+.activity-header button {
+  width: auto;
+  min-height: 44px;
+  padding: 6px 8px;
+  gap: 6px;
+  font-size: var(--text-sm);
+}
+.first-use-guide:not([open]) {
+  padding: 3px 8px;
+  border-radius: 20px;
+}
+.first-use-guide:not([open]) summary {
+  min-height: 30px;
+  font-size: var(--text-sm);
+}
+.first-use-guide > summary > button {
+  min-width: 28px;
+  min-height: 28px;
+  font-size: 20px;
+}
+.zoom-controls {
+  max-width: calc(100% - 24px);
+  gap: 2px;
+  padding: 4px 6px;
+}
+.modal.modal-token {
+  display: flex;
+  flex-direction: column;
+  height: min(90dvh, 900px);
+  overflow: hidden;
+  padding-bottom: 16px;
+}
+.modal-token > h2 {
+  flex-shrink: 0;
+}
+.token-dialog-form,
+.token-fields {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  flex: 1;
+}
+.token-form-body {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  padding-right: 8px;
+  scrollbar-gutter: stable;
+}
+.token-form-body > label:first-child {
+  margin-top: 0;
+}
+.token-form-body > h3 {
+  margin-top: 22px;
+  margin-bottom: 8px;
+}
+.token-form-actions {
+  flex-shrink: 0;
+  padding-top: 12px;
+  margin-top: 12px;
+  border-top: 1px solid #a2875b55;
+}
+.token-form-actions .modal-submit {
+  margin-top: 0;
+  min-height: 46px;
+}
+@media (max-width: 620px) {
+  .tool-rail .workspace-button .rail-caption {
+    display: block;
+    font-size: 10px;
+    line-height: 1.1;
+  }
+  .tool-rail .workspace-button {
+    min-height: 46px;
+  }
+  .activity-header strong {
+    font-size: var(--text-sm);
+  }
+  .chronicle-tabs button {
+    font-size: var(--text-sm);
+  }
+}
+.first-use-guide:not([open]) > summary {
+  padding-block: 0;
+  min-height: 30px;
+}
+.first-use-guide:not([open]) > summary > button {
+  height: 28px;
+  min-height: 28px;
+  padding: 0;
+  line-height: 1;
+}

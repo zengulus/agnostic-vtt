@@ -503,11 +503,9 @@ describe('campaign workshop over real HTTP and WebSockets', () => {
     });
     const invalidUndo = pc.send({ type: 'UNDO' });
     await pc.wait('ERROR', (m) => m.actionId === invalidUndo);
-    await gm.commit({ type: 'CHAT_SEND', text: 'We remember this message.' });
     await gm.commit({ type: 'DICE_ROLL_REQUEST', expression: '2d6+3', visibility: 'public' });
     await gm.commit({ type: 'UNDO' });
     expect(gm.state.scenes.hollow.tokens.ranger).toEqual(original);
-    expect(gm.state.chat.at(-1)?.text).toBe('We remember this message.');
     expect(gm.state.rolls).toHaveLength(1);
   });
   it('retains new scene objects, templates, statuses and tracker across a server restart', async () => {

@@ -1,3 +1,4 @@
+import { desktopWorkspace, openDice, openLibrary } from './helpers/workspace.js';
 import { expect, test, type Page } from '@playwright/test';
 import type { Action } from '../../shared/protocol.js';
 import type { RoomState } from '../../shared/model.js';
@@ -13,6 +14,7 @@ async function demo(page: Page, player = false) {
       exact: true,
     })
     .click();
+  await desktopWorkspace(page);
 }
 async function state(page: Page): Promise<RoomState> {
   return page.evaluate(async () => {
@@ -110,36 +112,23 @@ test('a controller can read and spend or restore resources from token selection'
   await expect(page.getByRole('button', { name: 'Edit token', exact: true })).toHaveCount(0);
 });
 
-test('phone drawer gives players chat, turns and roll history', async ({ page }) => {
-  await demo(page, true);
-  await action(page, { type: 'CHAT_SEND', text: 'Ready on my phone' });
+test('phone map stays full height with dice, turns and history available on demand', async ({
+  page,
+}) => {
   await page.setViewportSize({ width: 390, height: 844 });
-  await page.getByRole('button', { name: 'Chat, turns & history' }).click();
-  await expect(page.getByRole('button', { name: 'Close table activity' })).toHaveAttribute(
-    'aria-expanded',
-    'true',
-  );
-  await page.getByRole('button', { name: 'Party chat', exact: true }).click();
-  await expect(page.getByText('Ready on my phone', { exact: true })).toBeVisible();
-  await page.getByLabel('Message your party').fill('Still here');
-  await page.getByRole('button', { name: 'Send message' }).click();
-  await expect(page.getByText('Still here', { exact: true })).toBeVisible();
-  await page.getByRole('button', { name: 'Turns', exact: true }).click();
+  await demo(page, true);
+  await expect(page.locator('.chronicle')).toBeHidden();
+  const canvas = (await page.locator('.tabletop > canvas').boundingBox())!;
+  expect(canvas.height).toBeGreaterThan(700);
+  await page.getByRole('button', { name: 'Turn tracker', exact: true }).click();
   await expect(page.locator('.tracker-panel')).toBeVisible();
-  await page.getByRole('button', { name: 'Chronicle', exact: true }).click();
+  await page.getByRole('button', { name: 'Back to map', exact: true }).click();
+  await openDice(page);
   await expect(page.getByText('The tale is yet unwritten.')).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Roll the dice' })).toBeInViewport({ ratio: 1 });
+  await page.getByRole('button', { name: 'Back to map', exact: true }).click();
+  await expect(page.locator('.chronicle')).toBeHidden();
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
-  await page.screenshot({ path: '/tmp/aether-phone-activity-open.png' });
-  await page.getByRole('button', { name: 'Close table activity' }).click();
-  await expect(page.getByRole('button', { name: 'Chat, turns & history' })).toHaveAttribute(
-    'aria-expanded',
-    'false',
-  );
-  await expect(page.getByLabel('Dice expression', { exact: true })).toBeVisible();
-  await expect(page.getByRole('button', { name: 'Roll the dice', exact: true })).toBeInViewport({
-    ratio: 1,
-  });
-  await page.screenshot({ path: '/tmp/aether-phone-activity-closed.png' });
 });
 
 test('revised macro imports require reviewed replacements and preserve favorites and remembered inputs', async ({
@@ -148,6 +137,7 @@ test('revised macro imports require reviewed replacements and preserve favorites
   await demo(page);
   const source = '[Attack]([Hit(d20 + X)])',
     revised = '[Attack]([Hit(d20 + X + 2)])';
+  await openDice(page);
   await page.getByRole('button', { name: 'Macros · import .txt' }).click();
   await page.getByLabel('Macro definitions').fill(source);
   await page.getByRole('button', { name: 'Import 1 macro', exact: true }).click();
@@ -167,6 +157,7 @@ test('revised macro imports require reviewed replacements and preserve favorites
   await page.getByRole('button', { name: 'Prepare Attack', exact: true }).click();
   await page.getByLabel('Numeric input X').fill('5');
   await page.getByRole('button', { name: 'Close dialog' }).click();
+  await openDice(page);
   await page.getByRole('button', { name: 'Macros · import .txt' }).click();
   await expect(page.getByRole('button', { name: 'Favorite Attack', exact: true })).toHaveAttribute(
     'aria-pressed',
@@ -176,6 +167,7 @@ test('revised macro imports require reviewed replacements and preserve favorites
   await expect(page.getByLabel('Numeric input X')).toHaveValue('5');
   await page.getByRole('button', { name: 'Roll macro', exact: true }).click();
   await page.getByRole('button', { name: 'Continue', exact: true }).click();
+  await openDice(page);
   await page.getByRole('button', { name: 'Macros · import .txt' }).click();
   await page.getByRole('button', { name: 'Recent rolls', exact: true }).click();
   await expect(page.getByRole('button', { name: 'Prepare Attack', exact: true })).toBeVisible();
@@ -201,6 +193,7 @@ test('offline owners remain assignable and removal requires a warning before acc
     await pc.getByRole('button', { name: 'Join your party', exact: true }).click();
     await expect(pc.getByText('Live', { exact: true })).toBeVisible();
     await pc.close();
+    await openLibrary(gm);
     await gm.getByRole('button', { name: 'Kael Wanderer', exact: true }).click();
     await gm.getByRole('button', { name: 'Edit token', exact: true }).click();
     const ownership = gm.getByLabel('Who can move it?');
@@ -240,6 +233,7 @@ test('offline owners remain assignable and removal requires a warning before acc
     await resumed.goto(invitation);
     await resumed.getByRole('button', { name: 'Join your party', exact: true }).click();
     await expect(resumed.getByText('Live', { exact: true })).toBeVisible();
+    await openLibrary(resumed);
     await resumed.getByRole('button', { name: 'Kael Wanderer', exact: true }).click();
     await resumed.getByRole('button', { name: 'Damage or spend resource' }).click();
     await expect
@@ -261,7 +255,7 @@ for (const viewport of [
     await demo(page);
     const original = (await state(page)).scenes.hollow;
     await page.setViewportSize(viewport);
-    await page.getByRole('button', { name: 'Toggle library', exact: true }).click();
+    await openLibrary(page);
     const library = page.getByRole('dialog');
     await expect(
       library.getByRole('button', { name: 'Scene settings', exact: true }),
@@ -283,7 +277,7 @@ for (const viewport of [
 test('compact library keeps scene creation restricted to the GM', async ({ page }) => {
   await demo(page, true);
   await page.setViewportSize({ width: 390, height: 844 });
-  await page.getByRole('button', { name: 'Toggle library', exact: true }).click();
+  await openLibrary(page);
   await expect(
     page.getByRole('dialog').getByRole('button', { name: 'New Scene', exact: true }),
   ).toHaveCount(0);
@@ -321,6 +315,7 @@ test('scene and grid controls stay locked until acknowledgement and unlock on re
   await page.getByRole('button', { name: 'Log in', exact: true }).click();
   await page.getByRole('button', { name: 'Create campaign', exact: true }).click();
   await expect(page.getByText('Live', { exact: true })).toBeVisible();
+  await desktopWorkspace(page);
   for (const kind of ['map', 'grid', 'new-scene'] as const) {
     await page
       .getByRole('button', {

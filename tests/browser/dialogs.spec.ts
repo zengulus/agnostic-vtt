@@ -1,3 +1,4 @@
+import { desktopWorkspace } from './helpers/workspace.js';
 import { expect, test, type Page } from '@playwright/test';
 import sharp from 'sharp';
 import type { Action } from '../../shared/protocol.js';
@@ -22,6 +23,7 @@ async function create(page: Page) {
   });
   expect(response.status(), `${response.url()}: ${body}`).toBe(201);
   await expect(page.getByText('Live', { exact: true })).toBeVisible();
+  await desktopWorkspace(page);
 }
 async function roomState(page: Page): Promise<RoomState> {
   return page.evaluate(async () => {
@@ -45,6 +47,7 @@ async function join(page: Page, url: string) {
   await page.goto(url);
   await page.getByRole('button', { name: 'Join your party', exact: true }).click();
   await expect(page.getByText('Live', { exact: true })).toBeVisible();
+  await desktopWorkspace(page);
 }
 async function editToken(page: Page) {
   await page.getByRole('button', { name: 'Kael Wanderer', exact: true }).click();

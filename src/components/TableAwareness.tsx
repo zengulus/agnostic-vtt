@@ -86,7 +86,7 @@ export function FirstUseGuide() {
   const s = useTable(),
     key = `aether-first-use:${s.self?.id}:${s.self?.role}`;
   const [dismissed, setDismissed] = useState('');
-  const [expanded, setExpanded] = useState(() => window.innerWidth > 1150);
+  const [expanded, setExpanded] = useState(false);
   useEffect(() => {
     if (!['select', 'pan'].includes(s.tool)) setExpanded(false);
   }, [s.tool]);
@@ -106,9 +106,7 @@ export function FirstUseGuide() {
     >
       <summary>
         <ChevronDown size={16} />
-        <strong>
-          {s.self.role === 'gm' ? 'Welcome, game master' : 'Your first turn at the table'}
-        </strong>
+        <strong>Quick start</strong>
         <button
           aria-label="Dismiss getting started"
           onClick={(e) => {
@@ -155,6 +153,7 @@ export function TurnAwareness() {
   const token = current?.tokenId ? scene.tokens[current.tokenId] : undefined;
   const yours =
     token && s.self && assigned(token, s.self.id) && canControl(token, s.self.id, s.self.role);
+  if (!tracker.entries.length) return null;
   return (
     <div
       className={`turn-awareness ${yours ? 'your-turn' : ''}`}

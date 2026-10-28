@@ -93,9 +93,6 @@ export function applyChanges(state: RoomState, changes: StateChange[]): RoomStat
       case 'roll':
         next.rolls = [...next.rolls, c.roll].slice(-100);
         break;
-      case 'chat':
-        next.chat = [...next.chat, c.chat].slice(-100);
-        break;
     }
   }
   return next;

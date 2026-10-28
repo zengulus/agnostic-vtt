@@ -161,7 +161,6 @@ try {
             activeSceneId: 'hollow',
             scenes: { hollow: sampleScene() },
             rolls: [],
-            chat: [],
             savedAt: null,
           },
           self,

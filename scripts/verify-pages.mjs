@@ -63,6 +63,7 @@ try {
   });
   await page.goto(address, { waitUntil: 'domcontentloaded' });
   await page.getByRole('heading', { name: 'The next chapter.' }).waitFor();
+  await page.getByRole('button', { name: 'Toggle library', exact: true }).click();
   await page.waitForFunction(() => {
     const images = [...document.querySelectorAll('.scene-thumb img')];
     return images.length > 0 && images.every((image) => image.complete && image.naturalWidth > 0);
@@ -92,13 +93,11 @@ try {
   await page.locator('.scene-options').getByText('Scene fog', { exact: true }).click();
   await expect(page.getByRole('button', { name: 'Cover entire scene', exact: true })).toBeVisible();
   await page.locator('.scene-options').getByText('Scene fog', { exact: true }).click();
+  await page.getByRole('button', { name: 'Dice & macros', exact: true }).click();
   await page.getByRole('button', { name: 'Roll the dice' }).click();
   await expect(page.getByTestId('roll-total')).toBeVisible();
   await page.getByRole('button', { name: 'Dismiss roll', exact: true }).click();
-  await page.getByRole('button', { name: 'Party chat', exact: true }).click();
-  await page.getByLabel('Message your party').fill('No cloud needed.');
-  await page.getByRole('button', { name: 'Send message', exact: true }).click();
-  await expect(page.locator('.chat-messages')).toContainText('No cloud needed.');
+  await expect(page.getByRole('button', { name: 'Party chat', exact: true })).toHaveCount(0);
   await page.getByRole('button', { name: 'Macros · import .txt' }).click();
   const example = await page
     .getByRole('link', { name: 'Download example macro.txt ↗' })
@@ -118,7 +117,7 @@ try {
   await page.getByRole('button', { name: 'Dismiss roll', exact: true }).click();
   await page.screenshot({ path: '/tmp/aether-offline-demo.png' });
   await page.getByRole('button', { name: 'Reset demo', exact: true }).click();
-  await page.getByRole('button', { name: 'Chronicle', exact: true }).click();
+  await page.getByRole('button', { name: 'Dice & macros', exact: true }).click();
   await expect(page.locator('.history-card')).toHaveCount(0);
   await page.reload();
   await page.getByRole('button', { name: 'Try the player demo', exact: true }).click();
@@ -132,7 +131,7 @@ try {
     throw new Error('Demo overflows the mobile viewport.');
   if (errors.length) throw new Error(errors.join('\n'));
   console.log(
-    `Static production smoke check passed at ${base}; demo roles, fog, undo, dice, chat, macros, reset and subpath assets work without cloud requests.`,
+    `Static production smoke check passed at ${base}; demo roles, fog, undo, dice, macros, reset and subpath assets work without cloud requests.`,
   );
 } finally {
   if (browser) await browser.close();
