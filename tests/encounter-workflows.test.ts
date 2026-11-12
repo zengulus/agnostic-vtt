@@ -204,6 +204,11 @@ describe('encounter workflows', () => {
     expect(() =>
       commit(room, { ...roll, expression: '40d6', characterIds: ['one', 'two', 'one'] }),
     ).toThrow('at most 100');
+    const draws = [...Array(10).fill(4), 1, ...Array(11).fill(4), 1];
+    expect(() =>
+      prepareAction(room, gm, message({ ...roll, expression: 'd4!' }), () => draws.shift()!),
+    ).toThrow('Explosion limit reached');
+    expect(draws).toEqual([1]);
   });
   it('edits abilities with ownership, full validation and stale-sheet protection', () => {
     const room = setup(),

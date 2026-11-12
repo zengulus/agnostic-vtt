@@ -200,11 +200,40 @@ describe('real authoritative WebSocket server', () => {
     });
     pc.send({ type: 'STATE_RESYNC' });
     expect((await pc.wait('ROOM_SNAPSHOT')).state.scenes.hollow.tokens.mage).toBeUndefined();
+    const cueSetup = gm.send({
+      type: 'TOKEN_UPDATE',
+      sceneId: 'hollow',
+      token: {
+        ...scene.tokens.mage,
+        x: 300,
+        y: 100,
+        owners: [],
+        proximity: { distance: 185, when: 'both', playerMessage: 'Nearby' },
+      },
+    });
+    await pc.wait('STATE_PATCH', (m) => m.actionId === cueSetup);
+    const hiddenMove = pc.send({
+      type: 'TOKEN_MOVE_COMMIT',
+      sceneId: 'hollow',
+      tokenId: 'ranger',
+      position: { x: 130, y: 100 },
+    });
+    await pc.wait('STATE_PATCH', (m) => m.actionId === hiddenMove);
+    expect((await gm.wait('PROXIMITY_CUE')).message).toContain('Lyra');
+    expect(pc.messages.some((m) => m.type === 'PROXIMITY_CUE')).toBe(false);
     const open = gm.send({ type: 'WALL_SET', sceneId: 'hollow', wall: { ...wall, open: true } });
     const revealed = await pc.wait('STATE_PATCH', (m) => m.actionId === open);
     expect(revealed.changes).toContainEqual(
       expect.objectContaining({ kind: 'token', token: expect.objectContaining({ id: 'mage' }) }),
     );
+    const visibleMove = pc.send({
+      type: 'TOKEN_MOVE_COMMIT',
+      sceneId: 'hollow',
+      tokenId: 'ranger',
+      position: { x: 60, y: 120 },
+    });
+    await pc.wait('STATE_PATCH', (m) => m.actionId === visibleMove);
+    expect((await pc.wait('PROXIMITY_CUE')).message).toBe('Nearby');
   });
   it('lets one GM account enter as a player without demotion and enforces that connection role', async () => {
     const gm = await client(owner);

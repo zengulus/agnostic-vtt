@@ -126,8 +126,8 @@ export function parseDice(expression: string): ParsedTerm[] {
 export function evaluateDice(
   expression: string,
   randomInt: (min: number, max: number) => number,
+  budget = { remaining: 20 },
 ): { terms: RollTerm[]; total: number } {
-  const budget = { remaining: 20 };
   const terms = parseDice(expression).map((t): RollTerm => {
     if (t.kind === 'dice')
       return evaluateDiceTerm(

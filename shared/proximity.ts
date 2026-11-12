@@ -1,7 +1,7 @@
 import { type Point, type ProximityRule, type RoomState, type Zone } from './model.js';
 import { fogAllowsToken, pointInPolygon, segmentDistance } from './regions.js';
 
-type Cue = { gm: string; player?: string; tokenId: string };
+type Cue = { gm: string; player?: string; tokenId: string; sourceTokenId?: string };
 function insideZone(p: Point, z: Zone, distance: number) {
   if (z.shape === 'circle') {
     const rx = z.width / 2 + distance,
@@ -98,6 +98,7 @@ export function proximityCues(
       was: boolean,
       now: boolean,
       crossed: boolean,
+      sourceTokenId?: string,
     ) => {
       if (!rule || (was === now && (was || !crossed))) return;
       const events = was !== now ? [now ? 'enter' : 'leave'] : ['enter', 'leave'];
@@ -110,6 +111,7 @@ export function proximityCues(
               ? rule.playerMessage
               : undefined,
           tokenId: b.id,
+          sourceTokenId,
         });
       }
     };
@@ -153,6 +155,7 @@ export function proximityCues(
           Math.hypot(a.x - previous.x, a.y - previous.y) <= range,
           Math.hypot(b.x - target.x, b.y - target.y) <= range,
           segmentDistance({ x: 0, y: 0 }, relative(a, previous), relative(b, target)) <= range,
+          target.id,
         );
       }
   }
@@ -170,6 +173,7 @@ export function proximityCues(
         was: boolean,
         now: boolean,
         crossed: boolean,
+        sourceTokenId?: string,
       ) => {
         if (!rule || (was === now && (was || !crossed))) return;
         const events = was !== now ? [now ? 'enter' : 'leave'] : ['enter', 'leave'];
@@ -182,6 +186,7 @@ export function proximityCues(
                 ? rule.playerMessage
                 : undefined,
             tokenId: actor.id,
+            sourceTokenId,
           });
         }
       };
@@ -194,6 +199,7 @@ export function proximityCues(
           Math.hypot(actor.x - previous.x, actor.y - previous.y) <= range,
           Math.hypot(actor.x - target.x, actor.y - target.y) <= range,
           segmentDistance(actor, previous, target) <= range,
+          target.id,
         );
       }
       for (const zone of Object.values(scene.zones)) {

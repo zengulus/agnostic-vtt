@@ -883,7 +883,16 @@ export class RoomManager {
                   'player',
                   p.identity.id,
                   playerIds,
-                )
+                ) &&
+                (!cue.sourceTokenId ||
+                  (cueScene.tokens[cue.sourceTokenId] &&
+                    tokenVisible(
+                      cueScene.tokens[cue.sourceTokenId],
+                      cueScene,
+                      'player',
+                      p.identity.id,
+                      playerIds,
+                    )))
               ? cue.player
               : undefined;
         if (text) p.send({ v: 7, type: 'PROXIMITY_CUE', message: text });

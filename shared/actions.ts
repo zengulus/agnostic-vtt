@@ -1240,8 +1240,9 @@ export function prepareAction(
         0,
       );
       if (dice * sheets.length > 100) throw new Error('A group roll supports at most 100 dice.');
+      const explosionBudget = { remaining: 20 };
       const results = sheets.map((sheet) => {
-        const evaluated = evaluateDice(m.expression, randomInt);
+        const evaluated = evaluateDice(m.expression, randomInt, explosionBudget);
         const statValue = sheet.stats[m.stat];
         const modifiers = [
           {
