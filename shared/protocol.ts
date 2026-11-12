@@ -11,10 +11,16 @@ import {
   fogOperationSchema,
   annotationSchema,
   trackerSchema,
+  tokenStatusSchema,
+  statusPresetSchema,
+  transitionSchema,
+  pinSchema,
+  wallSchema,
+  lightingSchema,
 } from './model.js';
 import type { StateChange, Point, Presence, Roll, RoomState } from './model.js';
 import { tokenEditSchema } from './tokenEdits.js';
-import { refreshSchema } from './characters.js';
+import { characterAbilitySchema, refreshSchema } from './characters.js';
 export const MAX_CLIENT_MESSAGE_BYTES = 256 * 1024;
 const base = { v: z.literal(VERSION), actionId: z.string().min(1).max(80) };
 const sceneId = idSchema;
@@ -50,6 +56,13 @@ export const clientMessageSchema = z.discriminatedUnion('type', [
     delta: z.number().int().min(-10000).max(10000),
   }),
   z.object({ ...base, type: z.literal('CHARACTER_REFRESH'), id: idSchema, refresh: refreshSchema }),
+  z.object({
+    ...base,
+    type: z.literal('CHARACTER_ABILITY_SAVE'),
+    id: idSchema,
+    digest: z.string().regex(/^[a-f0-9]{64}$/),
+    ability: characterAbilitySchema,
+  }),
   z.object({
     ...base,
     type: z.literal('CHARACTER_ABILITY_STATE'),
@@ -94,6 +107,13 @@ export const clientMessageSchema = z.discriminatedUnion('type', [
   }),
   z.object({
     ...base,
+    type: z.literal('TOKEN_ROTATE'),
+    sceneId,
+    tokenId: idSchema,
+    delta: z.union([z.literal(45), z.literal(-45)]),
+  }),
+  z.object({
+    ...base,
     type: z.literal('TOKEN_UPDATE'),
     sceneId,
     token: tokenSchema,
@@ -104,7 +124,27 @@ export const clientMessageSchema = z.discriminatedUnion('type', [
     type: z.literal('TOKEN_PATCH'),
     sceneId,
     tokenId: idSchema,
-    edits: z.array(tokenEditSchema).min(1).max(13),
+    edits: z.array(tokenEditSchema).min(1).max(19),
+  }),
+  z.object({
+    ...base,
+    type: z.literal('TOKEN_STATUS_SET'),
+    sceneId,
+    tokenId: idSchema,
+    status: tokenStatusSchema,
+    expected: z
+      .string()
+      .regex(/^[a-f0-9]{64}$/)
+      .optional(),
+  }),
+  z.object({ ...base, type: z.literal('STATUS_PRESET_SET'), preset: statusPresetSchema }),
+  z.object({ ...base, type: z.literal('STATUS_PRESET_DELETE'), id: idSchema }),
+  z.object({
+    ...base,
+    type: z.literal('TOKEN_STATUS_REMOVE'),
+    sceneId,
+    tokenId: idSchema,
+    statusId: idSchema,
   }),
   z.object({
     ...base,
@@ -112,6 +152,27 @@ export const clientMessageSchema = z.discriminatedUnion('type', [
     sceneId,
     tokenId: idSchema,
     delta: z.number().finite().min(-10000).max(10000),
+    expected: z
+      .object({
+        characterId: idSchema.nullable(),
+        resourceId: idSchema.nullable(),
+        label: z.string().max(16).nullable(),
+      })
+      .optional(),
+  }),
+  z.object({
+    ...base,
+    type: z.literal('TOKEN_BATCH_ACTION'),
+    sceneId,
+    tokenIds: z.array(idSchema).min(1).max(50),
+    operation: z.discriminatedUnion('kind', [
+      z.object({ kind: z.literal('add-status'), status: tokenStatusSchema }),
+      z.object({ kind: z.literal('remove-status'), label: z.string().trim().min(1).max(24) }),
+      z.object({
+        kind: z.literal('adjust-resource'),
+        delta: z.number().int().min(-10000).max(10000),
+      }),
+    ]),
   }),
   z.object({ ...base, type: z.literal('TOKEN_DELETE'), sceneId, tokenId: idSchema }),
   z.object({ ...base, type: z.literal('SCENE_UPDATE'), scene: sceneSchema }),
@@ -124,18 +185,68 @@ export const clientMessageSchema = z.discriminatedUnion('type', [
     width: sceneSchema.shape.width,
     height: sceneSchema.shape.height,
     create: z.boolean(),
+    visibility: z.enum(['public', 'gm']).optional(),
   }),
+  z.object({
+    ...base,
+    type: z.literal('SCENE_VISIBILITY'),
+    sceneId,
+    visibility: z.enum(['public', 'gm']),
+  }),
+  z.object({
+    ...base,
+    type: z.literal('PIN_SET'),
+    sceneId,
+    pin: pinSchema,
+    expected: z
+      .string()
+      .regex(/^[a-f0-9]{64}$/)
+      .optional(),
+  }),
+  z.object({ ...base, type: z.literal('PIN_DELETE'), sceneId, id: idSchema }),
   z.object({ ...base, type: z.literal('GRID_UPDATE'), sceneId, grid: gridSchema }),
-  z.object({ ...base, type: z.literal('SCENE_CHANGE'), sceneId }),
+  z.object({ ...base, type: z.literal('WALL_SET'), sceneId, wall: wallSchema }),
+  z.object({ ...base, type: z.literal('WALL_DELETE'), sceneId, id: idSchema }),
+  z.object({
+    ...base,
+    type: z.literal('LIGHTING_SET'),
+    sceneId,
+    lighting: lightingSchema,
+    expected: lightingSchema.nullable().optional(),
+  }),
+  z.object({
+    ...base,
+    type: z.literal('SCENE_CHANGE'),
+    sceneId,
+    transition: transitionSchema.optional(),
+  }),
   z.object({
     ...base,
     type: z.literal('DICE_ROLL_REQUEST'),
     expression: z.string().min(1).max(120),
     visibility: z.enum(['public', 'private']),
   }),
+  z.object({
+    ...base,
+    type: z.literal('STAT_ROLL_REQUEST'),
+    characterIds: z.array(idSchema).min(1).max(20),
+    stat: z.string().regex(/^[A-Za-z][A-Za-z0-9_]{0,23}$/),
+    expression: z.string().min(1).max(80),
+    modifier: z.number().finite().min(-10000).max(10000),
+    visibility: z.enum(['public', 'private']),
+  }),
   z.object({ ...base, type: z.literal('PING'), position: pointSchema }),
   z.object({ ...base, type: z.literal('FOG_UPDATE'), sceneId, fog: fogSchema }),
-  z.object({ ...base, type: z.literal('ZONE_UPDATE'), sceneId, zone: zoneSchema }),
+  z.object({
+    ...base,
+    type: z.literal('ZONE_UPDATE'),
+    sceneId,
+    zone: zoneSchema,
+    expected: z
+      .string()
+      .regex(/^[a-f0-9]{64}$/)
+      .optional(),
+  }),
   z.object({ ...base, type: z.literal('ZONE_DELETE'), sceneId, id: idSchema }),
   z.object({
     ...base,
@@ -166,6 +277,37 @@ export const clientMessageSchema = z.discriminatedUnion('type', [
   }),
   z.object({ ...base, type: z.literal('LIBRARY_SAVE'), token: tokenSchema }),
   z.object({ ...base, type: z.literal('LIBRARY_DELETE'), id: idSchema }),
+  z.object({
+    ...base,
+    type: z.literal('ENCOUNTER_SAVE'),
+    id: idSchema,
+    name: z.string().trim().min(1).max(64),
+    sceneId,
+    tokenIds: z.array(idSchema).min(1).max(50),
+  }),
+  z.object({
+    ...base,
+    type: z.literal('ENCOUNTER_PLACE'),
+    id: idSchema,
+    sceneId,
+    independent: z.boolean().optional(),
+  }),
+  z.object({ ...base, type: z.literal('ENCOUNTER_DELETE'), id: idSchema }),
+  z.object({
+    ...base,
+    type: z.literal('ENCOUNTER_REPAIR'),
+    id: idSchema,
+    digest: z.string().regex(/^[a-f0-9]{64}$/),
+    from: idSchema,
+    to: idSchema.nullable(),
+  }),
+  z.object({
+    ...base,
+    type: z.literal('ENCOUNTER_REFRESH'),
+    id: idSchema,
+    sceneId,
+    placementId: idSchema,
+  }),
   z.object({ ...base, type: z.literal('TRACKER_UPDATE'), tracker: trackerSchema }),
   z.object({
     ...base,
@@ -242,13 +384,13 @@ export const clientMessageSchema = z.discriminatedUnion('type', [
 ]);
 export type ClientMessage = z.infer<typeof clientMessageSchema>;
 export type Action = ClientMessage extends infer T
-  ? T extends { v: 2; actionId: string }
+  ? T extends { v: 7; actionId: string }
     ? Omit<T, 'v' | 'actionId'>
     : never
   : never;
 /** Measure the actual UTF-8 JSON frame, including escaped text and replacement guards. */
 export function serializeClientAction(action: Action, actionId: string): string {
-  const payload = JSON.stringify({ ...action, v: 2, actionId });
+  const payload = JSON.stringify({ ...action, v: 7, actionId });
   if (new TextEncoder().encode(payload).byteLength > MAX_CLIENT_MESSAGE_BYTES)
     throw new Error(
       action.type === 'MACRO_IMPORT'
@@ -260,7 +402,7 @@ export function serializeClientAction(action: Action, actionId: string): string 
 export type ServerMessage =
   | ExtraServerMessage
   | {
-      v: 2;
+      v: 7;
       type: 'ROOM_SNAPSHOT';
       state: RoomState;
       self: Presence;
@@ -270,20 +412,21 @@ export type ServerMessage =
       savedRevision?: number;
       savePending?: boolean;
     }
-  | { v: 2; type: 'STATE_PATCH'; revision: number; actionId: string; changes: StateChange[] }
-  | { v: 2; type: 'PRESENCE_UPDATE'; presence: Presence[] }
+  | { v: 7; type: 'STATE_PATCH'; revision: number; actionId: string; changes: StateChange[] }
+  | { v: 7; type: 'PRESENCE_UPDATE'; presence: Presence[] }
   | {
-      v: 2;
+      v: 7;
       type: 'TOKEN_MOVE_PREVIEW';
       sceneId: string;
       tokenId: string;
       position: Point;
       userId: string;
     }
-  | { v: 2; type: 'DICE_ROLL_RESULT'; roll: Roll }
-  | { v: 2; type: 'PING'; position: Point; userId: string }
-  | { v: 2; type: 'SAVED'; savedAt: string; revision: number; pending?: boolean }
-  | { v: 2; type: 'ERROR'; message: string; actionId?: string };
+  | { v: 7; type: 'DICE_ROLL_RESULT'; roll: Roll }
+  | { v: 7; type: 'PING'; position: Point; userId: string }
+  | { v: 7; type: 'PROXIMITY_CUE'; message: string }
+  | { v: 7; type: 'SAVED'; savedAt: string; revision: number; pending?: boolean }
+  | { v: 7; type: 'ERROR'; message: string; actionId?: string };
 export type HistoryStatus = {
   canUndo: boolean;
   canRedo: boolean;
@@ -291,25 +434,25 @@ export type HistoryStatus = {
   redoLabel: string;
 };
 export type ExtraServerMessage =
-  | { v: 2; type: 'DISCORD_STATUS'; discord: DiscordStatus }
+  | { v: 7; type: 'DISCORD_STATUS'; discord: DiscordStatus }
   | {
-      v: 2;
+      v: 7;
       type: 'DISCORD_DELIVERY';
       rollId: string;
       status: 'queued' | 'sent' | 'failed';
       message: string;
     }
-  | { v: 2; type: 'HISTORY_STATUS'; history: HistoryStatus }
+  | { v: 7; type: 'HISTORY_STATUS'; history: HistoryStatus }
   | {
-      v: 2;
+      v: 7;
       type: 'MEMBERS_UPDATE';
       members: Array<Presence>;
       ownerId: string;
       removedMembers?: Array<{ id: string; name: string }>;
     }
-  | { v: 2; type: 'REVOKED'; message: string }
+  | { v: 7; type: 'REVOKED'; message: string }
   | {
-      v: 2;
+      v: 7;
       type: 'TOKEN_MOVE_PREVIEW_BATCH';
       sceneId: string;
       positions: Array<{ tokenId: string; position: Point }>;

@@ -34,6 +34,7 @@ import {
   Eraser,
   Type,
   Flag,
+  Flame,
   FolderOpen,
   BookOpen,
   Dices,
@@ -49,10 +50,15 @@ import { RollPresentation } from './components/RollPresentation.js';
 import { Dialogs } from './components/Dialogs.js';
 import { MacroResults } from './components/Macros.js';
 import { DiscordShare } from './components/DiscordSettings.js';
+import { ApplyRoll } from './components/ApplyRoll.js';
 import type { Tool } from './store.js';
 import { unlockSound } from './sound.js';
 import { useMediaQuery } from './useMediaQuery.js';
 import { useActivityFocus } from './useActivityFocus.js';
+import { useConfirmedAction } from './useConfirmedAction.js';
+import { PinList, PinPanel } from './components/Pins.js';
+import { LightingControls } from './components/Lighting.js';
+import { ScenePresentation } from './components/ScenePresentation.js';
 
 const tools: Array<{
   id: Tool;
@@ -65,6 +71,9 @@ const tools: Array<{
   { id: 'pan', label: 'Pan canvas', key: 'H', icon: Move },
   { id: 'measure', label: 'Measure', key: 'M', icon: Ruler },
   { id: 'ping', label: 'Ping your party', key: 'P', icon: Compass },
+  { id: 'pin', label: 'Place a map pin', key: '', icon: Flag, gm: true },
+  { id: 'light', label: 'Place a light', key: '', icon: Flame, gm: true },
+  { id: 'wall', label: 'Draw walls', key: 'W', icon: Square, gm: true },
   { id: 'zone', label: 'Mark an area', key: 'Z', icon: Square, gm: true },
   { id: 'fog', label: 'Fog reveal / conceal', key: 'F', icon: Eye, gm: true },
   { id: 'draw', label: 'Freehand drawing', key: 'D', icon: Pencil, gm: true },
@@ -73,9 +82,10 @@ const tools: Array<{
 ];
 export function App() {
   const s = useTable(),
-    scene = s.room.scenes[s.room.activeSceneId],
+    scene = s.room.scenes[s.viewSceneId || s.room.activeSceneId],
     gm = s.self?.role === 'gm';
   const [library, setLibrary] = useState(false);
+  const sceneAction = useConfirmedAction();
   const singlePanel = useMediaQuery('(max-width: 1199px)');
   useEffect(() => {
     if (singlePanel && s.activityOpen) setLibrary(false);
@@ -292,6 +302,9 @@ export function App() {
                     pan: 'Pan',
                     measure: 'Ruler',
                     ping: 'Ping',
+                    pin: 'Pin',
+                    light: 'Light',
+                    wall: 'Walls',
                     zone: 'Areas',
                     fog: 'Fog',
                     draw: 'Draw',
@@ -354,19 +367,26 @@ export function App() {
             {Object.values(s.room.scenes).map((sc) => (
               <button
                 key={sc.id}
+                aria-label={sc.name}
+                aria-description={gm && sc.visibility === 'gm' ? 'GM only' : undefined}
                 className={`scene-card ${scene.id === sc.id ? 'selected' : ''}`}
                 onClick={() => {
-                  if (gm) send({ type: 'SCENE_CHANGE', sceneId: sc.id });
+                  if (gm)
+                    void sceneAction.run(
+                      { type: 'SCENE_CHANGE', sceneId: sc.id, transition: s.transitionSettings },
+                      `Opening ${sc.name}…`,
+                    );
                   else if (!s.self)
                     s.set({ room: { ...s.room, activeSceneId: sc.id }, fitNonce: s.fitNonce + 1 });
                 }}
-                disabled={!!s.self && !gm && sc.id !== scene.id}
+                disabled={!!sceneAction.pending || (!!s.self && !gm && sc.id !== scene.id)}
               >
                 <div className="scene-thumb">
                   <AssetImage asset={sc.map} referrerPolicy="no-referrer" alt="" />
                 </div>
                 <div className="scene-card-caption">
                   <span>{sc.name}</span>
+                  {gm && sc.visibility === 'gm' && <small>GM only</small>}
                   {scene.id === sc.id ? (
                     <span className="scene-active-dot" />
                   ) : (
@@ -376,6 +396,9 @@ export function App() {
               </button>
             ))}
           </div>
+          <ScenePresentation />
+          {sceneAction.pending && <p role="status">{sceneAction.pending}</p>}
+          {sceneAction.error && <p role="alert">{sceneAction.error}</p>}
           <div className="library-divider" />
           <div className="section-heading">
             <h2>Scene tokens</h2>
@@ -390,6 +413,8 @@ export function App() {
             )}
           </div>
           <CharacterList />
+          <PinList />
+          <LightingControls key={scene.id} scene={scene} />
           <div className="library-actions">
             <button
               className="subtle-button"
@@ -414,6 +439,46 @@ export function App() {
       )}
       <main className="table-area">
         <Tabletop />
+        {s.viewSceneId && (
+          <div className="scene-preview-banner" role="status">
+            Preparing {scene.name} · The table remains in {s.room.scenes[s.room.activeSceneId].name}{' '}
+            <button
+              type="button"
+              onClick={() =>
+                s.set({
+                  viewSceneId: null,
+                  selected: null,
+                  selectedIds: [],
+                  selectedPin: null,
+                  pinDraftPoint: null,
+                  previews: {},
+                  fitNonce: s.fitNonce + 1,
+                })
+              }
+            >
+              Return to table
+            </button>
+          </div>
+        )}
+        <PinPanel />
+        {s.proximityCues.length > 0 && (
+          <section className="proximity-cues" aria-label="Proximity cues" aria-live="polite">
+            {s.proximityCues.map((cue) => (
+              <div key={cue.id}>
+                <span>{cue.message}</span>
+                <button
+                  type="button"
+                  aria-label="Dismiss cue"
+                  onClick={() =>
+                    s.set({ proximityCues: s.proximityCues.filter((c) => c.id !== cue.id) })
+                  }
+                >
+                  ×
+                </button>
+              </div>
+            ))}
+          </section>
+        )}
         <div className="table-awareness">
           {s.self && <TurnAwareness />}
           <FirstUseGuide />
@@ -425,10 +490,18 @@ export function App() {
             </p>
           )}
         </div>
-        {!!s.sceneTransition && !s.reducedMotion && (
-          <div key={s.sceneTransition} className="scene-transition" aria-hidden="true">
-            <span className="eyebrow">A NEW CHAPTER</span>
-            <strong>{scene.name}</strong>
+        {!!s.sceneTransition && !s.reducedMotion && s.transitionEffect?.style !== 'none' && (
+          <div
+            key={s.sceneTransition}
+            className={`scene-transition transition-${s.transitionEffect?.style || 'chapter'}`}
+            style={{
+              backgroundColor: s.transitionEffect?.color,
+              animationDuration: `${s.transitionEffect?.duration || 850}ms`,
+            }}
+            aria-hidden="true"
+          >
+            <span className="eyebrow">{s.transitionEffect?.subtitle ?? 'A NEW CHAPTER'}</span>
+            <strong>{s.transitionEffect?.title || scene.name}</strong>
             <span>✧</span>
           </div>
         )}
@@ -598,6 +671,7 @@ function Chronicle() {
                       </span>
                     </button>
                     <DiscordShare roll={r} />
+                    <ApplyRoll roll={r} />
                   </article>
                 ))}
               </div>

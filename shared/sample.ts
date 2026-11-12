@@ -45,6 +45,79 @@ export function sampleScene(id = 'hollow', name = 'The Whispering Hollow'): Scen
     fog: { enabled: false, revealed: [] },
   };
 }
+/** A self-contained offline lighting demonstration; no uploaded assets or database writes. */
+export function torchlitManor(): Scene {
+  const base = sampleScene('manor', 'The Lantern House');
+  const torch = (id: string, x: number, y: number): Token => ({
+    id,
+    name: 'Torch',
+    hideLabel: true,
+    image: { kind: 'builtin', url: 'wisp.svg' },
+    x,
+    y,
+    size: 24,
+    rotation: 0,
+    color: '#f1b765',
+    owners: [],
+    visibility: 'public',
+    light: { radius: 400, color: '#ffb45e', intensity: 0.95 },
+  });
+  const wall = (
+    id: string,
+    x1: number,
+    y1: number,
+    x2: number,
+    y2: number,
+    kind: 'wall' | 'door' = 'wall',
+  ) => ({
+    id,
+    a: { x: x1, y: y1 },
+    b: { x: x2, y: y2 },
+    kind,
+    ...(kind === 'door' ? { open: false } : {}),
+  });
+  return {
+    ...base,
+    map: { kind: 'builtin', url: 'torchlit-manor.svg' },
+    width: 1600,
+    height: 1000,
+    grid: { ...base.grid, enabled: false },
+    lighting: { vision: true, darkness: 0.72 },
+    tokens: {
+      ranger: { ...base.tokens.ranger, x: 520, y: 695, owners: ['*'], resource: undefined },
+      sentinel: {
+        ...base.tokens.sentinel,
+        name: 'Manor sentry',
+        x: 910,
+        y: 345,
+        owners: [],
+        resource: undefined,
+        sight: { range: 370, angle: 70, showCone: true, showToPlayers: true },
+        rotation: 145,
+      },
+      'torch-a': torch('torch-a', 215, 185),
+      'torch-b': torch('torch-b', 702, 185),
+      'torch-c': torch('torch-c', 845, 175),
+      'torch-d': torch('torch-d', 1390, 425),
+      'torch-e': torch('torch-e', 1365, 815),
+      'torch-f': torch('torch-f', 845, 820),
+      'torch-g': torch('torch-g', 215, 815),
+      'torch-h': torch('torch-h', 702, 815),
+    },
+    walls: {
+      north: wall('north', 125, 110, 1475, 110),
+      east: wall('east', 1475, 110, 1475, 890),
+      south: wall('south', 1475, 890, 125, 890),
+      west: wall('west', 125, 890, 125, 110),
+      'hall-north': wall('hall-north', 775, 110, 775, 350),
+      'hall-door': wall('hall-door', 775, 350, 775, 500, 'door'),
+      'hall-south': wall('hall-south', 775, 500, 775, 890),
+      'room-west': wall('room-west', 775, 505, 1050, 505),
+      'room-door': wall('room-door', 1050, 505, 1190, 505, 'door'),
+      'room-east': wall('room-east', 1190, 505, 1475, 505),
+    },
+  };
+}
 export function newRoom(
   id: string,
   ownerId: string,

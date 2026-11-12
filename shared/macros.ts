@@ -1,5 +1,5 @@
 import type { RollTerm } from './model.js';
-import { evaluateDiceTerm, readDiceTerm, type DiceSpec } from './dice.js';
+import { evaluateDiceTerm, readDiceTerm, MAX_STARTING_DICE, type DiceSpec } from './dice.js';
 
 export interface Macro {
   id: string;
@@ -173,8 +173,8 @@ class Parser {
           number = /^\d+(?![\w])/.exec(rest),
           variable = /^[A-Za-z][A-Za-z0-9_]{0,23}(?![\w])/.exec(rest);
         if (die) {
-          if ((this.dice += die.spec.count) > 20)
-            throw new Error('A macro supports up to 20 standard dice in total.');
+          if ((this.dice += die.spec.count) > MAX_STARTING_DICE)
+            throw new Error('A macro supports up to 40 standard dice in total.');
           operand = { kind: 'dice', ...die.spec, label: die.label };
           this.position += die.length;
         } else if (number) {
@@ -274,6 +274,7 @@ export function evaluateMacro(
   variables: Record<string, number>,
   randomInt: (min: number, max: number) => number,
 ): MacroResult {
+  const explosionBudget = { remaining: 20 };
   if (Object.keys(variables).some((key) => !definition.variables.includes(key)))
     throw new Error('Unknown numeric input.');
   for (const name of definition.variables)
@@ -302,7 +303,13 @@ export function evaluateMacro(
         ];
       }
       if (operand.kind === 'dice') {
-        const term = evaluateDiceTerm(operand, direction, operand.label, randomInt);
+        const term = evaluateDiceTerm(
+          operand,
+          direction,
+          operand.label,
+          randomInt,
+          explosionBudget,
+        );
         return [
           {
             ...(labels.length ? { label: labels.join(' · ') } : {}),

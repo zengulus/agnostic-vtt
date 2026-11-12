@@ -4,6 +4,7 @@ import { SnapshotConflictError, type Persistence } from '../server/persistence.j
 import type { AssetStorage } from '../server/assets.js';
 import type { DurableRoom, UploadedAsset } from '../shared/model.js';
 import type { ServerMessage } from '../shared/protocol.js';
+import { sampleScene } from '../shared/sample.js';
 
 class MemoryPersistence implements Persistence {
   rooms = new Map<string, DurableRoom>();
@@ -98,7 +99,7 @@ describe('snapshot ownership and durable image cleanup', () => {
     expect(save).not.toHaveBeenCalled();
     expect((await old.authorize(room.id, owner.id)).members.accepted).toBeDefined();
     expect(() =>
-      old.handle(stale, room.id, { v: 2, type: 'INVITE_ROTATE', actionId: 'stale' }),
+      old.handle(stale, room.id, { v: 7, type: 'INVITE_ROTATE', actionId: 'stale' }),
     ).toThrow('Join');
   });
   it('does not retry rollback snapshots after a concurrent in-flight membership save loses CAS', async () => {
@@ -158,19 +159,19 @@ describe('snapshot ownership and durable image cleanup', () => {
         await second.promise;
         return save(snapshot, version);
       });
-    m.handle(gm, room.id, { v: 2, type: 'INVITE_ROTATE', actionId: 'first' });
+    m.handle(gm, room.id, { v: 7, type: 'INVITE_ROTATE', actionId: 'first' });
     expect(gm.messages.filter((message) => message.type === 'ROOM_SNAPSHOT').at(-1)).toMatchObject({
       savedRevision: 0,
       savePending: true,
     });
-    m.handle(gm, room.id, { v: 2, type: 'INVITE_ROTATE', actionId: 'second' });
+    m.handle(gm, room.id, { v: 7, type: 'INVITE_ROTATE', actionId: 'second' });
     first.resolve();
     await secondStarted.promise;
     expect(gm.messages.filter((message) => message.type === 'SAVED').at(-1)).toMatchObject({
       revision: 0,
       pending: true,
     });
-    m.handle(gm, room.id, { v: 2, type: 'STATE_RESYNC', actionId: 'resync' });
+    m.handle(gm, room.id, { v: 7, type: 'STATE_RESYNC', actionId: 'resync' });
     expect(gm.messages.filter((message) => message.type === 'ROOM_SNAPSHOT').at(-1)).toMatchObject({
       savedRevision: 0,
       savePending: true,
@@ -196,6 +197,59 @@ describe('snapshot ownership and durable image cleanup', () => {
     expect(blobs.remove).toHaveBeenCalledTimes(2);
     await m.flushAll();
     expect(storage.rooms.get(room.id)?.assetCleanup?.[image.id]).toBeUndefined();
+  });
+  it('retains an image used only by a saved encounter until that encounter is deleted', async () => {
+    const blobs = assets(),
+      m = manager(blobs),
+      room = await m.create(owner, 'Encounter assets'),
+      gm = peer(owner.id);
+    await m.join(gm, room.id);
+    await m.registerAsset(room.id, owner.id, image);
+    const token = {
+      ...sampleScene().tokens.ranger,
+      image: { kind: 'uploaded' as const, url: image.id },
+    };
+    m.handle(gm, room.id, {
+      v: 7,
+      actionId: 'token',
+      type: 'TOKEN_UPDATE',
+      sceneId: 'hollow',
+      token,
+    });
+    m.handle(gm, room.id, {
+      v: 7,
+      actionId: 'save',
+      type: 'ENCOUNTER_SAVE',
+      id: 'ambush',
+      name: 'Ambush',
+      sceneId: 'hollow',
+      tokenIds: ['ranger'],
+    });
+    m.handle(gm, room.id, {
+      v: 7,
+      actionId: 'delete-token',
+      type: 'TOKEN_DELETE',
+      sceneId: 'hollow',
+      tokenId: 'ranger',
+    });
+    await m.flushAll();
+    await m.close();
+    const resumed = manager(blobs),
+      nextGm = peer(owner.id);
+    await resumed.join(nextGm, room.id);
+    expect(nextGm.messages.find((message) => message.type === 'ROOM_SNAPSHOT')).toMatchObject({
+      state: { encounters: { ambush: { name: 'Ambush' } } },
+    });
+    await expect(resumed.removeAsset(room.id, image.id, owner.id)).rejects.toThrow(
+      'saved encounter',
+    );
+    resumed.handle(nextGm, room.id, {
+      v: 7,
+      actionId: 'delete-encounter',
+      type: 'ENCOUNTER_DELETE',
+      id: 'ambush',
+    });
+    await expect(resumed.removeAsset(room.id, image.id, owner.id)).resolves.toBeUndefined();
   });
   it('retries failed deletion after hydration and handles a crash before cleanup acknowledgment', async () => {
     const blobs = assets(),

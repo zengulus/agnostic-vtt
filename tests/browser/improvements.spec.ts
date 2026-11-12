@@ -80,7 +80,8 @@ test('disconnected map and grid saves retain their forms and entered values for 
 
 test('rejected scene creation retains the draft', async ({ page }) => {
   await demo(page);
-  for (let i = 0; i < 8; i++)
+  const remaining = 10 - Object.keys((await state(page)).scenes).length;
+  for (let i = 0; i < remaining; i++)
     await action(page, {
       type: 'SCENE_CONFIG',
       create: true,
@@ -303,7 +304,7 @@ test('scene and grid controls stay locked until acknowledgement and unlock on re
       else
         ws.send(
           JSON.stringify({
-            v: 2,
+            v: 7,
             type: 'ERROR',
             actionId: action.actionId,
             message: 'Save rejected for regression check.',

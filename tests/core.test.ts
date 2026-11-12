@@ -7,12 +7,16 @@ import {
   snapPoint,
   clampPoint,
   distance,
+  pathDistance,
 } from '../shared/geometry.js';
 import { validateAsset } from '../shared/assets.js';
 import { projectRoom, tokenVisible } from '../shared/model.js';
 import { newRoom } from '../shared/sample.js';
 import { clientMessageSchema } from '../shared/protocol.js';
 describe('bounded generic dice mathematics', () => {
+  it('supports large bounded pools for complex actions', () => {
+    expect(evaluateDice('40d6', () => 2).total).toBe(80);
+  });
   it('presents each die and positive/negative contribution separately', () => {
     const result = evaluateDice('1d20 + 5 - 2', () => 14);
     expect(result.total).toBe(17);
@@ -43,7 +47,7 @@ describe('bounded generic dice mathematics', () => {
   it.each([
     '1d20++2',
     '0d6',
-    '21d6',
+    '41d6',
     '1d7',
     'Infinity',
     'alert(1)',
@@ -76,6 +80,23 @@ describe('coordinates and assets', () => {
     expect(clampPoint({ x: -10, y: 2000 }, 1600, 1200, 80)).toEqual({ x: 40, y: 1160 });
     expect(distance({ x: 0, y: 0 }, { x: 80, y: 0 }, grid)).toBe(5);
   });
+  it('counts alternating square diagonals across path waypoints', () => {
+    const alternating = {
+      ...grid,
+      enabled: true,
+      type: 'square' as const,
+      measurement: 'alternating' as const,
+    };
+    const points = [
+      { x: 40, y: 40 },
+      { x: 120, y: 120 },
+      { x: 200, y: 200 },
+    ];
+    expect(distance(points[0], points[1], alternating)).toBe(5);
+    expect(pathDistance(points, alternating)).toBe(15);
+    expect(distance(points[0], { x: 280, y: 200 }, alternating)).toBe(20);
+    expect(distance(points[0], points[2], { ...alternating, measurement: 'grid' })).toBe(10);
+  });
   it('allows public HTTPS assets and whitelisted builtins', () => {
     expect(() =>
       validateAsset({ kind: 'external', url: 'https://images.example.com/map.webp' }),
@@ -99,7 +120,7 @@ describe('coordinates and assets', () => {
   it('rejects prototype keys and nonfinite movement at the protocol boundary', () => {
     expect(
       clientMessageSchema.safeParse({
-        v: 2,
+        v: 7,
         type: 'TOKEN_MOVE_COMMIT',
         actionId: 'a',
         sceneId: 'constructor',
@@ -109,7 +130,7 @@ describe('coordinates and assets', () => {
     ).toBe(false);
     expect(
       clientMessageSchema.safeParse({
-        v: 2,
+        v: 7,
         type: 'TOKEN_MOVE_COMMIT',
         actionId: 'a',
         sceneId: 'hollow',

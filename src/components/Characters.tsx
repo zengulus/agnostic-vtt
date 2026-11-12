@@ -8,7 +8,6 @@ import {
   characterControlled,
   characterDigest,
   exportCharacter,
-  parseCharacter,
   refreshNames,
   unavailableAbility,
   type CharacterAbility,
@@ -17,6 +16,10 @@ import {
 import { parseMacro } from '../../shared/macros.js';
 import { MacroResults } from './Macros.js';
 import { DiscordShare } from './DiscordSettings.js';
+import { AbilityEditor } from './AbilityEditor.js';
+import { StatRoll } from './StatRoll.js';
+import { useImportPreview } from '../useImportPreview.js';
+import type { CharacterPreview, PreviewRequest } from '../preview.worker.js';
 
 export function openCharacter(id: string | null = null) {
   useTable
@@ -111,18 +114,21 @@ function ResourceControl({
   busy,
   act,
   controlled,
+  pending,
 }: {
   sheet: CharacterSheet;
   resource: CharacterSheet['resources'][number];
   busy: boolean;
   act: (action: Action) => Promise<boolean>;
   controlled: boolean;
+  pending: string;
 }) {
   const [amount, setAmount] = useState('1');
   const value = Number(amount),
     valid = Number.isInteger(value) && value > 0 && value <= 10000;
   return (
     <div className="sheet-resource">
+      {pending && <span role="status">{pending}</span>}
       <div>
         <strong>{resource.name}</strong>
         <span aria-live="polite">
@@ -149,7 +155,7 @@ function ResourceControl({
               onChange={(e) => setAmount(e.target.value)}
             />
             <button
-              disabled={busy || !valid || !resource.current}
+              disabled={busy || !valid || resource.current <= (resource.min ?? 0)}
               onClick={() =>
                 void act({
                   type: 'CHARACTER_RESOURCE_ADJUST',
@@ -193,15 +199,19 @@ export function CharacterWorkspace() {
   const abilitiesRef = useRef<HTMLElement>(null),
     resourcesRef = useRef<HTMLElement>(null);
   const [busy, setBusy] = useState(false),
+    [pendingMessage, setPendingMessage] = useState(''),
+    [pendingAction, setPendingAction] = useState<Action | null>(null),
     [error, setError] = useState(''),
     [filter, setFilter] = useState(''),
     [availability, setAvailability] = useState('all'),
     [prepared, setPrepared] = useState<CharacterAbility | null>(null),
+    [editingAbility, setEditingAbility] = useState<CharacterAbility | 'new' | null>(null),
     [inputs, setInputs] = useState<Record<string, string>>({}),
     [privateResult, setPrivateResult] = useState(true);
   const [deleting, setDeleting] = useState(false);
   useEffect(() => {
     setPrepared(null);
+    setEditingAbility(null);
     setInputs({});
     setError('');
     setFilter('');
@@ -213,9 +223,19 @@ export function CharacterWorkspace() {
       setPrepared(null);
   }, [sheet, prepared]);
   const connected = s.status === 'live' || s.status === 'demo';
+  const actionInFlight = useRef(false);
   const act = async (action: Action) => {
-    if (busy) return false;
+    if (actionInFlight.current) return false;
+    actionInFlight.current = true;
     setBusy(true);
+    setPendingAction(action);
+    setPendingMessage(
+      action.type === 'CHARACTER_ABILITY_USE'
+        ? `Using ${sheet?.abilities.find((a) => a.id === action.abilityId)?.name || 'ability'}…`
+        : action.type === 'CHARACTER_RESOURCE_ADJUST'
+          ? `Updating ${sheet?.resources.find((r) => r.id === action.resourceId)?.name || 'resource'}…`
+          : 'Updating character…',
+    );
     setError('');
     try {
       await sendAndWait(action);
@@ -224,7 +244,10 @@ export function CharacterWorkspace() {
       setError((error as Error).message);
       return false;
     } finally {
+      actionInFlight.current = false;
       setBusy(false);
+      setPendingMessage('');
+      setPendingAction(null);
     }
   };
   const useAbility = async (ability: CharacterAbility, values: Record<string, number> = {}) => {
@@ -333,6 +356,11 @@ export function CharacterWorkspace() {
           </small>
         </div>
       </div>
+      {pendingMessage &&
+        pendingAction?.type !== 'CHARACTER_ABILITY_USE' &&
+        pendingAction?.type !== 'CHARACTER_RESOURCE_ADJUST' && (
+          <p role="status">{pendingMessage}</p>
+        )}
       <nav className="sheet-sections" aria-label="Character sections">
         <button
           aria-label="Jump to abilities"
@@ -358,45 +386,6 @@ export function CharacterWorkspace() {
           </button>
         )}
       </nav>
-      {sheet.resources.length > 0 && (
-        <section ref={resourcesRef} tabIndex={-1} aria-label="Character resources">
-          <h3>Resources</h3>
-          <div className="sheet-resources">
-            {sheet.resources.map((r) => (
-              <ResourceControl
-                key={sheet.id + r.id}
-                sheet={sheet}
-                resource={r}
-                controlled={controlled}
-                busy={busy || !connected}
-                act={act}
-              />
-            ))}
-          </div>
-        </section>
-      )}
-      {controlled && (
-        <div className="sheet-recovery" aria-label="Refresh character resources">
-          {(['recovery', 'encounter', 'rest'] as const)
-            .filter(
-              (kind) =>
-                sheet.resources.some((r) => r.refresh === kind) ||
-                sheet.abilities.some((a) => a.refresh === kind && a.maxUses),
-            )
-            .map((kind) => (
-              <button
-                key={kind}
-                disabled={busy || !connected}
-                title={`Restore only resources and abilities marked ${refreshNames[kind]}`}
-                onClick={() => void act({ type: 'CHARACTER_REFRESH', id: sheet.id, refresh: kind })}
-              >
-                <RefreshCw size={15} />
-                {kind === 'recovery' ? 'Recover' : kind === 'encounter' ? 'Encounter' : 'Rest'}
-              </button>
-            ))}
-          <small className="sr-only">Each button restores only its matching refresh group.</small>
-        </div>
-      )}
       <section
         ref={abilitiesRef}
         tabIndex={-1}
@@ -475,6 +464,18 @@ export function CharacterWorkspace() {
                     </small>
                     {controlled && (
                       <div className="ability-actions">
+                        <button
+                          type="button"
+                          disabled={busy}
+                          aria-label={`Edit ability ${ability.name}`}
+                          onClick={() => setEditingAbility(ability)}
+                        >
+                          Edit
+                        </button>
+                        {pendingAction?.type === 'CHARACTER_ABILITY_USE' &&
+                          pendingAction.abilityId === ability.id && (
+                            <span role="status">{pendingMessage}</span>
+                          )}
                         <button
                           className="primary-button"
                           disabled={busy || !connected || !!unavailable}
@@ -573,6 +574,65 @@ export function CharacterWorkspace() {
           </div>
         ))}
       </section>
+      {controlled && !editingAbility && (
+        <button type="button" onClick={() => setEditingAbility('new')}>
+          Add ability
+        </button>
+      )}
+      {controlled && <StatRoll key={`sheet-stat-${sheet.id}`} characterIds={[sheet.id]} />}
+      {controlled && editingAbility && (
+        <AbilityEditor
+          key={editingAbility === 'new' ? 'new' : editingAbility.id}
+          sheet={sheet}
+          ability={editingAbility === 'new' ? undefined : editingAbility}
+          close={() => setEditingAbility(null)}
+        />
+      )}
+      {sheet.resources.length > 0 && (
+        <section ref={resourcesRef} tabIndex={-1} aria-label="Character resources">
+          <h3>Resources</h3>
+          <div className="sheet-resources">
+            {sheet.resources.map((r) => (
+              <ResourceControl
+                key={sheet.id + r.id}
+                sheet={sheet}
+                resource={r}
+                controlled={controlled}
+                busy={busy || !connected}
+                pending={
+                  pendingAction?.type === 'CHARACTER_RESOURCE_ADJUST' &&
+                  pendingAction.resourceId === r.id
+                    ? pendingMessage
+                    : ''
+                }
+                act={act}
+              />
+            ))}
+          </div>
+        </section>
+      )}
+      {controlled && (
+        <div className="sheet-recovery" aria-label="Refresh character resources">
+          {(['recovery', 'encounter', 'rest'] as const)
+            .filter(
+              (kind) =>
+                sheet.resources.some((r) => r.refresh === kind) ||
+                sheet.abilities.some((a) => a.refresh === kind && a.maxUses),
+            )
+            .map((kind) => (
+              <button
+                key={kind}
+                disabled={busy || !connected}
+                title={`Restore only resources and abilities marked ${refreshNames[kind]}`}
+                onClick={() => void act({ type: 'CHARACTER_REFRESH', id: sheet.id, refresh: kind })}
+              >
+                <RefreshCw size={15} />
+                {kind === 'recovery' ? 'Recover' : kind === 'encounter' ? 'Encounter' : 'Rest'}
+              </button>
+            ))}
+          <small className="sr-only">Each button restores only its matching refresh group.</small>
+        </div>
+      )}
       {error && (
         <p className="form-error" role="alert">
           {error}
@@ -680,14 +740,12 @@ export function CharacterImportDialog() {
     [visibility, setVisibility] = useState<'public' | 'private'>(original?.visibility || 'private'),
     [error, setError] = useState(''),
     [busy, setBusy] = useState(false);
-  const preview = useMemo(() => {
-    if (!text.trim()) return null;
-    try {
-      return { sheet: parseCharacter(text), error: '' };
-    } catch (error) {
-      return { sheet: null, error: (error as Error).message };
-    }
-  }, [text]);
+  const previewRequest = useMemo<PreviewRequest | null>(
+    () => (text.trim() ? { kind: 'character', text } : null),
+    [text],
+  );
+  const previewState = useImportPreview<CharacterPreview>(previewRequest);
+  const preview = previewState.value;
   const validContext = () => {
     const now = useTable.getState();
     return (
@@ -810,6 +868,12 @@ export function CharacterImportDialog() {
           an existing sheet replaces its text and counters; export includes the current counters.
         </p>
       </details>
+      {previewState.pending && <p role="status">Preparing character preview…</p>}
+      {previewState.error && (
+        <p className="form-error" role="alert">
+          {previewState.error}
+        </p>
+      )}
       {preview?.error && (
         <p className="form-error" role="alert">
           {preview.error}

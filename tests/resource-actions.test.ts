@@ -4,7 +4,7 @@ import { prepareAction } from '../shared/actions.js';
 import { applyChanges } from '../shared/state.js';
 import { clientMessageSchema, type Action } from '../shared/protocol.js';
 const message = (action: Action) =>
-  clientMessageSchema.parse({ v: 2, actionId: 'test', ...action });
+  clientMessageSchema.parse({ v: 7, actionId: 'test', ...action });
 const action = (delta: number): Action => ({
   type: 'TOKEN_RESOURCE_ADJUST',
   sceneId: 'hollow',
@@ -18,6 +18,15 @@ function setup() {
   return room;
 }
 describe('controller resource adjustments', () => {
+  it('honours an explicitly configured negative minimum', () => {
+    const room = setup();
+    room.state.scenes.hollow.tokens.ranger.resource!.min = -10;
+    const next = applyChanges(
+      room.state,
+      prepareAction(room, { id: 'player', name: 'Player' }, message(action(-100)), () => 1),
+    );
+    expect(next.scenes.hollow.tokens.ranger.resource?.value).toBe(-10);
+  });
   it('adjusts only the current value and preserves concurrent moves and other fields', () => {
     const room = setup(),
       token = room.state.scenes.hollow.tokens.ranger;
@@ -76,5 +85,24 @@ describe('controller resource adjustments', () => {
   it('rejects nonfinite and excessive deltas at the protocol boundary', () => {
     for (const delta of [NaN, Infinity, 10001, -10001])
       expect(() => message(action(delta))).toThrow();
+  });
+  it('rejects a changed resource identity while allowing concurrent value changes', () => {
+    const room = setup(),
+      token = room.state.scenes.hollow.tokens.ranger;
+    const op: Action = {
+      type: 'TOKEN_RESOURCE_ADJUST',
+      sceneId: 'hollow',
+      tokenId: 'ranger',
+      delta: -1,
+      expected: { characterId: null, resourceId: null, label: 'Resolve' },
+    };
+    token.resource!.value = 4;
+    expect(() =>
+      prepareAction(room, { id: 'player', name: 'Player' }, message(op), () => 1),
+    ).not.toThrow();
+    token.resource!.label = 'Mana';
+    expect(() =>
+      prepareAction(room, { id: 'player', name: 'Player' }, message(op), () => 1),
+    ).toThrow('target resource changed');
   });
 });

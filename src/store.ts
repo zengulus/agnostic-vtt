@@ -1,12 +1,24 @@
 import { create } from 'zustand';
 import { z } from 'zod';
-import type { Point, Presence, Roll, RoomState } from '../shared/model.js';
+import type { Point, Presence, Roll, RoomState, SceneTransition } from '../shared/model.js';
 import { sampleScene } from '../shared/sample.js';
 import type { Camera } from '../shared/geometry.js';
 import { dicePreferencesSchema, type DicePreferences } from '../shared/diceThemes.js';
 import type { DiscordStatus, HistoryStatus } from '../shared/protocol.js';
+import { lightPresets, type LightDraft } from './lightPresets.js';
 export type Tool =
-  'select' | 'pan' | 'measure' | 'ping' | 'zone' | 'fog' | 'draw' | 'text' | 'erase';
+  | 'select'
+  | 'pan'
+  | 'measure'
+  | 'ping'
+  | 'pin'
+  | 'light'
+  | 'wall'
+  | 'zone'
+  | 'fog'
+  | 'draw'
+  | 'text'
+  | 'erase';
 export type Dialog =
   | 'launch'
   | 'map'
@@ -58,7 +70,7 @@ interface UIState {
   dialog: Dialog;
   error: string | null;
   previews: Record<string, Point>;
-  pings: Array<Point & { at: number }>;
+  pings: Array<Point & { at: number; userId?: string; name?: string }>;
   presentation: Roll | null;
   rollQueue: Roll[];
   reducedMotion: boolean;
@@ -72,7 +84,11 @@ interface UIState {
   discord: DiscordStatus;
   deliveries: Record<string, { status: 'queued' | 'sent' | 'failed'; message: string }>;
   zoneShape: 'rectangle' | 'circle' | 'polygon' | 'line' | 'cone';
+  wallKind: 'wall' | 'door' | 'window';
+  lightDraft: LightDraft;
   zoneSnap: boolean;
+  zoneLabel: string;
+  zoneVisibility: 'public' | 'gm';
   fogShape: 'circle' | 'rectangle' | 'polygon';
   fogMode: 'reveal' | 'conceal';
   brushSize: number;
@@ -83,6 +99,12 @@ interface UIState {
   annotationVisibility: 'public' | 'gm';
   measurementShape: 'distance' | 'path' | 'radius' | 'cone' | 'area';
   sceneTransition: number;
+  selectedPin: string | null;
+  viewSceneId: string | null;
+  pinDraftPoint: Point | null;
+  proximityCues: Array<{ id: string; message: string }>;
+  transitionSettings: SceneTransition;
+  transitionEffect: SceneTransition | null;
   set: (value: Partial<UIState>) => void;
   finishRoll: () => void;
 }
@@ -139,7 +161,11 @@ export const useTable = create<UIState>((set, get) => ({
   discord: { configured: false, enabled: false, mode: 'automatic', canManage: false },
   deliveries: {},
   zoneShape: 'rectangle',
+  wallKind: 'wall',
+  lightDraft: structuredClone(lightPresets.torch),
   zoneSnap: false,
+  zoneLabel: '',
+  zoneVisibility: 'public',
   fogShape: 'circle',
   fogMode: 'reveal',
   brushSize: 130,
@@ -150,6 +176,18 @@ export const useTable = create<UIState>((set, get) => ({
   annotationVisibility: 'public',
   measurementShape: 'distance',
   sceneTransition: 0,
+  selectedPin: null,
+  viewSceneId: null,
+  pinDraftPoint: null,
+  proximityCues: [],
+  transitionSettings: {
+    style: 'chapter',
+    title: '',
+    subtitle: 'A NEW CHAPTER',
+    duration: 1800,
+    color: '#08140d',
+  },
+  transitionEffect: null,
   set,
   finishRoll: () => {
     const [presentation, ...rollQueue] = get().rollQueue;

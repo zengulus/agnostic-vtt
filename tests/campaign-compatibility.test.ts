@@ -8,7 +8,7 @@ import { applyChanges } from '../shared/state.js';
 it('rejects the removed chat action from older clients', () => {
   expect(
     clientMessageSchema.safeParse({
-      v: 2,
+      v: 7,
       actionId: 'old-client',
       type: 'CHAT_SEND',
       text: 'Hello',
@@ -23,7 +23,7 @@ it('keeps legacy campaign data private while existing gameplay still works', () 
     room,
     { id: 'owner', name: 'Owner' },
     {
-      v: 2,
+      v: 7,
       actionId: 'move',
       type: 'TOKEN_MOVE_COMMIT',
       sceneId: 'hollow',

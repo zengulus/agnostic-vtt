@@ -365,3 +365,7 @@
   padding: 0;
   line-height: 1;
 }
+.library .lighting-controls label,
+.library .scene-presentation-settings label {
+  color: #493928;
+}

@@ -8,7 +8,7 @@ import { applyTokenEdits, tokenEdits } from '../shared/tokenEdits.js';
 describe('conflict-checked token form edits', () => {
   const create = () => newRoom('testing', 'gm', 'Keeper', 'Test', 'invite');
   const message = (action: Action) =>
-    clientMessageSchema.parse({ ...action, v: 2, actionId: 'edit' });
+    clientMessageSchema.parse({ ...action, v: 7, actionId: 'edit' });
   it('rejects create-only collisions atomically while preserving legacy upsert behavior', () => {
     const room = create(),
       original = room.state.scenes.hollow.tokens.ranger;
@@ -140,7 +140,7 @@ describe('conflict-checked token form edits', () => {
     (field) => {
       expect(
         clientMessageSchema.safeParse({
-          v: 2,
+          v: 7,
           actionId: 'edit',
           type: 'TOKEN_PATCH',
           sceneId: 'hollow',
@@ -152,7 +152,7 @@ describe('conflict-checked token form edits', () => {
   );
   it('validates proposed values and requires a baseline and at least one changed field', () => {
     const action = {
-      v: 2,
+      v: 7,
       actionId: 'edit',
       type: 'TOKEN_PATCH',
       sceneId: 'hollow',

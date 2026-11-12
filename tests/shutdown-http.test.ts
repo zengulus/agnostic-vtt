@@ -59,7 +59,7 @@ it('closes HTTP without waiting 30 seconds for an upload and saves another campa
     const peer: Peer = { identity: owner, send() {} };
     await manager.join(peer, second.id);
     manager.handle(peer, second.id, {
-      v: 2,
+      v: 7,
       actionId: 'move',
       type: 'TOKEN_MOVE_COMMIT',
       sceneId: 'hollow',

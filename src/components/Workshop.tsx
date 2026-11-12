@@ -17,7 +17,23 @@ import {
 import { useTable } from '../store.js';
 import { deleteImage, send } from '../connection.js';
 import { AssetImage } from '../assets.js';
-import { emptyTracker, type Annotation, type Tracker, type Zone } from '../../shared/model.js';
+import {
+  emptyTracker,
+  zoneDigest,
+  type Annotation,
+  type Tracker,
+  type Zone,
+} from '../../shared/model.js';
+import { useConfirmedAction } from '../useConfirmedAction.js';
+import { TokenStatuses } from './TokenStatuses.js';
+import { Encounters } from './Encounters.js';
+import { ProximityEditor } from './ProximityEditor.js';
+import { LightFields } from './LightFields.js';
+import { LightingControls } from './Lighting.js';
+import { PinList } from './Pins.js';
+import { ScenePresentation } from './ScenePresentation.js';
+import { useMediaQuery } from '../useMediaQuery.js';
+import { lightSchema } from '../../shared/model.js';
 
 export function HistoryControls() {
   const s = useTable();
@@ -50,11 +66,137 @@ export function ToolOptions({
   clearDraft: () => void;
 }) {
   const s = useTable();
-  if (!['zone', 'fog', 'draw', 'text', 'erase', 'measure'].includes(s.tool)) return null;
+  const compact = useMediaQuery('(max-width: 620px)');
+  const [lightX, setLightX] = useState(200),
+    [lightY, setLightY] = useState(200);
+  const placeAction = useConfirmedAction();
+  if (!['light', 'wall', 'zone', 'fog', 'draw', 'text', 'erase', 'measure'].includes(s.tool))
+    return null;
   return (
     <div className="tool-options" aria-label="Active tool options">
+      {s.tool === 'light' && (
+        <>
+          <p>
+            Click to place a light. For a directional beam, drag from its position to aim. Switch to
+            Move to reposition it.
+          </p>
+          {compact ? (
+            <details className="light-settings">
+              <summary>Light settings · {s.lightDraft.name}</summary>
+              <LightFields
+                prefix="New light"
+                value={s.lightDraft}
+                onChange={(lightDraft) => s.set({ lightDraft })}
+                showHint={false}
+              />
+            </details>
+          ) : (
+            <LightFields
+              prefix="New light"
+              value={s.lightDraft}
+              onChange={(lightDraft) => s.set({ lightDraft })}
+              showHint={false}
+            />
+          )}
+          <details className="light-position">
+            <summary>Place by coordinates</summary>
+            <label>
+              Map X{' '}
+              <input
+                aria-label="Light position X"
+                type="number"
+                value={lightX}
+                onChange={(e) => setLightX(Number(e.target.value))}
+              />
+            </label>
+            <label>
+              Map Y{' '}
+              <input
+                aria-label="Light position Y"
+                type="number"
+                value={lightY}
+                onChange={(e) => setLightY(Number(e.target.value))}
+              />
+            </label>
+            <button
+              type="button"
+              disabled={
+                !!placeAction.pending ||
+                !s.lightDraft.name.trim() ||
+                !lightSchema.safeParse(s.lightDraft.light).success ||
+                !Number.isFinite(lightX) ||
+                !Number.isFinite(lightY)
+              }
+              onClick={() => {
+                const scene = s.room.scenes[s.viewSceneId || s.room.activeSceneId];
+                void placeAction.run(
+                  {
+                    type: 'TOKEN_UPDATE',
+                    sceneId: scene.id,
+                    createOnly: true,
+                    token: {
+                      id: crypto.randomUUID(),
+                      name: s.lightDraft.name.trim(),
+                      hideLabel: true,
+                      image: { kind: 'builtin', url: 'wisp.svg' },
+                      x: lightX,
+                      y: lightY,
+                      size: 24,
+                      rotation: 0,
+                      color: s.lightDraft.light.color,
+                      owners: [],
+                      visibility: 'public',
+                      light: { ...s.lightDraft.light },
+                    },
+                  },
+                  'Placing light…',
+                );
+              }}
+            >
+              Place light
+            </button>
+            {placeAction.pending && <span role="status">{placeAction.pending}</span>}
+            {placeAction.error && <span role="alert">{placeAction.error}</span>}
+          </details>
+        </>
+      )}
+      {s.tool === 'wall' && (
+        <label>
+          Wall type{' '}
+          <select
+            aria-label="Wall type"
+            value={s.wallKind}
+            onChange={(e) => s.set({ wallKind: e.target.value as typeof s.wallKind })}
+          >
+            <option value="wall">Opaque wall</option>
+            <option value="door">Door</option>
+            <option value="window">Window</option>
+          </select>
+          <small>Drag to draw. Windows and open doors do not block sight.</small>
+        </label>
+      )}
       {s.tool === 'zone' && (
         <>
+          <label>
+            Region name
+            <input
+              aria-label="New region name"
+              maxLength={48}
+              value={s.zoneLabel}
+              onChange={(e) => s.set({ zoneLabel: e.target.value })}
+            />
+          </label>
+          <label>
+            Visibility
+            <select
+              aria-label="New region visibility"
+              value={s.zoneVisibility}
+              onChange={(e) => s.set({ zoneVisibility: e.target.value as 'public' | 'gm' })}
+            >
+              <option value="public">Party</option>
+              <option value="gm">GM only</option>
+            </select>
+          </label>
           <label>
             Shape
             <select
@@ -222,9 +364,10 @@ export function ToolOptions({
 }
 export function TokenLibraryDialog() {
   const s = useTable(),
-    scene = s.room.scenes[s.room.activeSceneId],
+    scene = s.room.scenes[s.viewSceneId || s.room.activeSceneId],
     selected = s.selected ? scene.tokens[s.selected] : null,
     gm = s.self?.role === 'gm';
+  const sceneAction = useConfirmedAction();
   return (
     <>
       <div className="library-actions">
@@ -257,22 +400,40 @@ export function TokenLibraryDialog() {
       </div>
       <h3>My characters & scene characters</h3>
       <CharacterList />
+      <PinList />
+      <LightingControls key={scene.id} scene={scene} />
+      <ScenePresentation />
       <div className="scene-switcher">
         {Object.values(s.room.scenes).map((sc) => (
           <button
             key={sc.id}
             className="subtle-button"
-            disabled={!gm || sc.id === scene.id}
-            onClick={() => {
-              send({ type: 'SCENE_CHANGE', sceneId: sc.id });
-              s.set({ dialog: null });
+            disabled={!gm || sc.id === s.room.activeSceneId || !!sceneAction.pending}
+            onClick={async () => {
+              if (
+                (await sceneAction.run(
+                  { type: 'SCENE_CHANGE', sceneId: sc.id, transition: s.transitionSettings },
+                  `Opening ${sc.name}…`,
+                )) &&
+                useTable.getState().room.id === s.room.id &&
+                useTable.getState().sessionNonce === s.sessionNonce &&
+                useTable.getState().dialog === 'library'
+              )
+                s.set({ dialog: null });
             }}
           >
             {sc.name}
           </button>
         ))}
       </div>
+      {sceneAction.pending && <p role="status">{sceneAction.pending}</p>}
+      {sceneAction.error && (
+        <p role="alert" className="form-error">
+          {sceneAction.error}
+        </p>
+      )}
       <HistoryControls />
+      <Encounters />
       {gm && selected && (
         <button
           className="primary"
@@ -339,8 +500,9 @@ export function AssetManagerDialog() {
   const s = useTable(),
     [error, setError] = useState(''),
     [busy, setBusy] = useState('');
+  const mapAction = useConfirmedAction();
   const assets = Object.values(s.room.assets || {}),
-    scene = s.room.scenes[s.room.activeSceneId];
+    scene = s.room.scenes[s.viewSceneId || s.room.activeSceneId];
   return (
     <>
       <p className="modal-description">
@@ -362,17 +524,28 @@ export function AssetManagerDialog() {
             <div>
               <button
                 aria-label={`Use ${a.name} as map`}
-                onClick={() => {
-                  send({
-                    type: 'SCENE_CONFIG',
-                    sceneId: scene.id,
-                    name: scene.name,
-                    map: { kind: 'uploaded', url: a.id },
-                    width: Math.max(200, a.width),
-                    height: Math.max(200, a.height),
-                    create: false,
-                  });
-                  s.set({ dialog: null, fitNonce: s.fitNonce + 1 });
+                disabled={!!mapAction.pending || !!busy}
+                onClick={async () => {
+                  const confirmed = await mapAction.run(
+                    {
+                      type: 'SCENE_CONFIG',
+                      sceneId: scene.id,
+                      name: scene.name,
+                      map: { kind: 'uploaded', url: a.id },
+                      width: Math.max(200, a.width),
+                      height: Math.max(200, a.height),
+                      create: false,
+                    },
+                    'Updating map…',
+                  );
+                  const current = useTable.getState();
+                  if (
+                    confirmed &&
+                    current.dialog === 'assets' &&
+                    current.room.id === s.room.id &&
+                    current.sessionNonce === s.sessionNonce
+                  )
+                    current.set({ dialog: null, fitNonce: current.fitNonce + 1 });
                 }}
               >
                 <Image size={13} />
@@ -380,7 +553,7 @@ export function AssetManagerDialog() {
               </button>
               <button
                 aria-label={`Delete image ${a.name}`}
-                disabled={!!busy}
+                disabled={!!busy || !!mapAction.pending}
                 onClick={async () => {
                   setBusy(a.id);
                   setError('');
@@ -399,6 +572,13 @@ export function AssetManagerDialog() {
           </div>
         ))}
       </div>
+      {busy && <p role="status">Deleting image…</p>}
+      {mapAction.pending && <p role="status">{mapAction.pending}</p>}
+      {mapAction.error && (
+        <p role="alert" className="form-error">
+          {mapAction.error}
+        </p>
+      )}
       {!assets.length && (
         <p className="field-note">
           Choose Upload image in a map or token dialog to add your first asset.
@@ -425,12 +605,25 @@ export function AssetManagerDialog() {
 }
 export function ObjectsDialog() {
   const s = useTable(),
-    scene = s.room.scenes[s.room.activeSceneId],
+    scene = s.room.scenes[s.viewSceneId || s.room.activeSceneId],
     gm = s.self?.role === 'gm',
     [editing, setEditing] = useState<Zone | Annotation | null>(null),
-    [tags, setTags] = useState('');
+    [tags, setTags] = useState(''),
+    [expected, setExpected] = useState('');
+  const action = useConfirmedAction();
   const zone = editing && 'shape' in editing ? editing : null,
     annotation = editing && 'kind' in editing ? editing : null;
+  const reshape = (z: Zone, x: number, y: number, width: number, height: number): Zone => ({
+    ...z,
+    x,
+    y,
+    width,
+    height,
+    points: z.points?.map((p) => ({
+      x: x + ((p.x - z.x) * width) / z.width,
+      y: y + ((p.y - z.y) * height) / z.height,
+    })),
+  });
   return (
     <>
       <p className="modal-description">
@@ -441,18 +634,23 @@ export function ObjectsDialog() {
         {Object.values(scene.zones).map((z) => (
           <button
             key={z.id}
+            disabled={!!action.pending}
             onClick={() => {
               setEditing(z);
+              setExpected(zoneDigest(z));
               setTags((z.tags || []).join(', '));
             }}
           >
             <span style={{ background: z.color }} />
             {z.label || 'Unnamed region'}
-            <small>{z.shape}</small>
+            <small>
+              {z.shape}
+              {z.note ? ` · ${z.note}` : ''}
+            </small>
           </button>
         ))}
         {Object.values(scene.annotations || {}).map((a) => (
-          <button key={a.id} onClick={() => setEditing(a)}>
+          <button key={a.id} disabled={!!action.pending} onClick={() => setEditing(a)}>
             <span style={{ background: a.color }} />
             {a.kind === 'text' ? a.text.slice(0, 30) : 'Freehand drawing'}
             <small>{a.visibility === 'gm' ? 'GM only' : a.kind}</small>
@@ -461,105 +659,275 @@ export function ObjectsDialog() {
       </div>
       {editing && (
         <form
-          onSubmit={(e) => {
+          onSubmit={async (e) => {
             e.preventDefault();
             if (!gm) return;
-            if (zone)
-              send({
-                type: 'ZONE_UPDATE',
-                sceneId: scene.id,
-                zone: {
-                  ...zone,
-                  tags: tags
-                    .split(',')
-                    .map((t) => t.trim().slice(0, 24))
-                    .filter(Boolean)
-                    .slice(0, 10),
+            if (
+              zone &&
+              (await action.run(
+                {
+                  type: 'ZONE_UPDATE',
+                  sceneId: scene.id,
+                  expected,
+                  zone: {
+                    ...zone,
+                    tags: tags
+                      .split(',')
+                      .map((t) => t.trim().slice(0, 24))
+                      .filter(Boolean)
+                      .slice(0, 10),
+                  },
                 },
-              });
-            if (annotation) send({ type: 'ANNOTATION_UPDATE', sceneId: scene.id, annotation });
-            setEditing(null);
+                'Saving region…',
+              ))
+            )
+              setEditing(null);
+            if (
+              annotation &&
+              (await action.run(
+                { type: 'ANNOTATION_UPDATE', sceneId: scene.id, annotation },
+                'Saving drawing…',
+              ))
+            )
+              setEditing(null);
           }}
         >
-          {zone && (
-            <>
-              <label>
-                Region label
-                <input
-                  value={zone.label}
-                  maxLength={48}
-                  onChange={(e) => setEditing({ ...zone, label: e.target.value })}
+          <fieldset
+            disabled={!!action.pending}
+            style={{ border: 0, padding: 0, margin: 0, minWidth: 0 }}
+          >
+            {zone && (
+              <>
+                <label>
+                  Region label
+                  <input
+                    value={zone.label}
+                    maxLength={48}
+                    onChange={(e) => setEditing({ ...zone, label: e.target.value })}
+                  />
+                </label>
+                <label>
+                  Tags · comma separated
+                  <input value={tags} onChange={(e) => setTags(e.target.value)} maxLength={240} />
+                </label>
+                <label>
+                  Duration or note
+                  <input
+                    value={zone.note || ''}
+                    maxLength={120}
+                    onChange={(e) => setEditing({ ...zone, note: e.target.value })}
+                  />
+                </label>
+                <label>
+                  Visibility
+                  <select
+                    value={zone.visibility || 'public'}
+                    onChange={(e) =>
+                      setEditing({ ...zone, visibility: e.target.value as 'public' | 'gm' })
+                    }
+                  >
+                    <option value="public">Party</option>
+                    <option value="gm">GM only</option>
+                  </select>
+                </label>
+                <ProximityEditor
+                  value={zone.proximity}
+                  onChange={(proximity) => setEditing({ ...zone, proximity })}
                 />
-              </label>
-              <label>
-                Tags · comma separated
-                <input value={tags} onChange={(e) => setTags(e.target.value)} maxLength={240} />
-              </label>
-              <label>
-                Opacity
-                <input
-                  type="range"
-                  min={0}
-                  max={1}
-                  step={0.05}
-                  value={zone.opacity ?? 0.2}
-                  onChange={(e) => setEditing({ ...zone, opacity: Number(e.target.value) })}
-                />
-              </label>
-            </>
-          )}
-          {annotation && (
-            <>
-              <label>
-                Text
-                <input
-                  value={annotation.text}
-                  maxLength={300}
-                  onChange={(e) => setEditing({ ...annotation, text: e.target.value })}
-                />
-              </label>
-              <label>
-                Visibility
-                <select
-                  value={annotation.visibility}
-                  onChange={(e) =>
-                    setEditing({ ...annotation, visibility: e.target.value as 'public' | 'gm' })
-                  }
+                <label>
+                  Follow token
+                  <select
+                    aria-label="Region follows token"
+                    value={zone.anchorTokenId || ''}
+                    onChange={(e) =>
+                      setEditing({ ...zone, anchorTokenId: e.target.value || undefined })
+                    }
+                  >
+                    <option value="">Fixed region</option>
+                    {Object.values(scene.tokens).map((token) => (
+                      <option key={token.id} value={token.id}>
+                        {token.name}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+                <div className="form-row">
+                  {(['x', 'y', 'width', 'height'] as const).map((key) => (
+                    <label key={key}>
+                      {key}
+                      <input
+                        aria-label={`Region ${key}`}
+                        type="number"
+                        step="any"
+                        min={key === 'width' || key === 'height' ? 1 : undefined}
+                        max={key === 'width' || key === 'height' ? 5000 : undefined}
+                        value={zone[key]}
+                        onChange={(e) => {
+                          const value = Number(e.target.value);
+                          if (
+                            !Number.isFinite(value) ||
+                            ((key === 'width' || key === 'height') && (value < 1 || value > 5000))
+                          )
+                            return;
+                          const values = {
+                            x: zone.x,
+                            y: zone.y,
+                            width: zone.width,
+                            height: zone.height,
+                            [key]: value,
+                          };
+                          setEditing(
+                            reshape(zone, values.x, values.y, values.width, values.height),
+                          );
+                        }}
+                      />
+                    </label>
+                  ))}
+                </div>
+                <label>
+                  Expires on
+                  <select
+                    aria-label="Region expires on"
+                    value={zone.duration?.participantId || ''}
+                    onChange={(e) =>
+                      setEditing({
+                        ...zone,
+                        duration: e.target.value
+                          ? {
+                              participantId: e.target.value,
+                              remaining: zone.duration?.remaining || 1,
+                              phase: zone.duration?.phase || 'start',
+                            }
+                          : undefined,
+                      })
+                    }
+                  >
+                    <option value="">Manually</option>
+                    {(s.room.tracker?.entries || []).map((entry) => (
+                      <option value={entry.id} key={entry.id}>
+                        {entry.name}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+                {zone.duration && (
+                  <div className="form-row">
+                    <label>
+                      Rounds
+                      <input
+                        aria-label="Region rounds"
+                        type="number"
+                        min={1}
+                        max={10000}
+                        value={zone.duration.remaining}
+                        onChange={(e) =>
+                          setEditing({
+                            ...zone,
+                            duration: { ...zone.duration!, remaining: Number(e.target.value) },
+                          })
+                        }
+                      />
+                    </label>
+                    <label>
+                      Turn phase
+                      <select
+                        aria-label="Region turn phase"
+                        value={zone.duration.phase}
+                        onChange={(e) =>
+                          setEditing({
+                            ...zone,
+                            duration: {
+                              ...zone.duration!,
+                              phase: e.target.value as 'start' | 'end',
+                            },
+                          })
+                        }
+                      >
+                        <option value="start">Start</option>
+                        <option value="end">End</option>
+                      </select>
+                    </label>
+                  </div>
+                )}
+                <label>
+                  Opacity
+                  <input
+                    type="range"
+                    min={0}
+                    max={1}
+                    step={0.05}
+                    value={zone.opacity ?? 0.2}
+                    onChange={(e) => setEditing({ ...zone, opacity: Number(e.target.value) })}
+                  />
+                </label>
+              </>
+            )}
+            {annotation && (
+              <>
+                <label>
+                  Text
+                  <input
+                    value={annotation.text}
+                    maxLength={300}
+                    onChange={(e) => setEditing({ ...annotation, text: e.target.value })}
+                  />
+                </label>
+                <label>
+                  Visibility
+                  <select
+                    value={annotation.visibility}
+                    onChange={(e) =>
+                      setEditing({ ...annotation, visibility: e.target.value as 'public' | 'gm' })
+                    }
+                  >
+                    <option value="public">Party</option>
+                    <option value="gm">GM only</option>
+                  </select>
+                </label>
+              </>
+            )}
+            <label>
+              Colour
+              <input
+                type="color"
+                value={editing.color}
+                onChange={(e) => setEditing({ ...editing, color: e.target.value })}
+              />
+            </label>
+            {gm && (
+              <div className="form-row">
+                <button className="primary modal-submit">
+                  <Save size={15} />
+                  Save object
+                </button>
+                <button
+                  type="button"
+                  className="modal-submit"
+                  onClick={async () => {
+                    const request = zone
+                      ? { type: 'ZONE_DELETE' as const, sceneId: scene.id, id: zone.id }
+                      : annotation
+                        ? {
+                            type: 'ANNOTATION_DELETE' as const,
+                            sceneId: scene.id,
+                            id: annotation.id,
+                          }
+                        : null;
+                    if (request && (await action.run(request, 'Deleting object…')))
+                      setEditing(null);
+                  }}
                 >
-                  <option value="public">Party</option>
-                  <option value="gm">GM only</option>
-                </select>
-              </label>
-            </>
-          )}
-          <label>
-            Colour
-            <input
-              type="color"
-              value={editing.color}
-              onChange={(e) => setEditing({ ...editing, color: e.target.value })}
-            />
-          </label>
-          {gm && (
-            <div className="form-row">
-              <button className="primary modal-submit">
-                <Save size={15} />
-                Save object
-              </button>
-              <button
-                type="button"
-                className="modal-submit"
-                onClick={() => {
-                  if (zone) send({ type: 'ZONE_DELETE', sceneId: scene.id, id: zone.id });
-                  if (annotation)
-                    send({ type: 'ANNOTATION_DELETE', sceneId: scene.id, id: annotation.id });
-                  setEditing(null);
-                }}
-              >
-                <Trash2 size={15} />
-                Delete
-              </button>
-            </div>
+                  <Trash2 size={15} />
+                  Delete
+                </button>
+              </div>
+            )}
+          </fieldset>
+          {action.pending && <p role="status">{action.pending}</p>}
+          {action.error && (
+            <p role="alert" className="form-error">
+              {action.error}
+            </p>
           )}
         </form>
       )}
@@ -578,9 +946,11 @@ export function TrackerPanel() {
     [hidden, setHidden] = useState(false),
     [editing, setEditing] = useState<string | null>(null),
     [tokenId, setTokenId] = useState<string | undefined>();
-  const scene = s.room.scenes[s.room.activeSceneId],
+  const action = useConfirmedAction();
+  const scene = s.room.scenes[s.viewSceneId || s.room.activeSceneId],
     selected = s.selected ? scene.tokens[s.selected] : undefined;
-  const update = (next: Tracker) => send({ type: 'TRACKER_UPDATE', tracker: next });
+  const update = (next: Tracker) =>
+    action.run({ type: 'TRACKER_UPDATE', tracker: next }, 'Updating turns…');
   const shift = (id: string, delta: number) => {
     const entries = [...tracker.entries],
       i = entries.findIndex((e) => e.id === id),
@@ -591,242 +961,265 @@ export function TrackerPanel() {
   };
   return (
     <div className="tracker-panel">
-      <div className="tracker-heading">
-        <Flag size={16} />
-        <span>Round {tracker.round}</span>
+      {action.pending && <p role="status">{action.pending}</p>}
+      {action.error && (
+        <p role="alert" className="form-error">
+          {action.error}
+        </p>
+      )}
+      <fieldset
+        disabled={!!action.pending}
+        style={{ border: 0, padding: 0, margin: 0, minWidth: 0 }}
+      >
+        <div className="tracker-heading">
+          <Flag size={16} />
+          <span>Round {tracker.round}</span>
+          {gm && (
+            <div>
+              <button
+                aria-label="Previous turn"
+                disabled={!tracker.entries.length}
+                onClick={() =>
+                  void action.run({ type: 'TRACKER_ADVANCE', direction: -1 }, 'Changing turn…')
+                }
+              >
+                <ArrowUp size={15} />
+              </button>
+              <button
+                aria-label="Next turn"
+                disabled={!tracker.entries.length}
+                onClick={() =>
+                  void action.run({ type: 'TRACKER_ADVANCE', direction: 1 }, 'Changing turn…')
+                }
+              >
+                <ChevronRight size={17} />
+              </button>
+            </div>
+          )}
+        </div>
         {gm && (
-          <div>
-            <button
-              aria-label="Previous turn"
-              disabled={!tracker.entries.length}
-              onClick={() => send({ type: 'TRACKER_ADVANCE', direction: -1 })}
+          <label>
+            Ordering
+            <select
+              aria-label="Tracker ordering"
+              value={tracker.order}
+              onChange={(e) => {
+                const order = e.target.value as Tracker['order'],
+                  entries = [...tracker.entries];
+                if (order !== 'manual')
+                  entries.sort((a, b) =>
+                    order === 'descending' ? b.value - a.value : a.value - b.value,
+                  );
+                update({ ...tracker, order, entries });
+              }}
             >
-              <ArrowUp size={15} />
-            </button>
-            <button
-              aria-label="Next turn"
-              disabled={!tracker.entries.length}
-              onClick={() => send({ type: 'TRACKER_ADVANCE', direction: 1 })}
-            >
-              <ChevronRight size={17} />
-            </button>
-          </div>
+              <option value="manual">Manual</option>
+              <option value="descending">Highest first</option>
+              <option value="ascending">Lowest first</option>
+            </select>
+          </label>
         )}
-      </div>
-      {gm && (
-        <label>
-          Ordering
-          <select
-            aria-label="Tracker ordering"
-            value={tracker.order}
-            onChange={(e) => {
-              const order = e.target.value as Tracker['order'],
-                entries = [...tracker.entries];
-              if (order !== 'manual')
+        <div className="tracker-entries">
+          {tracker.entries.map((entry) => (
+            <div key={entry.id} className={tracker.activeId === entry.id ? 'active' : ''}>
+              <span className="tracker-value">{entry.value}</span>
+              <span>
+                {entry.name}
+                <small>
+                  {entry.hidden
+                    ? 'GM only'
+                    : tracker.activeId === entry.id
+                      ? 'Current participant'
+                      : ''}
+                </small>
+                {entry.tokenId && scene.tokens[entry.tokenId] && (
+                  <TokenStatuses
+                    key={entry.tokenId}
+                    token={scene.tokens[entry.tokenId]}
+                    sceneId={scene.id}
+                  />
+                )}
+              </span>
+              {entry.tokenId && scene.tokens[entry.tokenId] && (
+                <button
+                  aria-label={`Focus ${entry.name}`}
+                  onClick={() => focusCharacter(entry.tokenId!)}
+                >
+                  ◎
+                </button>
+              )}
+              {gm && (
+                <div>
+                  <button aria-label={`Move ${entry.name} up`} onClick={() => shift(entry.id, -1)}>
+                    <ArrowUp size={11} />
+                  </button>
+                  <button aria-label={`Move ${entry.name} down`} onClick={() => shift(entry.id, 1)}>
+                    <ArrowDown size={11} />
+                  </button>
+                  <button
+                    aria-label={`Edit ${entry.name}`}
+                    onClick={() => {
+                      setEditing(entry.id);
+                      setName(entry.name);
+                      setValue(entry.value);
+                      setHidden(entry.hidden);
+                      setTokenId(entry.tokenId);
+                    }}
+                  >
+                    <Copy size={11} />
+                  </button>
+                  <button
+                    aria-label={`Remove ${entry.name}`}
+                    onClick={() => {
+                      const entries = tracker.entries.filter((e) => e.id !== entry.id);
+                      update({
+                        ...tracker,
+                        entries,
+                        activeId:
+                          tracker.activeId === entry.id ? entries[0]?.id || null : tracker.activeId,
+                      });
+                    }}
+                  >
+                    <Trash2 size={11} />
+                  </button>
+                </div>
+              )}
+            </div>
+          ))}
+        </div>
+        {!tracker.entries.length && <p className="field-note">No participants yet.</p>}
+        {gm && (
+          <form
+            onSubmit={async (e) => {
+              e.preventDefault();
+              const id = editing || crypto.randomUUID(),
+                entry = {
+                  id,
+                  name,
+                  value,
+                  hidden: hidden || (!!tokenId && scene.tokens[tokenId]?.visibility === 'gm'),
+                  tokenId,
+                },
+                entries = editing
+                  ? tracker.entries.map((t) => (t.id === id ? entry : t))
+                  : [...tracker.entries, entry];
+              if (tracker.order !== 'manual')
                 entries.sort((a, b) =>
-                  order === 'descending' ? b.value - a.value : a.value - b.value,
+                  tracker.order === 'descending' ? b.value - a.value : a.value - b.value,
                 );
-              update({ ...tracker, order, entries });
+              if (!(await update({ ...tracker, entries, activeId: tracker.activeId || id })))
+                return;
+              setEditing(null);
+              setName('');
+              setValue(0);
+              setHidden(false);
+              setTokenId(undefined);
             }}
           >
-            <option value="manual">Manual</option>
-            <option value="descending">Highest first</option>
-            <option value="ascending">Lowest first</option>
-          </select>
-        </label>
-      )}
-      <div className="tracker-entries">
-        {tracker.entries.map((entry) => (
-          <div key={entry.id} className={tracker.activeId === entry.id ? 'active' : ''}>
-            <span className="tracker-value">{entry.value}</span>
-            <span>
-              {entry.name}
-              <small>
-                {entry.hidden
-                  ? 'GM only'
-                  : tracker.activeId === entry.id
-                    ? 'Current participant'
-                    : ''}
-              </small>
-            </span>
-            {entry.tokenId && scene.tokens[entry.tokenId] && (
+            <label>
+              Participant
+              <input
+                aria-label="Participant name"
+                value={name}
+                onChange={(e) => setName(e.target.value)}
+                required
+                maxLength={48}
+              />
+            </label>
+            <div className="form-row">
+              <label>
+                Value
+                <input
+                  aria-label="Participant value"
+                  type="number"
+                  value={value}
+                  onChange={(e) => setValue(Number(e.target.value))}
+                  min={-10000}
+                  max={10000}
+                />
+              </label>
+              <label className="check-label">
+                <input
+                  type="checkbox"
+                  checked={hidden}
+                  onChange={(e) => setHidden(e.target.checked)}
+                />
+                Hidden
+              </label>
+            </div>
+            <button className="subtle-button">
+              <Plus size={14} />
+              {editing ? 'Save participant' : 'Add participant'}
+            </button>
+            {tokenId && (
+              <p className="field-note">
+                Linked to {scene.tokens[tokenId]?.name || 'removed character'}.{' '}
+                {hidden || scene.tokens[tokenId]?.visibility === 'gm'
+                  ? 'GM only · hidden from players'
+                  : 'Visible only while the character is visible to players.'}
+              </p>
+            )}
+            {selected && (
               <button
-                aria-label={`Focus ${entry.name}`}
-                onClick={() => focusCharacter(entry.tokenId!)}
+                type="button"
+                className="subtle-button"
+                onClick={() => {
+                  setName(selected.name.split(' · ')[0]);
+                  setTokenId(selected.id);
+                  setHidden((wasHidden) => wasHidden || selected.visibility === 'gm');
+                }}
               >
-                ◎
+                Use selected token
               </button>
             )}
-            {gm && (
-              <div>
-                <button aria-label={`Move ${entry.name} up`} onClick={() => shift(entry.id, -1)}>
-                  <ArrowUp size={11} />
-                </button>
-                <button aria-label={`Move ${entry.name} down`} onClick={() => shift(entry.id, 1)}>
-                  <ArrowDown size={11} />
-                </button>
+            {!!s.selectedIds.length && (
+              <details className="tracker-add-selected">
+                <summary>Add selected characters to turns</summary>
+                <ul>
+                  {s.selectedIds
+                    .flatMap((id) => (scene.tokens[id] ? [scene.tokens[id]] : []))
+                    .map((t) => (
+                      <li key={t.id}>
+                        {t.name} ·{' '}
+                        {t.visibility === 'gm' ? 'GM only' : 'Visible when character is visible'}
+                      </li>
+                    ))}
+                </ul>
                 <button
-                  aria-label={`Edit ${entry.name}`}
+                  type="button"
                   onClick={() => {
-                    setEditing(entry.id);
-                    setName(entry.name);
-                    setValue(entry.value);
-                    setHidden(entry.hidden);
-                    setTokenId(entry.tokenId);
-                  }}
-                >
-                  <Copy size={11} />
-                </button>
-                <button
-                  aria-label={`Remove ${entry.name}`}
-                  onClick={() => {
-                    const entries = tracker.entries.filter((e) => e.id !== entry.id);
+                    const additions = s.selectedIds.flatMap((id) =>
+                      scene.tokens[id] && !tracker.entries.some((e) => e.tokenId === id)
+                        ? [
+                            {
+                              id: crypto.randomUUID(),
+                              tokenId: id,
+                              name: scene.tokens[id].name.split(' · ')[0],
+                              value: 0,
+                              hidden: scene.tokens[id].visibility === 'gm',
+                            },
+                          ]
+                        : [],
+                    );
+                    const entries = [...tracker.entries, ...additions];
+                    if (tracker.order !== 'manual')
+                      entries.sort((a, b) =>
+                        tracker.order === 'descending' ? b.value - a.value : a.value - b.value,
+                      );
                     update({
                       ...tracker,
                       entries,
-                      activeId:
-                        tracker.activeId === entry.id ? entries[0]?.id || null : tracker.activeId,
+                      activeId: tracker.activeId || entries[0]?.id || null,
                     });
                   }}
                 >
-                  <Trash2 size={11} />
+                  Add selected to tracker
                 </button>
-              </div>
+              </details>
             )}
-          </div>
-        ))}
-      </div>
-      {!tracker.entries.length && <p className="field-note">No participants yet.</p>}
-      {gm && (
-        <form
-          onSubmit={(e) => {
-            e.preventDefault();
-            const id = editing || crypto.randomUUID(),
-              entry = {
-                id,
-                name,
-                value,
-                hidden: hidden || (!!tokenId && scene.tokens[tokenId]?.visibility === 'gm'),
-                tokenId,
-              },
-              entries = editing
-                ? tracker.entries.map((t) => (t.id === id ? entry : t))
-                : [...tracker.entries, entry];
-            if (tracker.order !== 'manual')
-              entries.sort((a, b) =>
-                tracker.order === 'descending' ? b.value - a.value : a.value - b.value,
-              );
-            update({ ...tracker, entries, activeId: tracker.activeId || id });
-            setEditing(null);
-            setName('');
-            setValue(0);
-            setHidden(false);
-            setTokenId(undefined);
-          }}
-        >
-          <label>
-            Participant
-            <input
-              aria-label="Participant name"
-              value={name}
-              onChange={(e) => setName(e.target.value)}
-              required
-              maxLength={48}
-            />
-          </label>
-          <div className="form-row">
-            <label>
-              Value
-              <input
-                aria-label="Participant value"
-                type="number"
-                value={value}
-                onChange={(e) => setValue(Number(e.target.value))}
-                min={-10000}
-                max={10000}
-              />
-            </label>
-            <label className="check-label">
-              <input
-                type="checkbox"
-                checked={hidden}
-                onChange={(e) => setHidden(e.target.checked)}
-              />
-              Hidden
-            </label>
-          </div>
-          <button className="subtle-button">
-            <Plus size={14} />
-            {editing ? 'Save participant' : 'Add participant'}
-          </button>
-          {tokenId && (
-            <p className="field-note">
-              Linked to {scene.tokens[tokenId]?.name || 'removed character'}.{' '}
-              {hidden || scene.tokens[tokenId]?.visibility === 'gm'
-                ? 'GM only · hidden from players'
-                : 'Visible only while the character is visible to players.'}
-            </p>
-          )}
-          {selected && (
-            <button
-              type="button"
-              className="subtle-button"
-              onClick={() => {
-                setName(selected.name.split(' · ')[0]);
-                setTokenId(selected.id);
-                setHidden((wasHidden) => wasHidden || selected.visibility === 'gm');
-              }}
-            >
-              Use selected token
-            </button>
-          )}
-          {!!s.selectedIds.length && (
-            <details className="tracker-add-selected">
-              <summary>Add selected characters to turns</summary>
-              <ul>
-                {s.selectedIds
-                  .flatMap((id) => (scene.tokens[id] ? [scene.tokens[id]] : []))
-                  .map((t) => (
-                    <li key={t.id}>
-                      {t.name} ·{' '}
-                      {t.visibility === 'gm' ? 'GM only' : 'Visible when character is visible'}
-                    </li>
-                  ))}
-              </ul>
-              <button
-                type="button"
-                onClick={() => {
-                  const additions = s.selectedIds.flatMap((id) =>
-                    scene.tokens[id] && !tracker.entries.some((e) => e.tokenId === id)
-                      ? [
-                          {
-                            id: crypto.randomUUID(),
-                            tokenId: id,
-                            name: scene.tokens[id].name.split(' · ')[0],
-                            value: 0,
-                            hidden: scene.tokens[id].visibility === 'gm',
-                          },
-                        ]
-                      : [],
-                  );
-                  const entries = [...tracker.entries, ...additions];
-                  if (tracker.order !== 'manual')
-                    entries.sort((a, b) =>
-                      tracker.order === 'descending' ? b.value - a.value : a.value - b.value,
-                    );
-                  update({
-                    ...tracker,
-                    entries,
-                    activeId: tracker.activeId || entries[0]?.id || null,
-                  });
-                }}
-              >
-                Add selected to tracker
-              </button>
-            </details>
-          )}
-        </form>
-      )}
+          </form>
+        )}
+      </fieldset>
     </div>
   );
 }

@@ -200,7 +200,7 @@ test('grid calibration is local, cancels cleanly and sends one update per save i
         if (reject) {
           ws.send(
             JSON.stringify({
-              v: 2,
+              v: 7,
               type: 'ERROR',
               actionId: value.actionId,
               message: 'Grid rejected for test.',
@@ -534,7 +534,7 @@ test('durable-save time follows SAVED revisions independently of acknowledgement
   });
   await expect(page.locator('.save-status')).toContainText('Newer changes awaiting save');
   const room = await state(page),
-    earlier = { v: 2, type: 'SAVED', revision: room.revision, savedAt: '2099-01-01T00:00:00.000Z' };
+    earlier = { v: 7, type: 'SAVED', revision: room.revision, savedAt: '2099-01-01T00:00:00.000Z' };
   proxy!.send(JSON.stringify(earlier));
   await expect(page.locator('.save-status')).toContainText('Saved to storage');
   proxy!.send(JSON.stringify({ ...earlier, pending: true }));

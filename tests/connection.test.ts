@@ -62,7 +62,7 @@ describe('client connection transitions', () => {
   };
   function snapshot(socket: Socket, roomId = 'campaign-a', role: 'gm' | 'player' = 'gm') {
     socket.message({
-      v: 2,
+      v: 7,
       type: 'ROOM_SNAPSHOT',
       state: { ...structuredClone(table.demoState), id: roomId },
       self: { ...self, role },
@@ -121,7 +121,7 @@ describe('client connection transitions', () => {
     const old = await connect();
     await connect('campaign-b');
     snapshot(old);
-    old.message({ v: 2, type: 'DICE_ROLL_RESULT', roll });
+    old.message({ v: 7, type: 'DICE_ROLL_RESULT', roll });
     expect(table.useTable.getState().room.id).toBe('campaign-b');
     expect(table.useTable.getState().presentation).toBeNull();
   });
@@ -145,7 +145,7 @@ describe('client connection transitions', () => {
       pings: [{ x: 100, y: 100, at: Date.now() }],
     });
     socket.message({
-      v: 2,
+      v: 7,
       type: 'STATE_PATCH',
       revision: 1,
       actionId: 'scene',

@@ -398,12 +398,29 @@ test('large hex maps render only the visible grid with one hundred tokens', asyn
     segments = 0;
     const start = performance.now();
     for (let i = 0; i < 20; i++) renderer.draw(ctx, options);
+    const millisecondsPerFrame = (performance.now() - start) / 20;
+    scene.fog = {
+      enabled: true,
+      revealed: [],
+      operations: Array.from({ length: 500 }, (_, i) => ({
+        id: `fog-${i}`,
+        mode: i % 2 ? ('conceal' as const) : ('reveal' as const),
+        shape: 'circle' as const,
+        x: (i % 25) * 40,
+        y: Math.floor(i / 25) * 40,
+        radius: 30,
+      })),
+    };
+    const fogStart = performance.now();
+    renderer.draw(ctx, options);
     return {
       segmentsPerFrame: segments / 20,
-      millisecondsPerFrame: (performance.now() - start) / 20,
+      millisecondsPerFrame,
+      fogRebuildMilliseconds: performance.now() - fogStart,
     };
   });
   expect(result.segmentsPerFrame).toBeLessThan(25000);
+  expect(result.fogRebuildMilliseconds).toBeLessThan(400);
   await info.attach('large-map-render.json', {
     body: JSON.stringify(result),
     contentType: 'application/json',

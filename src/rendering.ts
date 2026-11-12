@@ -1,6 +1,19 @@
-import type { Asset, FogOperation, Point, Scene, Token } from '../shared/model.js';
+import {
+  gaussianLightStops,
+  hasLightAnimation,
+  lightAnimationFrame,
+} from '../shared/lightFalloff.js';
+import {
+  projectedLightId,
+  type Asset,
+  type FogOperation,
+  type Point,
+  type Scene,
+  type Token,
+} from '../shared/model.js';
+import { visibilityPolygon } from '../shared/vision.js';
 import type { Camera } from '../shared/geometry.js';
-import { distance, hexToWorld } from '../shared/geometry.js';
+import { distance, hexToWorld, pathDistance } from '../shared/geometry.js';
 import { resolveAsset } from './assets.js';
 import type { Tool } from './store.js';
 import { useTable } from './store.js';
@@ -149,6 +162,8 @@ export interface Draft {
   points: Point[];
   completed?: boolean;
   radius?: number;
+  angle?: number;
+  rotation?: number;
   erasedIds?: string[];
   erasedZoneIds?: string[];
 }
@@ -160,11 +175,13 @@ interface RenderOptions {
   height: number;
   dpr: number;
   gm: boolean;
+  userId?: string;
   selected: string[];
   previews: Record<string, Point>;
   localDragging: Set<string>;
   reducedMotion: boolean;
-  pings: Array<Point & { at: number }>;
+  lightTick?: number;
+  pings: Array<Point & { at: number; name?: string }>;
   draft: Draft | null;
   tool: Tool;
   zoneShape: string;
@@ -179,6 +196,90 @@ interface RenderOptions {
 export class SceneRenderer {
   private positions = new Map<string, Point>();
   private context = '';
+  private effectsCache: {
+    key: string;
+    tokens: Scene['tokens'];
+    walls: Scene['walls'];
+    lighting: Scene['lighting'];
+    lightSources: Scene['lightSources'];
+    canvas: HTMLCanvasElement;
+  } | null = null;
+  private effectsLayer: HTMLCanvasElement | null = null;
+  private effectsMask: HTMLCanvasElement | null = null;
+  private wallsRef: Scene['walls'];
+  private polygons = new Map<string, Point[]>();
+  private polygonQueue: Array<{
+    key: string;
+    p: Point;
+    range: number;
+    angle: number;
+    rotation: number;
+    walls: Scene['walls'];
+  }> = [];
+  private polygonPending = new Set<string>();
+  private polygonScheduled = false;
+  private polygonTimer: ReturnType<typeof setTimeout> | undefined;
+  get visibilityPending() {
+    return this.polygonQueue.length > 0;
+  }
+  private polygonRedraw: () => void = () => {};
+  private processPolygons = () => {
+    this.polygonScheduled = false;
+    this.polygonTimer = undefined;
+    const until = performance.now() + 12;
+    do {
+      const next = this.polygonQueue.shift();
+      if (!next) break;
+      this.polygonPending.delete(next.key);
+      if (next.walls !== this.wallsRef || this.polygons.has(next.key)) continue;
+      const points = visibilityPolygon(next.p, next.range, next.angle, next.rotation, next.walls);
+      if (this.polygons.size >= 512) this.polygons.delete(this.polygons.keys().next().value!);
+      this.polygons.set(next.key, points);
+    } while (this.polygonQueue.length && performance.now() < until);
+    this.effectsCache = null;
+    this.polygonRedraw();
+    if (this.polygonQueue.length && !this.polygonScheduled) {
+      this.polygonScheduled = true;
+      this.polygonTimer = setTimeout(this.processPolygons, 0);
+    }
+  };
+  private polygon(p: Point, range: number, angle: number, rotation: number, walls: Scene['walls']) {
+    if (this.wallsRef !== walls) {
+      this.wallsRef = walls;
+      this.polygons.clear();
+      this.polygonQueue = [];
+      this.polygonPending.clear();
+    }
+    const key = `${p.x}/${p.y}/${range}/${angle}/${rotation}`;
+    const points = this.polygons.get(key);
+    if (points) {
+      // Keep visible geometry hot while a dragged token creates new polygons.
+      this.polygons.delete(key);
+      this.polygons.set(key, points);
+      return points;
+    }
+    if (!this.polygonPending.has(key)) {
+      if (this.polygonQueue.length >= 512) {
+        const discarded = this.polygonQueue.shift();
+        if (discarded) this.polygonPending.delete(discarded.key);
+      }
+      this.polygonPending.add(key);
+      this.polygonQueue.push({ key, p: { x: p.x, y: p.y }, range, angle, rotation, walls });
+      if (!this.polygonScheduled) {
+        this.polygonScheduled = true;
+        this.polygonTimer = setTimeout(this.processPolygons, 0);
+      }
+    }
+    return [];
+  }
+  dispose() {
+    if (this.polygonTimer !== undefined) clearTimeout(this.polygonTimer);
+    this.polygonTimer = undefined;
+    this.polygonScheduled = false;
+    this.polygonQueue = [];
+    this.polygonPending.clear();
+    this.effectsCache = null;
+  }
   private fog: {
     canvas: HTMLCanvasElement;
     source: Scene['fog'];
@@ -189,6 +290,7 @@ export class SceneRenderer {
     h: number;
   } | null = null;
   draw(ctx: CanvasRenderingContext2D, o: RenderOptions): boolean {
+    this.polygonRedraw = o.redraw;
     const { scene: s, camera: c, width: w, height: h, dpr } = o;
     const context = `${o.roomId}/${s.id}/${o.gm}`;
     if (this.context !== context) {
@@ -324,6 +426,23 @@ export class SceneRenderer {
       }
       ctx.restore();
     }
+    for (const pin of Object.values(s.pins || {})) {
+      ctx.save();
+      ctx.translate(pin.x, pin.y);
+      ctx.fillStyle = pin.visibility === 'gm' ? '#b788ce' : '#e8bf71';
+      ctx.strokeStyle = '#171b17';
+      ctx.lineWidth = 2 / c.zoom;
+      ctx.beginPath();
+      ctx.arc(0, 0, 9 / c.zoom, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.stroke();
+      ctx.fillStyle = '#171b17';
+      ctx.font = `bold ${12 / c.zoom}px sans-serif`;
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+      ctx.fillText('◆', 0, 0);
+      ctx.restore();
+    }
     for (const id of this.positions.keys()) if (!s.tokens[id]) this.positions.delete(id);
     for (const t of Object.values(s.tokens)) {
       const target = o.previews[t.id] || t,
@@ -337,6 +456,281 @@ export class SceneRenderer {
       this.positions.set(t.id, p);
       this.token(ctx, t, p, o, c.zoom);
     }
+    const movingLights = new Map<string, Point>();
+    const movingGeometry: string[] = [];
+    for (const token of Object.values(s.tokens)) {
+      const p = this.positions.get(token.id) || token;
+      if (
+        (p.x !== token.x || p.y !== token.y) &&
+        (token.light || token.sight || token.sharedVisionSource)
+      ) {
+        movingGeometry.push(`${token.id}:${p.x}:${p.y}`);
+        if (!o.gm && token.light) movingLights.set(projectedLightId(s.id, token.id), p);
+      }
+      if (
+        token.sight &&
+        (o.gm ? token.sight.showCone : token.sight.showToPlayers) &&
+        token.sight.range > 0
+      ) {
+        const points = this.polygon(
+          p,
+          token.sight.range,
+          token.sight.angle,
+          token.rotation,
+          s.walls,
+        );
+        if (points.length) {
+          ctx.save();
+          ctx.fillStyle = token.color;
+          ctx.globalAlpha = 0.18;
+          polygonPath(ctx, points);
+          ctx.fill();
+          ctx.restore();
+        }
+      }
+    }
+    const lighting = s.lighting || { vision: false, darkness: 0 };
+    const rawEmitters = o.gm
+      ? Object.values(s.tokens).flatMap((token) =>
+          token.light
+            ? [
+                {
+                  x: (this.positions.get(token.id) || token).x,
+                  y: (this.positions.get(token.id) || token).y,
+                  rotation: token.rotation,
+                  light: token.light,
+                },
+              ]
+            : [],
+        )
+      : Object.entries(s.lightSources || {}).map(([id, source]) => {
+          const moving = movingLights.get(id);
+          return moving ? { ...source, ...moving } : source;
+        });
+    const left = -c.x / c.zoom,
+      top = -c.y / c.zoom,
+      right = (w - c.x) / c.zoom,
+      bottom = (h - c.y) / c.zoom;
+    const emitters = rawEmitters.filter(
+      (source) =>
+        source.x + source.light.radius >= left &&
+        source.x - source.light.radius <= right &&
+        source.y + source.light.radius >= top &&
+        source.y - source.light.radius <= bottom,
+    );
+    const animatedLights =
+      !o.reducedMotion && emitters.some((source) => hasLightAnimation(source.light));
+    if (
+      lighting.darkness > 0 ||
+      (lighting.vision && !o.gm) ||
+      emitters.some((token) => !!token.light.radius && token.light.intensity > 0)
+    ) {
+      const key = `${s.id}/${o.gm}/${o.userId}/${c.x}/${c.y}/${c.zoom}/${w}/${h}/${dpr}/${animatedLights ? o.lightTick : 'still'}/${movingGeometry.join('|')}`;
+      let cached = this.effectsCache;
+      if (
+        !cached ||
+        cached.key !== key ||
+        cached.tokens !== s.tokens ||
+        cached.walls !== s.walls ||
+        cached.lightSources !== s.lightSources ||
+        cached.lighting !== s.lighting
+      ) {
+        const layer = this.effectsLayer || (this.effectsLayer = document.createElement('canvas'));
+        const pixelWidth = Math.ceil(w * dpr),
+          pixelHeight = Math.ceil(h * dpr);
+        if (layer.width !== pixelWidth || layer.height !== pixelHeight) {
+          layer.width = pixelWidth;
+          layer.height = pixelHeight;
+        }
+        const g = layer.getContext('2d')!;
+        g.setTransform(1, 0, 0, 1, 0, 0);
+        g.clearRect(0, 0, layer.width, layer.height);
+        g.setTransform(dpr * c.zoom, 0, 0, dpr * c.zoom, dpr * c.x, dpr * c.y);
+
+        const canvas = this.effectsMask || (this.effectsMask = document.createElement('canvas'));
+        if (canvas.width !== pixelWidth || canvas.height !== pixelHeight) {
+          canvas.width = pixelWidth;
+          canvas.height = pixelHeight;
+        }
+        const f = canvas.getContext('2d')!;
+        f.setTransform(1, 0, 0, 1, 0, 0);
+        f.clearRect(0, 0, canvas.width, canvas.height);
+        f.globalCompositeOperation = 'source-over';
+        f.setTransform(dpr * c.zoom, 0, 0, dpr * c.zoom, dpr * c.x, dpr * c.y);
+        const frames = emitters.map((token) => ({
+          token,
+          frame: lightAnimationFrame(
+            token.light,
+            token.x,
+            token.y,
+            o.lightTick ?? 0,
+            o.reducedMotion,
+          ),
+        }));
+        if (lighting.darkness > 0) {
+          f.fillStyle = `rgba(0,0,0,${lighting.darkness})`;
+          f.fillRect(0, 0, s.width, s.height);
+          f.globalCompositeOperation = 'destination-out';
+          for (const { token, frame } of frames)
+            if (frame.radius > 0 && frame.brightness > 0) {
+              const points = this.polygon(
+                token,
+                token.light.radius,
+                token.light.angle ?? 360,
+                token.rotation + (token.light.direction ?? 0),
+                s.walls,
+              );
+              if (!points.length) continue;
+              f.save();
+              polygonPath(f, points);
+              f.clip();
+              const gradient = f.createRadialGradient(
+                token.x,
+                token.y,
+                0,
+                token.x,
+                token.y,
+                frame.radius,
+              );
+              for (const stop of gaussianLightStops(frame.brightness))
+                gradient.addColorStop(stop.offset, `rgba(0,0,0,${stop.alpha})`);
+              f.fillStyle = gradient;
+              f.fillRect(
+                token.x - frame.radius,
+                token.y - frame.radius,
+                frame.radius * 2,
+                frame.radius * 2,
+              );
+              f.restore();
+            }
+          g.save();
+          g.setTransform(1, 0, 0, 1, 0, 0);
+          g.drawImage(canvas, 0, 0);
+          g.restore();
+          f.save();
+          f.setTransform(1, 0, 0, 1, 0, 0);
+          f.clearRect(0, 0, canvas.width, canvas.height);
+          f.restore();
+        }
+        if (lighting.vision && !o.gm) {
+          f.globalCompositeOperation = 'source-over';
+          f.fillStyle = '#000';
+          f.fillRect(0, 0, s.width, s.height);
+          f.globalCompositeOperation = 'destination-out';
+          for (const token of Object.values(s.tokens))
+            if (token.sharedVisionSource) {
+              const points = this.polygon(
+                this.positions.get(token.id) || token,
+                Math.hypot(s.width, s.height) * 1.01,
+                360,
+                0,
+                s.walls,
+              );
+              if (points.length) {
+                polygonPath(f, points);
+                f.fillStyle = '#000';
+                f.fill();
+              }
+            }
+        }
+        for (const { token, frame } of frames)
+          if (frame.radius > 0 && frame.brightness > 0) {
+            const points = this.polygon(
+              token,
+              token.light.radius,
+              token.light.angle ?? 360,
+              token.rotation + (token.light.direction ?? 0),
+              s.walls,
+            );
+            g.save();
+            polygonPath(g, points);
+            g.clip();
+            const gradient = g.createRadialGradient(
+              token.x,
+              token.y,
+              0,
+              token.x,
+              token.y,
+              frame.radius,
+            );
+            for (const stop of gaussianLightStops(frame.brightness * 0.33)) {
+              const alpha = Math.round(stop.alpha * 255)
+                .toString(16)
+                .padStart(2, '0');
+              gradient.addColorStop(stop.offset, `${frame.color}${alpha}`);
+            }
+            g.fillStyle = gradient;
+            g.fillRect(
+              token.x - frame.radius,
+              token.y - frame.radius,
+              frame.radius * 2,
+              frame.radius * 2,
+            );
+            g.restore();
+          }
+
+        if (lighting.vision && !o.gm) {
+          g.save();
+          g.setTransform(1, 0, 0, 1, 0, 0);
+          g.drawImage(canvas, 0, 0);
+          g.restore();
+        }
+
+        cached = {
+          key,
+          tokens: s.tokens,
+          walls: s.walls,
+          lighting: s.lighting,
+          lightSources: s.lightSources,
+          canvas: layer,
+        };
+        this.effectsCache = cached;
+      }
+      ctx.save();
+      ctx.setTransform(1, 0, 0, 1, 0, 0);
+      ctx.drawImage(cached.canvas, 0, 0);
+      ctx.restore();
+    }
+    if (o.gm)
+      for (const wall of Object.values(s.walls || {})) {
+        ctx.save();
+        ctx.strokeStyle =
+          wall.kind === 'door'
+            ? wall.open
+              ? '#78d49b'
+              : '#e8b16b'
+            : wall.kind === 'window'
+              ? '#89cfff'
+              : '#e98181';
+        ctx.lineWidth = 3 / c.zoom;
+        ctx.setLineDash(wall.kind === 'window' || wall.open ? [6 / c.zoom, 4 / c.zoom] : []);
+        ctx.beginPath();
+        ctx.moveTo(wall.a.x, wall.a.y);
+        ctx.lineTo(wall.b.x, wall.b.y);
+        ctx.stroke();
+        ctx.restore();
+      }
+    if (o.gm)
+      for (const id of o.selected) {
+        const token = s.tokens[id];
+        if (!token?.light?.radius) continue;
+        const points = this.polygon(
+          this.positions.get(token.id) || token,
+          token.light.radius,
+          token.light.angle ?? 360,
+          token.rotation + (token.light.direction ?? 0),
+          s.walls,
+        );
+        if (!points.length) continue;
+        ctx.save();
+        ctx.strokeStyle = token.light.color;
+        ctx.globalAlpha = 0.8;
+        ctx.lineWidth = 1.5 / c.zoom;
+        ctx.setLineDash([6 / c.zoom, 4 / c.zoom]);
+        polygonPath(ctx, points);
+        ctx.stroke();
+        ctx.restore();
+      }
     if (s.fog.enabled) {
       let mask = this.fog;
       if (
@@ -381,9 +775,19 @@ export class SceneRenderer {
       animating = true;
       ctx.strokeStyle = `rgba(224,190,117,${1 - life})`;
       ctx.lineWidth = 2 / c.zoom;
+      const sx = p.x * c.zoom + c.x,
+        sy = p.y * c.zoom + c.y;
+      const offscreen = sx < 24 || sy < 24 || sx > w - 24 || sy > h - 24;
+      const x = (Math.max(24, Math.min(w - 24, sx)) - c.x) / c.zoom;
+      const y = (Math.max(24, Math.min(h - 24, sy)) - c.y) / c.zoom;
       ctx.beginPath();
-      ctx.arc(p.x, p.y, (12 + 65 * life) / c.zoom, 0, Math.PI * 2);
+      ctx.arc(x, y, (offscreen ? 12 : 12 + 65 * life) / c.zoom, 0, Math.PI * 2);
       ctx.stroke();
+      ctx.fillStyle = `rgba(255,232,180,${1 - life})`;
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'bottom';
+      ctx.font = `${12 / c.zoom}px sans-serif`;
+      ctx.fillText(`${offscreen ? '◆ ' : ''}${p.name || 'Ping'}`, x, y - 14 / c.zoom);
     }
     if (o.draft) this.draft(ctx, o.draft, o);
     ctx.restore();
@@ -432,15 +836,28 @@ export class SceneRenderer {
     ctx.arc(0, 0, r, 0, Math.PI * 2);
     ctx.stroke();
     ctx.restore();
-    const label = t.name.split(' · ')[0];
-    ctx.font = `${16 / zoom}px sans-serif`;
-    ctx.textAlign = 'center';
-    const tw = ctx.measureText(label).width;
-    ctx.fillStyle = '#eadbbdec';
-    ctx.fillRect(p.x - tw / 2 - 8 / zoom, p.y + r + 6 / zoom, tw + 16 / zoom, 26 / zoom);
-    ctx.fillStyle = '#483527';
-    ctx.fillText(label, p.x, p.y + r + 25 / zoom);
-    if (t.resource) {
+    if (!t.hideLabel || o.selected.includes(t.id)) {
+      const label = t.name.split(' · ')[0];
+      ctx.font = `${16 / zoom}px sans-serif`;
+      ctx.textAlign = 'center';
+      const tw = ctx.measureText(label).width;
+      ctx.fillStyle = '#eadbbdec';
+      ctx.fillRect(p.x - tw / 2 - 8 / zoom, p.y + r + 6 / zoom, tw + 16 / zoom, 26 / zoom);
+      ctx.fillStyle = '#483527';
+      ctx.fillText(label, p.x, p.y + r + 25 / zoom);
+    }
+    const linkedResource =
+      t.resourceId && t.characterId
+        ? useTable
+            .getState()
+            .room.characters?.[t.characterId]?.resources.find(
+              (resource) => resource.id === t.resourceId,
+            )
+        : undefined;
+    const resource = t.resourceId
+      ? linkedResource && { value: linkedResource.current, max: linkedResource.max }
+      : t.resource;
+    if (resource) {
       const bw = t.size * 0.7;
       ctx.fillStyle = '#10221c';
       ctx.fillRect(p.x - bw / 2, p.y + r - 7 / zoom, bw, 4 / zoom);
@@ -448,7 +865,7 @@ export class SceneRenderer {
       ctx.fillRect(
         p.x - bw / 2,
         p.y + r - 7 / zoom,
-        bw * Math.min(1, t.resource.value / t.resource.max),
+        bw * Math.max(0, Math.min(1, resource.value / resource.max)),
         4 / zoom,
       );
     }
@@ -479,10 +896,36 @@ export class SceneRenderer {
       ctx.stroke();
       return;
     }
+    if (d.tool === 'light') {
+      ctx.strokeStyle = '#ffd28a';
+      const width = (Math.max(1, Math.min(360, d.angle ?? 360)) * Math.PI) / 180;
+      const center = ((d.rotation ?? 0) * Math.PI) / 180;
+      ctx.beginPath();
+      if (width < Math.PI * 2) ctx.moveTo(a.x, a.y);
+      ctx.arc(
+        a.x,
+        a.y,
+        Math.max(0, Math.min(5000, d.radius || 0)),
+        center - width / 2,
+        center + width / 2,
+      );
+      if (width < Math.PI * 2) ctx.closePath();
+      ctx.stroke();
+      ctx.setLineDash([]);
+      ctx.beginPath();
+      ctx.arc(a.x, a.y, 8 / c.zoom, 0, Math.PI * 2);
+      ctx.stroke();
+      return;
+    }
     if (d.tool === 'draw') {
       ctx.setLineDash([]);
       ctx.lineWidth = o.drawWidth;
       polygonPath(ctx, d.points, false);
+      ctx.stroke();
+      return;
+    }
+    if (d.tool === 'wall') {
+      polygonPath(ctx, [a, b], false);
       ctx.stroke();
       return;
     }
@@ -509,10 +952,7 @@ export class SceneRenderer {
       }
       const length =
         mode === 'path'
-          ? [...d.points, b].reduce(
-              (n, p, i, all) => (i ? n + distance(all[i - 1], p, o.scene.grid) : 0),
-              0,
-            )
+          ? pathDistance([...d.points, b], o.scene.grid)
           : distance(a, b, o.scene.grid);
       const area =
         mode === 'area'

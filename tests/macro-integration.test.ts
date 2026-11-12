@@ -40,7 +40,7 @@ class Client {
     });
   }
   send(action: Action, actionId: string = randomUUID()) {
-    this.ws.send(JSON.stringify({ ...action, v: 2, actionId }));
+    this.ws.send(JSON.stringify({ ...action, v: 7, actionId }));
     return actionId;
   }
   async wait<T extends ServerMessage['type']>(

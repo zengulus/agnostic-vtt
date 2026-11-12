@@ -11,8 +11,9 @@ export type Refresh = z.infer<typeof refreshSchema>;
 export const characterResourceSchema = z.object({
   id: identifier,
   name: z.string().trim().min(1).max(48),
-  current: z.number().int().min(0).max(10000),
+  current: z.number().int().min(-10000).max(10000),
   max: z.number().int().min(1).max(10000),
+  min: z.number().int().min(-10000).max(0).optional(),
   refresh: refreshSchema,
 });
 export const characterAbilitySchema = z.object({
@@ -52,7 +53,8 @@ export const characterDefinitionSchema = z
     if (new Set(sheet.abilities.map((a) => a.id)).size !== sheet.abilities.length)
       issue('Duplicate ability identifiers.');
     for (const r of sheet.resources)
-      if (r.current > r.max) issue(`${r.name}: current exceeds maximum.`);
+      if (r.current > r.max || r.current < (r.min ?? 0))
+        issue(`${r.name}: current must be between minimum and maximum.`);
     for (const a of sheet.abilities) {
       if (a.remainingUses > a.maxUses) issue(`${a.name}: remaining uses exceed maximum.`);
       if (new Set(a.costs.map((c) => c.resourceId)).size !== a.costs.length)
@@ -190,8 +192,8 @@ export function parseCharacter(text: string): CharacterDefinition {
     )
       item[key] = data;
     else if (['resource', 'ability'].includes(section) && key === 'refresh') item.refresh = data;
-    else if (section === 'resource' && ['current', 'max'].includes(key)) {
-      if (!/^\d+$/.test(data)) fail(line, 'Resource amounts must be whole numbers.');
+    else if (section === 'resource' && ['current', 'max', 'min'].includes(key)) {
+      if (!/^-?\d+$/.test(data)) fail(line, 'Resource amounts must be whole numbers.');
       item[key] = Number(data);
     } else if (section === 'ability' && ['uses', 'remaining'].includes(key)) {
       if (key === 'uses' && data === 'unlimited') {
@@ -240,7 +242,7 @@ export function exportCharacter(sheet: CharacterDefinition): string {
         .join('\n')}`,
       ...sheet.resources.map(
         (r) =>
-          `[resource ${r.id}]\nname = ${quote(r.name)}\ncurrent = ${r.current}\nmax = ${r.max}\nrefresh = ${r.refresh}`,
+          `[resource ${r.id}]\nname = ${quote(r.name)}\ncurrent = ${r.current}\nmax = ${r.max}${r.min === undefined ? '' : `\nmin = ${r.min}`}\nrefresh = ${r.refresh}`,
       ),
       ...sheet.abilities.map(
         (a) =>

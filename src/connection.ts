@@ -472,7 +472,7 @@ function open() {
       if (socket === active && !stopped && active.readyState === WebSocket.OPEN)
         active.send(
           JSON.stringify({
-            v: 2,
+            v: 7,
             type: 'JOIN_ROOM',
             actionId: crypto.randomUUID(),
             roomId: activeConfig.roomId,
@@ -492,7 +492,7 @@ function open() {
     if (socket !== active || stopped) return;
     const message = JSON.parse(event.data) as ServerMessage,
       store = useTable.getState();
-    if (message.v !== 2) {
+    if (message.v !== 7) {
       notify('Your app version is out of date. Reload this page.');
       return;
     }
@@ -533,6 +533,10 @@ function open() {
           status: 'live',
           inviteCode: message.inviteCode,
           previews: {},
+          viewSceneId:
+            !contextChanged && store.viewSceneId && message.state.scenes[store.viewSceneId]
+              ? store.viewSceneId
+              : null,
           ...(contextChanged
             ? {
                 deliveries: {},
@@ -540,6 +544,7 @@ function open() {
                 rollQueue: [],
                 pings: [],
                 tool: 'select' as const,
+                viewSceneId: null,
                 dialog: null,
                 panel: ownCharacter ? ('character' as const) : ('chronicle' as const),
                 characterId: ownCharacter?.id || null,
@@ -556,16 +561,39 @@ function open() {
             : {}),
           selected:
             store.room.id === message.state.id &&
-            store.room.activeSceneId === message.state.activeSceneId &&
+            (store.viewSceneId || store.room.activeSceneId) ===
+              (contextChanged
+                ? message.state.activeSceneId
+                : store.viewSceneId && message.state.scenes[store.viewSceneId]
+                  ? store.viewSceneId
+                  : message.state.activeSceneId) &&
             store.selected &&
-            message.state.scenes[message.state.activeSceneId].tokens[store.selected]
+            message.state.scenes[
+              contextChanged
+                ? message.state.activeSceneId
+                : store.viewSceneId && message.state.scenes[store.viewSceneId]
+                  ? store.viewSceneId
+                  : message.state.activeSceneId
+            ].tokens[store.selected]
               ? store.selected
               : null,
           selectedIds:
             store.room.id === message.state.id &&
-            store.room.activeSceneId === message.state.activeSceneId
+            (store.viewSceneId || store.room.activeSceneId) ===
+              (contextChanged
+                ? message.state.activeSceneId
+                : store.viewSceneId && message.state.scenes[store.viewSceneId]
+                  ? store.viewSceneId
+                  : message.state.activeSceneId)
               ? store.selectedIds.filter(
-                  (id) => !!message.state.scenes[message.state.activeSceneId].tokens[id],
+                  (id) =>
+                    !!message.state.scenes[
+                      contextChanged
+                        ? message.state.activeSceneId
+                        : store.viewSceneId && message.state.scenes[store.viewSceneId]
+                          ? store.viewSceneId
+                          : message.state.activeSceneId
+                    ].tokens[id],
                 )
               : [],
           history:
@@ -603,6 +631,7 @@ function open() {
           previews = { ...store.previews };
         room.revision = message.revision;
         let sceneChanged = false,
+          transitionEffect: import('../shared/model.js').SceneTransition | null = null,
           dimensionsChanged = false;
         for (const change of message.changes) {
           switch (change.kind) {
@@ -613,7 +642,7 @@ function open() {
               delete previews[change.tokenId];
               break;
             case 'scene':
-              if (change.scene.id === room.activeSceneId) {
+              if (change.scene.id === (store.viewSceneId || room.activeSceneId)) {
                 const old = store.room.scenes[change.scene.id];
                 dimensionsChanged =
                   !!old && (old.width !== change.scene.width || old.height !== change.scene.height);
@@ -621,37 +650,42 @@ function open() {
               break;
             case 'scene-active':
               sceneChanged = true;
+              transitionEffect = change.transition || null;
               break;
             case 'roll':
               break;
           }
         }
+        const viewSceneId =
+          !sceneChanged && store.viewSceneId && room.scenes[store.viewSceneId]
+            ? store.viewSceneId
+            : null;
+        const viewedScene = room.scenes[viewSceneId || room.activeSceneId];
         store.set({
           room,
+          viewSceneId,
           previews,
-          selected:
-            store.selected && room.scenes[room.activeSceneId].tokens[store.selected]
-              ? store.selected
-              : null,
-          selectedIds: store.selectedIds.filter(
-            (id) => !!room.scenes[room.activeSceneId].tokens[id],
-          ),
+          selected: store.selected && viewedScene.tokens[store.selected] ? store.selected : null,
+          selectedIds: store.selectedIds.filter((id) => !!viewedScene.tokens[id]),
           ...(dimensionsChanged ? { fitNonce: store.fitNonce + 1 } : {}),
           ...(sceneChanged
             ? {
                 fitNonce: store.fitNonce + 1,
                 selected: null,
                 selectedIds: [],
+                selectedPin: null,
+                proximityCues: [],
                 previews: {},
                 pings: [],
                 sceneTransition: Date.now(),
+                transitionEffect,
               }
             : {}),
         });
         break;
       }
       case 'TOKEN_MOVE_PREVIEW':
-        if (message.sceneId === store.room.activeSceneId) {
+        if (message.sceneId === (store.viewSceneId || store.room.activeSceneId)) {
           store.set({ previews: { ...store.previews, [message.tokenId]: message.position } });
           setTimeout(() => {
             const s = useTable.getState();
@@ -709,7 +743,7 @@ function open() {
         });
         break;
       case 'TOKEN_MOVE_PREVIEW_BATCH':
-        if (message.sceneId === store.room.activeSceneId) {
+        if (message.sceneId === (store.viewSceneId || store.room.activeSceneId)) {
           const previews = { ...store.previews };
           for (const p of message.positions) previews[p.tokenId] = p.position;
           store.set({ previews });
@@ -725,11 +759,35 @@ function open() {
         presentRoll(message.roll);
         break;
       case 'PING':
+        if (
+          message.userId === store.self?.id &&
+          store.pings.some(
+            (p) =>
+              p.userId === message.userId &&
+              p.x === message.position.x &&
+              p.y === message.position.y &&
+              Date.now() - p.at < 2000,
+          )
+        )
+          break;
         store.set({
           pings: [
             ...store.pings.filter((p) => Date.now() - p.at < 2000),
-            { ...message.position, at: Date.now() },
-          ],
+            {
+              ...message.position,
+              at: Date.now(),
+              userId: message.userId,
+              name: store.presence.find((p) => p.id === message.userId)?.name,
+            },
+          ].slice(-30),
+        });
+        break;
+      case 'PROXIMITY_CUE':
+        store.set({
+          proximityCues: [
+            ...store.proximityCues,
+            { id: crypto.randomUUID(), message: message.message },
+          ].slice(-20),
         });
         break;
       case 'SAVED':

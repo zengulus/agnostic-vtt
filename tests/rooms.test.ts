@@ -43,6 +43,55 @@ describe('room admission and lifecycle', () => {
     await manager.close();
     vi.useRealTimers();
   });
+  it('coalesces wall, door and lighting edits into one scheduled snapshot', async () => {
+    const room = await manager.create(owner, 'Lighting'),
+      gm = peer(owner.id);
+    await manager.join(gm, room.id);
+    const save = vi.spyOn(storage, 'save');
+    for (let i = 0; i < 20; i++)
+      manager.handle(gm, room.id, {
+        v: 7,
+        actionId: `wall-${i}`,
+        type: 'WALL_SET',
+        sceneId: 'hollow',
+        wall: {
+          id: `wall-${i}`,
+          a: { x: i, y: 20 },
+          b: { x: i, y: 100 },
+          kind: i === 0 ? 'door' : 'wall',
+        },
+      });
+    manager.handle(gm, room.id, {
+      v: 7,
+      actionId: 'lights',
+      type: 'LIGHTING_SET',
+      sceneId: 'hollow',
+      lighting: { vision: true, darkness: 0.7 },
+    });
+    expect(save).not.toHaveBeenCalled();
+    await vi.advanceTimersByTimeAsync(60000);
+    expect(save).toHaveBeenCalledTimes(1);
+    const persisted = storage.rooms.get(room.id)!;
+    expect(Object.keys(persisted.state.scenes.hollow.walls || {})).toHaveLength(20);
+    expect(JSON.stringify(persisted.state.scenes.hollow.walls).length).toBeLessThan(2500);
+    save.mockClear();
+    manager.handle(gm, room.id, {
+      v: 7,
+      actionId: 'same-light',
+      type: 'LIGHTING_SET',
+      sceneId: 'hollow',
+      lighting: { vision: true, darkness: 0.7 },
+    });
+    manager.handle(gm, room.id, {
+      v: 7,
+      actionId: 'same-wall',
+      type: 'WALL_SET',
+      sceneId: 'hollow',
+      wall: { id: 'wall-0', a: { x: 0, y: 20 }, b: { x: 0, y: 100 }, kind: 'door' },
+    });
+    await vi.advanceTimersByTimeAsync(60000);
+    expect(save).not.toHaveBeenCalled();
+  });
   it('evicts unused new campaigns and can resume their durable snapshots', async () => {
     const room = await manager.create(owner, 'Unused');
     await vi.advanceTimersByTimeAsync(15 * 60000);
@@ -78,7 +127,7 @@ describe('room admission and lifecycle', () => {
       gm = peer(owner.id);
     await manager.join(gm, room.id);
     manager.handle(gm, room.id, {
-      v: 2,
+      v: 7,
       type: 'TOKEN_MOVE_COMMIT',
       actionId: 'move',
       sceneId: 'hollow',
@@ -189,7 +238,7 @@ describe('room admission and lifecycle', () => {
       gm: Peer = peer(owner.id);
     await manager.join(gm, room.id);
     manager.handle(gm, room.id, {
-      v: 2,
+      v: 7,
       type: 'TOKEN_MOVE_COMMIT',
       actionId: 'move',
       sceneId: 'hollow',
@@ -197,7 +246,7 @@ describe('room admission and lifecycle', () => {
       position: { x: 520, y: 760 },
     });
     await manager.join(peer('guest'), room.id, room.inviteCode);
-    expect(() => manager.handle(gm, room.id, { v: 2, type: 'UNDO', actionId: 'undo' })).toThrow(
+    expect(() => manager.handle(gm, room.id, { v: 7, type: 'UNDO', actionId: 'undo' })).toThrow(
       'Nothing to undo',
     );
   });

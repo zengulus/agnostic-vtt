@@ -1,4 +1,6 @@
 import { GridPreview } from './GridPreview.js';
+import { ProximityEditor } from './ProximityEditor.js';
+import { LightEffects } from './LightEffects.js';
 import { AssetImage } from '../assets.js';
 import { useEffect, useRef, useState } from 'react';
 import { ArrowUpRight, Check, Copy, Image, Link2, Lock, Plus, Sparkles, X } from 'lucide-react';
@@ -36,7 +38,7 @@ function useSceneDialog(dialog: 'map' | 'new-scene' | 'token' | 'grid') {
     const s = useTable.getState();
     return {
       roomId: s.room.id,
-      scene: s.room.scenes[s.room.activeSceneId],
+      scene: s.room.scenes[s.viewSceneId || s.room.activeSceneId],
       userId: s.self?.id,
       role: s.self?.role,
     };
@@ -44,7 +46,7 @@ function useSceneDialog(dialog: 'map' | 'new-scene' | 'token' | 'grid') {
   const invalidated = useRef(false);
   const matches = (s: ReturnType<typeof useTable.getState>) =>
     s.room.id === context.roomId &&
-    s.room.activeSceneId === context.scene.id &&
+    (s.viewSceneId || s.room.activeSceneId) === context.scene.id &&
     !!s.room.scenes[context.scene.id] &&
     s.self?.id === context.userId &&
     s.self?.role === context.role;
@@ -790,8 +792,16 @@ function MapDialog({ create }: { create: boolean }) {
             width,
             height,
             create,
+            ...(create ? { visibility: 'gm' as const } : {}),
           });
-          if (currentScene()) s.set({ dialog: null, fitNonce: useTable.getState().fitNonce + 1 });
+          if (currentScene())
+            s.set({
+              dialog: null,
+              ...(create
+                ? { viewSceneId: sceneId, selected: null, selectedIds: [], selectedPin: null }
+                : {}),
+              fitNonce: useTable.getState().fitNonce + 1,
+            });
         } catch (error) {
           if (currentScene())
             setError(error instanceof Error ? error.message : 'Scene save failed.');
@@ -948,6 +958,16 @@ function TokenDialog() {
               disabled={!gm}
             />
           </label>
+          {gm && (
+            <label className="check-label">
+              <input
+                type="checkbox"
+                checked={!!token.hideLabel}
+                onChange={(e) => update({ hideLabel: e.target.checked || undefined })}
+              />{' '}
+              Hide label on map unless selected
+            </label>
+          )}
           <div className="form-row">
             <label>
               Visibility
@@ -988,7 +1008,7 @@ function TokenDialog() {
               aria-label="Linked character sheet"
               value={token.characterId || ''}
               disabled={!gm}
-              onChange={(e) => update({ characterId: e.target.value || null })}
+              onChange={(e) => update({ characterId: e.target.value || null, resourceId: null })}
             >
               <option value="">No linked sheet</option>
               {token.characterId && !s.room.characters?.[token.characterId] && (
@@ -1004,6 +1024,24 @@ function TokenDialog() {
               A sheet keeps its resources across scenes. Its owner controls its abilities.
             </small>
           </label>
+          {token.characterId && s.room.characters?.[token.characterId] && (
+            <label>
+              Token bar source
+              <select
+                aria-label="Token bar source"
+                value={token.resourceId || ''}
+                disabled={!gm}
+                onChange={(e) => update({ resourceId: e.target.value || null })}
+              >
+                <option value="">Independent scene resource</option>
+                {s.room.characters[token.characterId].resources.map((resource) => (
+                  <option key={resource.id} value={resource.id}>
+                    {resource.name} · character resource
+                  </option>
+                ))}
+              </select>
+            </label>
+          )}
           <h3>Appearance</h3>
           <AssetPicker
             purpose="token"
@@ -1055,6 +1093,7 @@ function TokenDialog() {
                 onChange={(e) =>
                   update({
                     resource: {
+                      ...token.resource,
                       label: e.target.value,
                       value: token.resource?.value || 0,
                       max: token.resource?.max || 10,
@@ -1069,7 +1108,7 @@ function TokenDialog() {
               Current
               <input
                 type="number"
-                min={0}
+                min={token.resource?.min ?? 0}
                 max={10000}
                 value={token.resource?.value || 0}
                 onChange={(e) =>
@@ -1087,6 +1126,19 @@ function TokenDialog() {
                 value={token.resource?.max || 10}
                 onChange={(e) =>
                   update({ resource: { ...token.resource!, max: Number(e.target.value) } })
+                }
+                disabled={!gm}
+              />
+            </label>
+            <label>
+              Minimum
+              <input
+                type="number"
+                min={-10000}
+                max={0}
+                value={token.resource?.min ?? 0}
+                onChange={(e) =>
+                  update({ resource: { ...token.resource!, min: Number(e.target.value) } })
                 }
                 disabled={!gm}
               />
@@ -1109,6 +1161,23 @@ function TokenDialog() {
                   </button>
                 ))}
               </div>
+              {(token.statuses || []).map((status) => (
+                <label key={status.id}>
+                  {status.label} · duration or note
+                  <input
+                    aria-label={`${status.label} duration or note`}
+                    value={status.note || ''}
+                    maxLength={120}
+                    onChange={(e) =>
+                      update({
+                        statuses: token.statuses!.map((item) =>
+                          item.id === status.id ? { ...item, note: e.target.value } : item,
+                        ),
+                      })
+                    }
+                  />
+                </label>
+              ))}
               <div className="form-row">
                 <label>
                   Status label
@@ -1132,7 +1201,7 @@ function TokenDialog() {
                 <button
                   type="button"
                   aria-label="Add status"
-                  disabled={!statusLabel.trim() || (token.statuses?.length || 0) >= 8}
+                  disabled={!statusLabel.trim() || (token.statuses?.length || 0) >= 16}
                   onClick={() => {
                     update({
                       statuses: [
@@ -1163,6 +1232,168 @@ function TokenDialog() {
           )}
           {gm && (
             <>
+              <ProximityEditor
+                value={token.proximity}
+                onChange={(proximity) => update({ proximity })}
+              />
+              <details>
+                <summary>Sight & light</summary>
+                <label>
+                  <input
+                    type="checkbox"
+                    checked={!!token.sight}
+                    onChange={(e) =>
+                      update({
+                        sight: e.target.checked
+                          ? { range: 600, angle: 90, showCone: true, showToPlayers: false }
+                          : undefined,
+                      })
+                    }
+                  />{' '}
+                  Configure NPC vision cone
+                </label>
+                {token.sight && (
+                  <>
+                    <label>
+                      <input
+                        type="checkbox"
+                        checked={!!token.sight.showCone}
+                        onChange={(e) =>
+                          update({ sight: { ...token.sight!, showCone: e.target.checked } })
+                        }
+                      />{' '}
+                      Show cone to GM
+                    </label>
+                    <label>
+                      <input
+                        type="checkbox"
+                        checked={!!token.sight.showToPlayers}
+                        onChange={(e) =>
+                          update({ sight: { ...token.sight!, showToPlayers: e.target.checked } })
+                        }
+                      />{' '}
+                      Show cone to players
+                    </label>
+                    <label>
+                      Sight range (map pixels)
+                      <input
+                        type="number"
+                        min={0}
+                        max={10000}
+                        value={token.sight.range}
+                        onChange={(e) =>
+                          update({ sight: { ...token.sight!, range: Number(e.target.value) } })
+                        }
+                      />
+                    </label>
+                    <label>
+                      Vision angle (degrees)
+                      <input
+                        type="number"
+                        min={1}
+                        max={360}
+                        value={token.sight.angle}
+                        onChange={(e) =>
+                          update({ sight: { ...token.sight!, angle: Number(e.target.value) } })
+                        }
+                      />
+                    </label>
+                    <small>
+                      The cone follows token rotation; 0° points right. Player shared vision stays
+                      360°.
+                    </small>
+                  </>
+                )}
+                <label>
+                  <input
+                    type="checkbox"
+                    checked={!!token.light}
+                    onChange={(e) =>
+                      update({
+                        light: e.target.checked
+                          ? { radius: 240, color: '#ffd080', intensity: 0.8 }
+                          : undefined,
+                      })
+                    }
+                  />{' '}
+                  Emit light
+                </label>
+                {token.light && (
+                  <>
+                    <label>
+                      Light radius (map pixels)
+                      <input
+                        type="number"
+                        min={0}
+                        max={5000}
+                        value={token.light.radius}
+                        onChange={(e) =>
+                          update({ light: { ...token.light!, radius: Number(e.target.value) } })
+                        }
+                      />
+                    </label>
+                    <label>
+                      Light colour
+                      <input
+                        type="color"
+                        value={token.light.color}
+                        onChange={(e) =>
+                          update({ light: { ...token.light!, color: e.target.value } })
+                        }
+                      />
+                    </label>
+                    <label>
+                      Light intensity
+                      <input
+                        type="range"
+                        min={0}
+                        max={1}
+                        step={0.05}
+                        value={token.light.intensity}
+                        onChange={(e) =>
+                          update({ light: { ...token.light!, intensity: Number(e.target.value) } })
+                        }
+                      />
+                    </label>
+                    <LightEffects
+                      prefix="Token light"
+                      light={token.light}
+                      onChange={(light) => update({ light })}
+                    />
+                    <label>
+                      Light beam width (degrees)
+                      <input
+                        type="number"
+                        min={1}
+                        max={360}
+                        value={token.light.angle ?? 360}
+                        onChange={(e) =>
+                          update({ light: { ...token.light!, angle: Number(e.target.value) } })
+                        }
+                      />
+                    </label>
+                    {(token.light.angle ?? 360) < 360 && (
+                      <>
+                        <label>
+                          Light direction offset (degrees)
+                          <input
+                            type="number"
+                            min={-360}
+                            max={360}
+                            value={token.light.direction ?? 0}
+                            onChange={(e) =>
+                              update({
+                                light: { ...token.light!, direction: Number(e.target.value) },
+                              })
+                            }
+                          />
+                        </label>
+                        <small>0° points right; the beam turns with the token.</small>
+                      </>
+                    )}
+                  </>
+                )}
+              </details>
               <label>
                 GM note
                 <textarea
@@ -1276,11 +1507,14 @@ function GridDialog() {
             Measurement convention
             <select
               value={grid.measurement || 'real'}
-              onChange={(e) => update({ measurement: e.target.value as 'real' | 'grid' })}
+              onChange={(e) =>
+                update({ measurement: e.target.value as 'real' | 'grid' | 'alternating' })
+              }
               disabled={!!s.self && !gm}
             >
               <option value="real">Real distance</option>
               <option value="grid">Grid steps</option>
+              <option value="alternating">Alternating diagonals (5/10)</option>
             </select>
           </label>
         </div>
@@ -1627,7 +1861,9 @@ function Help() {
           <code>2d20kh1</code> keeps the highest die; <code>4d6dl1</code> drops the lowest. Use
           kh/kl to keep highest/lowest or dh/dl to drop highest/lowest, followed by a count.
           <code>5d6r&lt;2</code> rerolls ones until each die is at least 2. Rerolls support &lt;,
-          &lt;=, &gt;, &gt;= and =, and run before keep/drop. These also work in macros.
+          &lt;=, &gt;, &gt;= and =, and run before keep/drop. <code>2d6!</code> adds another die for
+          each maximum, up to 20 extra dice per roll. Explosions cannot be combined with other
+          suffixes on the same term. These also work in macros.
         </span>
       </div>
       <p className="field-note">

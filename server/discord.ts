@@ -78,7 +78,7 @@ export function discordPayload(roll: Roll, campaign: string) {
           ...characterFields,
           ...groups.map((group, index) => {
             const value = roll.macro
-                ? `${formatMacroGroup(group)}${group.terms.some((t) => t.kept || t.rerolls) ? `\n${formatRollBreakdown(group.terms)}` : ''}`
+                ? `${formatMacroGroup(group)}${group.terms.some((t) => t.kept || t.rerolls || t.explosions) ? `\n${formatRollBreakdown(group.terms)}` : ''}`
                 : `${roll.expression}\n${roll.terms.map((t) => `${t.sign < 0 ? '−' : '+'}${formatRollValues(t)}`).join(' ')} = ${roll.total}`,
               safe = group.selections
                 ? group.selections.map((entry) => `• ${discordTableEntry(entry)}`).join('\n')

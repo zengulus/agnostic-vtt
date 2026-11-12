@@ -45,7 +45,7 @@ describe('shutdown persistence', () => {
     const peer: Peer = { identity: owner, send() {} };
     await manager.join(peer, id);
     manager.handle(peer, id, {
-      v: 2,
+      v: 7,
       actionId,
       type: 'TOKEN_MOVE_COMMIT',
       sceneId: 'hollow',

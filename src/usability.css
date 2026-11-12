@@ -836,3 +836,43 @@ canvas:focus-visible {
     height: 30px;
   }
 }
+
+/* Compact, on-demand condition editing for tokens and tracker entries. */
+.token-statuses {
+  position: relative;
+  min-width: 0;
+}
+.token-statuses > summary {
+  cursor: pointer;
+}
+.token-statuses[open] {
+  max-height: min(55vh, 28rem);
+  overflow: auto;
+  min-width: 13rem;
+  padding: 0.5rem;
+  background: var(--panel, #1d2924);
+  color: #f5e9ce;
+  border: 1px solid #8a7955;
+  border-radius: 0.4rem;
+}
+.token-statuses form {
+  display: grid;
+  gap: 0.35rem;
+}
+.token-statuses label {
+  display: grid;
+  gap: 0.15rem;
+}
+.token-statuses input,
+.token-statuses select {
+  max-width: 100%;
+}
+.token-statuses > div {
+  display: flex;
+  align-items: center;
+  gap: 0.35rem;
+}
+.token-statuses > div span {
+  flex: 1;
+  overflow-wrap: anywhere;
+}

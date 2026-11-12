@@ -10,6 +10,14 @@ import { physicalDice, predeterminedNotation } from '../shared/dice.js';
 
 const example = String.raw`[Attack Name]\([Attack Roll(1d20 + X)],[Damage Roll(1d6 + [Fire(1d6)] + [Akashic(12)])`;
 describe('data-only named roll macros', () => {
+  it('handles a large damage pool and attack in separate groups', () => {
+    const result = evaluateMacro(
+      parseMacro('[Strike]([Attack(1d20)],[Damage(20d6)])'),
+      {},
+      () => 2,
+    );
+    expect(result.groups.map((group) => group.total)).toEqual([2, 40]);
+  });
   it('imports the supplied format, repairs trailing delimiters, and keeps unrelated totals separate', () => {
     const definition = parseMacro(example),
       faces = [14, 3, 4];
@@ -73,8 +81,8 @@ describe('data-only named roll macros', () => {
   it.each([
     '[Bad]([Roll(1d7)])',
     '[Bad]([Roll(0d6)])',
-    '[Bad]([Roll(21d6)])',
-    '[Bad]([A(20d6)],[B(d4)])',
+    '[Bad]([Roll(41d6)])',
+    '[Bad]([A(40d6)],[B(d4)])',
     '[Bad]([Roll(10001)])',
     '[Bad]([Roll(1d6 * 2)])',
     '[Bad]([Roll(Math.random())])',

@@ -35,7 +35,7 @@ class Client {
   }
   send(action: Action) {
     const actionId = randomUUID();
-    this.ws.send(JSON.stringify({ ...action, v: 2, actionId }));
+    this.ws.send(JSON.stringify({ ...action, v: 7, actionId }));
     return actionId;
   }
   async wait<T extends ServerMessage['type']>(
@@ -280,7 +280,7 @@ describe('campaign workshop over real HTTP and WebSockets', () => {
     await manager.join(peer, room.id);
     const token = (await manager.authorize(room.id, owner.id)).state.scenes.hollow.tokens.ranger;
     const action = (a: Action) =>
-      manager.handle(peer, room.id, { ...a, v: 2, actionId: randomUUID() });
+      manager.handle(peer, room.id, { ...a, v: 7, actionId: randomUUID() });
     for (let i = 0; i < 55; i++)
       action({ type: 'TOKEN_UPDATE', sceneId: 'hollow', token: { ...token, name: `Edit ${i}` } });
     for (let i = 0; i < 50; i++) action({ type: 'UNDO' });

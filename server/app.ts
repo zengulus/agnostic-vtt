@@ -65,7 +65,7 @@ export function createApp(
       if (req.url === '/api/health') {
         json(res, 200, {
           ok: true,
-          protocol: 2,
+          protocol: 7,
           authMode: auth instanceof LocalAuth ? 'local' : 'supabase',
         });
         return;
@@ -367,7 +367,7 @@ export function createApp(
         manager.handle(peer, roomId, message);
       } catch (error) {
         send({
-          v: 2,
+          v: 7,
           type: 'ERROR',
           actionId,
           message:

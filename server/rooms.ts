@@ -17,6 +17,7 @@ import type { Identity } from './auth.js';
 import { metrics, SnapshotConflictError, type Persistence } from './persistence.js';
 import type { AssetStorage } from './assets.js';
 import { DiscordDelivery, normalizeWebhook } from './discord.js';
+import { proximityCues } from '../shared/proximity.js';
 import type { DiscordStatus } from '../shared/protocol.js';
 
 export interface Peer {
@@ -116,7 +117,7 @@ export class RoomManager {
     this.discordDelivery.cancelRoom(room.data.state.id);
     if (this.rooms.get(room.data.state.id) === room) this.rooms.delete(room.data.state.id);
     for (const peer of room.peers) {
-      peer.send({ v: 2, type: 'ERROR', message: new SnapshotConflictError().message });
+      peer.send({ v: 7, type: 'ERROR', message: new SnapshotConflictError().message });
       peer.close?.('Saved table changed; reconnect');
     }
     room.peers.clear();
@@ -192,7 +193,11 @@ export class RoomManager {
         throw new Error('Your membership was removed. Ask the campaign owner for access.');
       room.undo = [];
       room.redo = [];
-      for (const p of room.peers) this.history(room, p);
+      for (const p of room.peers) {
+        this.history(room, p);
+        if (room.data.state.scenes[room.data.state.activeSceneId]?.lighting?.vision)
+          this.snapshot(room, p);
+      }
     }
     if (room.idleTimer) clearTimeout(room.idleTimer);
     room.idleTimer = undefined;
@@ -275,7 +280,7 @@ export class RoomManager {
   }
   private discordStatusMessage(room: LiveRoom, peer: Peer) {
     peer.send({
-      v: 2,
+      v: 7,
       type: 'DISCORD_STATUS',
       discord: {
         configured: !!room.data.discord,
@@ -299,7 +304,7 @@ export class RoomManager {
       room.data.state.name,
       (status, message) => {
         for (const peer of room.peers)
-          peer.send({ v: 2, type: 'DISCORD_DELIVERY', rollId: roll.id, status, message });
+          peer.send({ v: 7, type: 'DISCORD_DELIVERY', rollId: roll.id, status, message });
       },
       manual,
     );
@@ -485,6 +490,12 @@ export class RoomManager {
           );
       if (Object.values(state.tokenLibrary || {}).some((token) => referenced(token.image)))
         throw new Error('This image is still used in your saved token library.');
+      if (
+        Object.values(state.encounters || {}).some((encounter) =>
+          encounter.tokens.some((token) => referenced(token.image)),
+        )
+      )
+        throw new Error('This image is still used in a saved encounter.');
       const asset = state.assets?.[id];
       if (asset && Object.hasOwn(state.assets!, id)) {
         const assets = { ...state.assets };
@@ -543,7 +554,7 @@ export class RoomManager {
   }
   private snapshot(room: LiveRoom, peer: Peer) {
     peer.send({
-      v: 2,
+      v: 7,
       type: 'ROOM_SNAPSHOT',
       savedRevision: room.persistedRevision,
       savePending: room.dirty,
@@ -562,7 +573,7 @@ export class RoomManager {
   private history(room: LiveRoom, peer: Peer) {
     if (this.role(room, peer) === 'gm')
       peer.send({
-        v: 2,
+        v: 7,
         type: 'HISTORY_STATUS',
         history: {
           canUndo: !!room.undo.length,
@@ -575,7 +586,7 @@ export class RoomManager {
   private memberList(room: LiveRoom, peer: Peer) {
     if (this.role(room, peer) === 'gm')
       peer.send({
-        v: 2,
+        v: 7,
         type: 'MEMBERS_UPDATE',
         ownerId: room.data.ownerId,
         removedMembers:
@@ -594,7 +605,7 @@ export class RoomManager {
   }
   private broadcastPresence(room: LiveRoom) {
     for (const p of room.peers)
-      p.send({ v: 2, type: 'PRESENCE_UPDATE', presence: this.presence(room) });
+      p.send({ v: 7, type: 'PRESENCE_UPDATE', presence: this.presence(room) });
   }
   async leave(peer: Peer, id: string) {
     const room = this.rooms.get(id);
@@ -641,6 +652,9 @@ export class RoomManager {
     if (!room || !room.peers.has(peer)) throw new Error('Join a campaign first.');
     const data = room.data,
       role = this.role(room, peer);
+    const playerIds = Object.entries(data.members)
+      .filter(([, member]) => member.role === 'player')
+      .map(([id]) => id);
     if (message.type === 'JOIN_ROOM') throw new Error('Already connected to a campaign.');
     if (message.type === 'SESSION_ROLE') {
       if (message.role === 'gm' && data.members[peer.identity.id]?.role !== 'gm')
@@ -657,9 +671,12 @@ export class RoomManager {
     const key = `${peer.identity.id}:${message.actionId}`;
     if (
       room.seen.has(key) ||
-      (['DICE_ROLL_REQUEST', 'MACRO_ROLL_REQUEST', 'CHARACTER_ABILITY_USE'].includes(
-        message.type,
-      ) &&
+      ([
+        'DICE_ROLL_REQUEST',
+        'MACRO_ROLL_REQUEST',
+        'STAT_ROLL_REQUEST',
+        'CHARACTER_ABILITY_USE',
+      ].includes(message.type) &&
         data.state.rolls.some(
           (r) => r.actionId === message.actionId && r.userId === peer.identity.id,
         ))
@@ -671,32 +688,48 @@ export class RoomManager {
       throw new Error('You are no longer a member of this campaign.');
     if (message.type === 'PING') {
       for (const p of room.peers)
-        p.send({ v: 2, type: 'PING', position: message.position, userId: peer.identity.id });
+        p.send({ v: 7, type: 'PING', position: message.position, userId: peer.identity.id });
       return;
     }
     if (message.type === 'TOKEN_MOVE_PREVIEW' || message.type === 'TOKEN_MOVE_PREVIEW_BATCH') {
       const s = data.state.scenes[message.sceneId];
-      if (!s) throw new Error('Scene not found.');
+      if (!s || (role !== 'gm' && s.visibility === 'gm' && s.id !== data.state.activeSceneId))
+        throw new Error('Scene not found.');
       const positions =
         message.type === 'TOKEN_MOVE_PREVIEW'
           ? [{ tokenId: message.tokenId, position: message.position }]
           : message.positions;
       const validated = positions.map((p) => {
         const t = s.tokens[p.tokenId];
-        if (!t || !canControl(t, peer.identity.id, role) || !tokenVisible(t, s, role))
+        if (
+          !t ||
+          !canControl(t, peer.identity.id, role) ||
+          !tokenVisible(t, s, role, peer.identity.id, playerIds)
+        )
           throw new Error('You do not control that token.');
         return { ...p, position: clampPoint(p.position, s.width, s.height, t.size) };
       });
       for (const p of room.peers) {
         if (p === peer) continue;
         const pRole = this.role(room, p);
+        if (pRole !== 'gm' && s.visibility === 'gm' && s.id !== data.state.activeSceneId) continue;
         const visible = validated.filter(
-          (x) => pRole === 'gm' || (s.tokens[x.tokenId].visibility === 'public' && !s.fog.enabled),
+          (x) =>
+            pRole === 'gm' ||
+            (!s.fog.enabled &&
+              tokenVisible(s.tokens[x.tokenId], s, pRole, p.identity.id, playerIds) &&
+              tokenVisible(
+                { ...s.tokens[x.tokenId], ...x.position },
+                s,
+                pRole,
+                p.identity.id,
+                playerIds,
+              )),
         );
         if (!visible.length) continue;
         if (message.type === 'TOKEN_MOVE_PREVIEW')
           p.send({
-            v: 2,
+            v: 7,
             type: 'TOKEN_MOVE_PREVIEW',
             sceneId: s.id,
             tokenId: visible[0].tokenId,
@@ -705,7 +738,7 @@ export class RoomManager {
           });
         else
           p.send({
-            v: 2,
+            v: 7,
             type: 'TOKEN_MOVE_PREVIEW_BATCH',
             sceneId: s.id,
             positions: visible,
@@ -745,7 +778,7 @@ export class RoomManager {
           for (const p of room.peers)
             if (p.identity.id === message.userId) {
               room.peers.delete(p);
-              p.send({ v: 2, type: 'REVOKED', message: 'You were removed from this campaign.' });
+              p.send({ v: 7, type: 'REVOKED', message: 'You were removed from this campaign.' });
               p.close?.('Membership revoked');
             }
         } else data.members[message.userId] = { ...member, role: message.role };
@@ -771,7 +804,10 @@ export class RoomManager {
       target.push(entry);
     } else {
       changes = prepareAction(data, peer.identity, message, role);
-      if (changes.length && !['DICE_ROLL_REQUEST', 'MACRO_ROLL_REQUEST'].includes(message.type)) {
+      if (
+        changes.length &&
+        !['DICE_ROLL_REQUEST', 'MACRO_ROLL_REQUEST', 'STAT_ROLL_REQUEST'].includes(message.type)
+      ) {
         const edits = changes.filter((change) => change.kind !== 'roll');
         const inverse = inverseChanges(before, edits);
         const groupId = message.type === 'FOG_APPEND' ? message.groupId : undefined,
@@ -791,7 +827,28 @@ export class RoomManager {
           room.undo.shift();
       }
     }
+    if (!changes.length) {
+      peer.send({
+        v: 7,
+        type: 'STATE_PATCH',
+        actionId: message.actionId,
+        revision: before.revision,
+        changes: [],
+      });
+      return;
+    }
     data.state = { ...applyChanges(before, changes), revision: before.revision + 1 };
+    const cues =
+      message.type === 'TOKEN_MOVE_COMMIT'
+        ? proximityCues(before, data.state, message.sceneId, [message.tokenId])
+        : message.type === 'TOKEN_MOVE_BATCH'
+          ? proximityCues(
+              before,
+              data.state,
+              message.sceneId,
+              message.positions.map((p) => p.tokenId),
+            )
+          : [];
     room.dirty = true;
     room.generation++;
     room.seen.set(key, true);
@@ -803,16 +860,34 @@ export class RoomManager {
         data.state,
         this.role(room, p),
         p.identity.id,
+        playerIds,
       );
       p.send({
-        v: 2,
+        v: 7,
         type: 'STATE_PATCH',
         actionId: message.actionId,
         revision: data.state.revision,
         changes: projected,
       });
       for (const c of projected)
-        if (c.kind === 'roll') p.send({ v: 2, type: 'DICE_ROLL_RESULT', roll: c.roll });
+        if (c.kind === 'roll') p.send({ v: 7, type: 'DICE_ROLL_RESULT', roll: c.roll });
+      for (const cue of cues) {
+        const cueScene = data.state.scenes[data.state.activeSceneId];
+        const text =
+          this.role(room, p) === 'gm'
+            ? cue.gm
+            : cueScene.tokens[cue.tokenId] &&
+                tokenVisible(
+                  cueScene.tokens[cue.tokenId],
+                  cueScene,
+                  'player',
+                  p.identity.id,
+                  playerIds,
+                )
+              ? cue.player
+              : undefined;
+        if (text) p.send({ v: 7, type: 'PROXIMITY_CUE', message: text });
+      }
       this.history(room, p);
     }
     this.schedule(room);
@@ -823,7 +898,7 @@ export class RoomManager {
         } catch {
           for (const peer of room.peers)
             peer.send({
-              v: 2,
+              v: 7,
               type: 'DISCORD_DELIVERY',
               rollId: change.roll.id,
               status: 'failed',
@@ -848,7 +923,7 @@ export class RoomManager {
     console.error('Snapshot failed; retaining dirty room and retrying.');
     for (const p of room.peers)
       p.send({
-        v: 2,
+        v: 7,
         type: 'ERROR',
         message: 'Snapshot storage is unavailable. Your table is still live; saving will retry.',
       });
@@ -885,7 +960,7 @@ export class RoomManager {
       room.dirty = room.generation !== generation;
       for (const p of room.peers)
         p.send({
-          v: 2,
+          v: 7,
           type: 'SAVED',
           savedAt,
           revision: snapshot.state.revision,

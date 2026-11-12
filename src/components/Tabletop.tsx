@@ -15,7 +15,7 @@ import {
   Minimize2,
   ScanSearch,
 } from 'lucide-react';
-import { useTable } from '../store.js';
+import { useTable, notify } from '../store.js';
 import { launchDemo, liveAvailable, send, sendAndWait } from '../connection.js';
 import {
   clampPoint,
@@ -24,15 +24,28 @@ import {
   snapPoint,
   type Camera,
 } from '../../shared/geometry.js';
-import { canControl, type Point, type Token, type FogOperation } from '../../shared/model.js';
+import {
+  canControl,
+  lightSchema,
+  type Point,
+  type Token,
+  type FogOperation,
+} from '../../shared/model.js';
 import { SceneRenderer, conePoints, type Draft } from '../rendering.js';
 import { TokenResource } from './TokenResource.js';
+import { TokenStatuses } from './TokenStatuses.js';
+import { QuickAbilities } from './QuickAbilities.js';
+import { BatchActions } from './BatchActions.js';
+import { StatRoll } from './StatRoll.js';
 import { ToolOptions } from './Workshop.js';
 import { drawingsAlongBrush, zonesAlongBrush } from '../../shared/drawings.js';
 import { openCharacter } from './Characters.js';
 import { frameTokens } from '../camera.js';
+import { useConfirmedAction } from '../useConfirmedAction.js';
+import { hasLightAnimation, LIGHT_FRAME_MS } from '../../shared/lightFalloff.js';
 interface Drag {
-  kind: 'pan' | 'token' | 'measure' | 'zone' | 'fog' | 'draw' | 'select' | 'erase';
+  kind:
+    'pan' | 'token' | 'measure' | 'light' | 'wall' | 'zone' | 'fog' | 'draw' | 'select' | 'erase';
   start: Point;
   camera: Camera;
   token?: Token;
@@ -46,7 +59,12 @@ interface Drag {
   erasePoint?: Point;
 }
 export function Tabletop() {
+  const rotation = useConfirmedAction();
+  const wallAction = useConfirmedAction();
+  const lightAction = useConfirmedAction();
   const [compactControls, setCompactControls] = useState(false);
+  const [nudgePending, setNudgePending] = useState(false);
+  const [visionPending, setVisionPending] = useState(false);
   const canvas = useRef<HTMLCanvasElement>(null),
     frame = useRef(0),
     dirty = useRef(true),
@@ -54,13 +72,24 @@ export function Tabletop() {
     drag = useRef<Drag | null>(null),
     space = useRef(false),
     nudging = useRef(false),
+    visionPendingRef = useRef(false),
+    nudgeQueue = useRef<string[]>([]),
     draft = useRef<Draft | null>(null),
     renderer = useRef(new SceneRenderer()),
     pointers = useRef(new Map<number, Point>()),
     pinch = useRef<{ distance: number; world: Point; camera: Camera } | null>(null);
   const store = useTable(),
-    scene = store.room.scenes[store.room.activeSceneId],
+    scene = store.room.scenes[store.viewSceneId || store.room.activeSceneId],
     selected = store.selected ? scene.tokens[store.selected] : undefined;
+  const linked =
+    selected?.resourceId && selected.characterId
+      ? store.room.characters?.[selected.characterId]?.resources.find(
+          (r) => r.id === selected.resourceId,
+        )
+      : undefined;
+  const selectedResource = selected?.resourceId
+    ? linked && { label: linked.name, value: linked.current, max: linked.max }
+    : selected?.resource;
   const redraw = () => {
     dirty.current = true;
   };
@@ -72,7 +101,7 @@ export function Tabletop() {
   function fog(operation: FogOperation, groupId?: string) {
     send({
       type: 'FOG_APPEND',
-      sceneId: useTable.getState().room.activeSceneId,
+      sceneId: useTable.getState().viewSceneId || useTable.getState().room.activeSceneId,
       operation,
       ...(groupId ? { groupId } : {}),
     });
@@ -83,7 +112,7 @@ export function Tabletop() {
     if (st.self?.role !== 'gm') return;
     ctx.save();
     const ids = drawingsAlongBrush(
-      Object.values(st.room.scenes[st.room.activeSceneId].annotations || {}),
+      Object.values(st.room.scenes[st.viewSceneId || st.room.activeSceneId].annotations || {}),
       from,
       to,
       st.eraserSize,
@@ -95,7 +124,7 @@ export function Tabletop() {
     ctx.restore();
     for (const id of ids) gesture.erased!.add(id);
     for (const id of zonesAlongBrush(
-      Object.values(st.room.scenes[st.room.activeSceneId].zones),
+      Object.values(st.room.scenes[st.viewSceneId || st.room.activeSceneId].zones),
       from,
       to,
       st.eraserSize,
@@ -138,7 +167,7 @@ export function Tabletop() {
     else
       send({
         type: 'ZONE_UPDATE',
-        sceneId: st.room.activeSceneId,
+        sceneId: st.viewSceneId || st.room.activeSceneId,
         zone: {
           id: crypto.randomUUID(),
           shape: 'polygon',
@@ -147,7 +176,8 @@ export function Tabletop() {
           width,
           height,
           points: d.points,
-          label: 'Marked region',
+          label: st.zoneLabel.trim() || 'Marked region',
+          visibility: st.zoneVisibility,
           color: st.drawColor,
           opacity: 0.2,
           tags: [],
@@ -159,7 +189,7 @@ export function Tabletop() {
     const st = useTable.getState(),
       ids = st.selectedIds.length ? st.selectedIds : st.selected ? [st.selected] : [];
     if (!ids.length || st.self?.role !== 'gm') return;
-    send({ type: 'TOKENS_DELETE', sceneId: st.room.activeSceneId, ids });
+    send({ type: 'TOKENS_DELETE', sceneId: st.viewSceneId || st.room.activeSceneId, ids });
     st.set({ selected: null, selectedIds: [] });
   }
   function groupSelection(group: boolean) {
@@ -173,7 +203,7 @@ export function Tabletop() {
   }
   function duplicateSelection() {
     const st = useTable.getState(),
-      sc = st.room.scenes[st.room.activeSceneId],
+      sc = st.room.scenes[st.viewSceneId || st.room.activeSceneId],
       ids = st.selectedIds.length ? st.selectedIds : st.selected ? [st.selected] : [],
       groupId = ids.length > 1 ? crypto.randomUUID() : undefined;
     if (st.self?.role !== 'gm' || !ids.length) return;
@@ -195,7 +225,10 @@ export function Tabletop() {
     const element = canvas.current!;
     const fit = (tokens = false) => {
       const { w, h } = dimensions.current,
-        s = useTable.getState().room.scenes[useTable.getState().room.activeSceneId];
+        s =
+          useTable.getState().room.scenes[
+            useTable.getState().viewSceneId || useTable.getState().room.activeSceneId
+          ];
       const zoom = Math.max(0.08, Math.min(3, (w - 70) / s.width, (h - 70) / s.height));
       const framed = tokens ? frameTokens(Object.values(s.tokens), w, h) : null;
       useTable.getState().set({
@@ -224,7 +257,7 @@ export function Tabletop() {
     });
     observer.observe(element);
     const context = (s: ReturnType<typeof useTable.getState>) =>
-      `${s.room.id}:${s.room.activeSceneId}:${s.self?.id}:${s.self?.role}:${s.sessionNonce}`;
+      `${s.room.id}:${s.viewSceneId || s.room.activeSceneId}:${s.self?.id}:${s.self?.role}:${s.sessionNonce}`;
     let previousFit = useTable.getState().fitNonce,
       previousFrame = useTable.getState().frameTokensNonce,
       previousContext = context(useTable.getState()),
@@ -233,6 +266,7 @@ export function Tabletop() {
       const changedScene = context(s) !== previousContext;
       const requestedTokens = s.frameTokensNonce !== previousFrame;
       if (s.fitNonce !== previousFit || changedScene || requestedTokens) {
+        if (changedScene) nudgeQueue.current = [];
         previousFit = s.fitNonce;
         previousFrame = s.frameTokensNonce;
         previousContext = context(s);
@@ -245,25 +279,65 @@ export function Tabletop() {
       }
       redraw();
     });
+    let lastLightTick = -1;
+    let candidateTokens: unknown;
+    let candidateSources: unknown;
+    let candidateRole: string | undefined;
+    let candidates: Array<{ x: number; y: number; light: NonNullable<Token['light']> }> = [];
     const draw = () => {
       frame.current = requestAnimationFrame(draw);
       const s = useTable.getState(),
-        animated = s.pings.some((p) => Date.now() - p.at < 2000);
+        activeScene = s.room.scenes[s.viewSceneId || s.room.activeSceneId],
+        tick = Math.floor(Date.now() / LIGHT_FRAME_MS);
+      if (
+        candidateTokens !== activeScene.tokens ||
+        candidateSources !== activeScene.lightSources ||
+        candidateRole !== s.self?.role
+      ) {
+        candidateTokens = activeScene.tokens;
+        candidateSources = activeScene.lightSources;
+        candidateRole = s.self?.role;
+        candidates = (
+          candidateRole === 'gm'
+            ? Object.values(activeScene.tokens).flatMap((t) =>
+                t.light ? [{ x: t.x, y: t.y, light: t.light }] : [],
+              )
+            : Object.values(activeScene.lightSources || {})
+        ).filter((t) => hasLightAnimation(t.light));
+      }
+      const lightAnimated =
+          !document.hidden &&
+          !s.reducedMotion &&
+          candidates.some(
+            (t) =>
+              t.x * s.camera.zoom + s.camera.x + t.light.radius * s.camera.zoom >= 0 &&
+              t.y * s.camera.zoom + s.camera.y + t.light.radius * s.camera.zoom >= 0 &&
+              t.x * s.camera.zoom + s.camera.x - t.light.radius * s.camera.zoom <=
+                dimensions.current.w &&
+              t.y * s.camera.zoom + s.camera.y - t.light.radius * s.camera.zoom <=
+                dimensions.current.h,
+          ),
+        animated =
+          s.pings.some((p) => Date.now() - p.at < 2000) ||
+          (lightAnimated && tick !== lastLightTick);
       if (!dirty.current && !animated) return;
+      lastLightTick = tick;
       dirty.current = false;
       const localDragging = new Set(drag.current?.tokens?.map((t) => t.id) || []);
       dirty.current = renderer.current.draw(element.getContext('2d')!, {
-        scene: s.room.scenes[s.room.activeSceneId],
+        scene: s.room.scenes[s.viewSceneId || s.room.activeSceneId],
         roomId: s.room.id,
         camera: s.camera,
         width: dimensions.current.w,
         height: dimensions.current.h,
         dpr: Math.min(devicePixelRatio, 2),
         gm: s.self?.role === 'gm',
+        userId: s.self?.id || '',
         selected: [...new Set([...s.selectedIds, ...(s.selected ? [s.selected] : [])])],
         previews: s.previews,
         localDragging,
         reducedMotion: s.reducedMotion,
+        lightTick: tick,
         pings: s.pings,
         draft: draft.current,
         tool: s.tool,
@@ -276,6 +350,10 @@ export function Tabletop() {
         measurementShape: s.measurementShape,
         redraw,
       });
+      if (visionPendingRef.current !== renderer.current.visibilityPending) {
+        visionPendingRef.current = renderer.current.visibilityPending;
+        setVisionPending(visionPendingRef.current);
+      }
     };
     frame.current = requestAnimationFrame(draw);
     const wheel = (e: WheelEvent) => {
@@ -322,24 +400,77 @@ export function Tabletop() {
       if (e.ctrlKey || e.metaKey || e.altKey) return;
       if (['ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight'].includes(e.key)) {
         if (!st.self || !['live', 'demo'].includes(st.status)) return;
-        const scene = st.room.scenes[st.room.activeSceneId];
+        const scene = st.room.scenes[st.viewSceneId || st.room.activeSceneId];
         const tokens = [
           ...new Set([...st.selectedIds, ...(st.selected ? [st.selected] : [])]),
         ].flatMap((id) => (scene.tokens[id] ? [scene.tokens[id]] : []));
         if (!tokens.length || tokens.some((t) => !canControl(t, st.self!.id, st.self!.role)))
           return;
         e.preventDefault();
+        if (nudgeQueue.current.length < 20) nudgeQueue.current.push(e.key);
         if (nudging.current) return;
         nudging.current = true;
-        const positions = tokens.map((t) => ({
-          tokenId: t.id,
-          position: clampPoint(nudgePoint(t, e.key, scene.grid), scene.width, scene.height, t.size),
-        }));
-        void sendAndWait({ type: 'TOKEN_MOVE_BATCH', sceneId: scene.id, positions })
-          .catch((error) => useTable.getState().set({ error: error.message }))
-          .finally(() => {
+        setNudgePending(true);
+        const startContext = context(st),
+          ids = tokens.map((token) => token.id);
+        void (async () => {
+          try {
+            while (nudgeQueue.current.length) {
+              const direction = nudgeQueue.current.shift()!,
+                current = useTable.getState();
+              if (context(current) !== startContext) break;
+              const active = current.room.scenes[current.viewSceneId || current.room.activeSceneId];
+              const currentTokens = ids.map((id) => active.tokens[id]);
+              if (
+                currentTokens.some(
+                  (token) =>
+                    !token ||
+                    !current.self ||
+                    !canControl(token, current.self.id, current.self.role),
+                )
+              )
+                break;
+              const positions = currentTokens.map((token) => ({
+                tokenId: token.id,
+                position: clampPoint(
+                  nudgePoint(token, direction, active.grid),
+                  active.width,
+                  active.height,
+                  token.size,
+                ),
+              }));
+              current.set({
+                previews: {
+                  ...current.previews,
+                  ...Object.fromEntries(positions.map((p) => [p.tokenId, p.position])),
+                },
+              });
+              await sendAndWait({ type: 'TOKEN_MOVE_BATCH', sceneId: active.id, positions });
+              const acknowledged = useTable.getState();
+              if (context(acknowledged) === startContext) {
+                const previews = { ...acknowledged.previews };
+                for (const { tokenId, position } of positions) {
+                  if (previews[tokenId] === position) delete previews[tokenId];
+                }
+                acknowledged.set({ previews });
+              }
+            }
+          } catch (error) {
+            const current = useTable.getState();
+            if (context(current) === startContext) {
+              const previews = { ...current.previews };
+              for (const id of ids) delete previews[id];
+              current.set({
+                previews,
+                error: error instanceof Error ? error.message : 'Move failed.',
+              });
+            }
+          } finally {
+            nudgeQueue.current = [];
             nudging.current = false;
-          });
+            setNudgePending(false);
+          }
+        })();
         return;
       }
       if (e.code === 'Space') {
@@ -367,6 +498,7 @@ export function Tabletop() {
         h: 'pan',
         m: 'measure',
         p: 'ping',
+        w: 'wall',
         z: 'zone',
         f: 'fog',
         d: 'draw',
@@ -375,7 +507,10 @@ export function Tabletop() {
       } as const;
       if (key in tools) {
         const tool = tools[key as keyof typeof tools];
-        if (['zone', 'fog', 'draw', 'text', 'erase'].includes(tool) && st.self?.role === 'player')
+        if (
+          ['wall', 'zone', 'fog', 'draw', 'text', 'erase'].includes(tool) &&
+          st.self?.role === 'player'
+        )
           return;
         st.set({ tool });
       }
@@ -397,6 +532,7 @@ export function Tabletop() {
       observer.disconnect();
       unsubscribe();
       cancelAnimationFrame(frame.current);
+      renderer.current.dispose();
       element.removeEventListener('wheel', wheel);
       window.removeEventListener('keydown', down);
       window.removeEventListener('keyup', up);
@@ -412,7 +548,7 @@ export function Tabletop() {
     e.currentTarget.focus({ preventScroll: true });
     e.currentTarget.setPointerCapture(e.pointerId);
     const st = useTable.getState(),
-      s = st.room.scenes[st.room.activeSceneId],
+      s = st.room.scenes[st.viewSceneId || st.room.activeSceneId],
       p = pointer(e),
       raw = screenToWorld(p, st.camera),
       world = clampPoint(
@@ -452,8 +588,57 @@ export function Tabletop() {
       return;
     }
     if (st.tool === 'ping' || e.shiftKey) {
+      if (st.viewSceneId) {
+        notify('Pings are available on the active table scene.');
+        return;
+      }
+      st.set({
+        pings: [
+          ...st.pings.filter((p) => Date.now() - p.at < 2000),
+          { ...world, at: Date.now(), userId: st.self?.id, name: st.self?.name },
+        ].slice(-30),
+      });
       send({ type: 'PING', position: world });
       return;
+    }
+    if (st.tool === 'light' && st.self?.role === 'gm') {
+      if (!st.lightDraft.name.trim() || !lightSchema.safeParse(st.lightDraft.light).success) {
+        notify('Check the light name, radius, beam width and direction.');
+        return;
+      }
+      if (lightAction.pending) return;
+      draft.current = {
+        tool: 'light',
+        start: world,
+        end: world,
+        points: [],
+        radius: st.lightDraft.light.radius,
+        angle: st.lightDraft.light.angle ?? 360,
+        rotation: st.lightDraft.light.direction ?? 0,
+      };
+      drag.current = { ...base, kind: 'light' };
+      redraw();
+      return;
+    }
+    if (st.tool === 'pin' && st.self?.role === 'gm') {
+      st.set({
+        pinDraftPoint: {
+          x: Math.max(0, Math.min(scene.width, world.x)),
+          y: Math.max(0, Math.min(scene.height, world.y)),
+        },
+        selectedPin: ':new',
+        tool: 'select',
+      });
+      return;
+    }
+    if (st.tool === 'select') {
+      const pin = Object.values(scene.pins || {}).find(
+        (p) => Math.hypot(p.x - world.x, p.y - world.y) <= 14 / st.camera.zoom,
+      );
+      if (pin) {
+        st.set({ selectedPin: pin.id, pinDraftPoint: null });
+        return;
+      }
     }
     if (
       (st.tool === 'zone' && st.zoneShape === 'polygon') ||
@@ -476,7 +661,10 @@ export function Tabletop() {
       redraw();
       return;
     }
-    if (['zone', 'fog', 'draw', 'text', 'erase'].includes(st.tool) && st.self?.role !== 'gm')
+    if (
+      ['wall', 'zone', 'fog', 'draw', 'text', 'erase'].includes(st.tool) &&
+      st.self?.role !== 'gm'
+    )
       return;
     if (st.tool === 'erase') {
       const gesture: Drag = {
@@ -506,7 +694,8 @@ export function Tabletop() {
       });
       return;
     }
-    if (st.tool === 'zone' || st.tool === 'fog' || st.tool === 'draw') {
+    if (st.tool === 'wall' || st.tool === 'zone' || st.tool === 'fog' || st.tool === 'draw') {
+      if (st.tool === 'wall' && wallAction.pending) return;
       draft.current = { tool: st.tool, start: world, end: world, points: [world] };
       drag.current = { ...base, kind: st.tool };
       if (st.tool === 'fog' && st.fogShape === 'circle')
@@ -566,7 +755,7 @@ export function Tabletop() {
   }
   function onMove(e: React.PointerEvent<HTMLCanvasElement>) {
     const st = useTable.getState(),
-      s = st.room.scenes[st.room.activeSceneId],
+      s = st.room.scenes[st.viewSceneId || st.room.activeSceneId],
       p = pointer(e),
       raw = screenToWorld(p, st.camera),
       world = clampPoint(
@@ -597,6 +786,19 @@ export function Tabletop() {
     }
     const d = drag.current;
     if (!d) {
+      if (st.tool === 'light' && st.self?.role === 'gm') {
+        draft.current = {
+          tool: 'light',
+          start: world,
+          end: world,
+          points: [],
+          radius: st.lightDraft.light.radius,
+          angle: st.lightDraft.light.angle ?? 360,
+          rotation: st.lightDraft.light.direction ?? 0,
+        };
+        redraw();
+        return;
+      }
       if (st.tool === 'erase' && st.self?.role === 'gm') {
         draft.current = {
           tool: 'erase',
@@ -626,6 +828,16 @@ export function Tabletop() {
     }
     if (draft.current) {
       draft.current.end = world;
+      if (
+        d.kind === 'light' &&
+        (draft.current.angle ?? 360) < 360 &&
+        Math.hypot(world.x - draft.current.start.x, world.y - draft.current.start.y) > 4
+      )
+        draft.current.rotation =
+          Math.round(
+            (Math.atan2(world.y - draft.current.start.y, world.x - draft.current.start.x) * 1800) /
+              Math.PI,
+          ) / 10;
       if (
         d.kind === 'draw' &&
         draft.current.points.length < 500 &&
@@ -682,7 +894,7 @@ export function Tabletop() {
     drag.current = null;
     if (!d) return;
     const st = useTable.getState(),
-      s = st.room.scenes[st.room.activeSceneId],
+      s = st.room.scenes[st.viewSceneId || st.room.activeSceneId],
       shape = draft.current;
     if (d.kind === 'erase') {
       eraseAlong(
@@ -725,6 +937,39 @@ export function Tabletop() {
         y = Math.min(a.y, b.y),
         width = Math.max(1, Math.abs(b.x - a.x)),
         height = Math.max(1, Math.abs(b.y - a.y));
+      if (
+        d.kind === 'light' &&
+        st.self?.role === 'gm' &&
+        st.lightDraft.name.trim() &&
+        lightSchema.safeParse(st.lightDraft.light).success
+      ) {
+        const point = clampPoint(a, s.width, s.height, 24);
+        const light = {
+          ...st.lightDraft.light,
+          ...((st.lightDraft.light.angle ?? 360) < 360 ? { direction: shape.rotation ?? 0 } : {}),
+        };
+        void lightAction.run(
+          {
+            type: 'TOKEN_UPDATE',
+            sceneId: s.id,
+            createOnly: true,
+            token: {
+              id: crypto.randomUUID(),
+              name: st.lightDraft.name.trim(),
+              hideLabel: true,
+              image: { kind: 'builtin', url: 'wisp.svg' },
+              ...point,
+              size: 24,
+              rotation: 0,
+              color: light.color,
+              owners: [],
+              visibility: 'public',
+              light,
+            },
+          },
+          'Placing light…',
+        );
+      }
       if (d.kind === 'select') {
         const ids = Object.values(s.tokens)
           .filter((t) => t.x >= x && t.x <= x + width && t.y >= y && t.y <= y + height)
@@ -751,12 +996,33 @@ export function Tabletop() {
             width: st.zoneShape === 'circle' ? r * 2 : width,
             height: st.zoneShape === 'circle' ? r * 2 : height,
             points,
-            label: 'Marked region',
+            label: st.zoneLabel.trim() || 'Marked region',
+            visibility: st.zoneVisibility,
             color: st.drawColor,
             opacity: 0.2,
             tags: [],
           },
         });
+      }
+      if (d.kind === 'wall' && Math.hypot(b.x - a.x, b.y - a.y) > 3) {
+        const bounded = (p: Point) => ({
+          x: Math.round(Math.max(0, Math.min(s.width, p.x)) * 10) / 10,
+          y: Math.round(Math.max(0, Math.min(s.height, p.y)) * 10) / 10,
+        });
+        void wallAction.run(
+          {
+            type: 'WALL_SET',
+            sceneId: s.id,
+            wall: {
+              id: crypto.randomUUID(),
+              a: bounded(a),
+              b: bounded(b),
+              kind: st.wallKind,
+              open: false,
+            },
+          },
+          'Saving wall…',
+        );
       }
       if (d.kind === 'fog' && st.fogShape === 'rectangle')
         fog({ id: crypto.randomUUID(), shape: 'rectangle', mode: st.fogMode, x, y, width, height });
@@ -790,6 +1056,36 @@ export function Tabletop() {
   };
   return (
     <div className={`tabletop tool-${store.tool}`}>
+      {visionPending && !nudgePending && !wallAction.pending && !wallAction.error && (
+        <span role="status" className="wall-save-status">
+          Calculating visibility…
+        </span>
+      )}
+      {nudgePending && (
+        <span role="status" className="wall-save-status">
+          Moving token…
+        </span>
+      )}
+      {wallAction.pending && (
+        <span role="status" className="wall-save-status">
+          {wallAction.pending}
+        </span>
+      )}
+      {wallAction.error && (
+        <span role="alert" className="wall-save-status">
+          {wallAction.error}
+        </span>
+      )}
+      {lightAction.pending && (
+        <span role="status" className="wall-save-status">
+          {lightAction.pending}
+        </span>
+      )}
+      {lightAction.error && (
+        <span role="alert" className="wall-save-status">
+          {lightAction.error}
+        </span>
+      )}
       <canvas
         ref={canvas}
         tabIndex={0}
@@ -798,7 +1094,10 @@ export function Tabletop() {
         onPointerMove={onMove}
         onPointerUp={onUp}
         onPointerLeave={() => {
-          if (!drag.current && draft.current?.tool === 'erase') {
+          if (
+            !drag.current &&
+            (draft.current?.tool === 'erase' || draft.current?.tool === 'light')
+          ) {
             draft.current = null;
             redraw();
           }
@@ -861,10 +1160,10 @@ export function Tabletop() {
                 ? 'Arrow keys move to neighbouring hex centres'
                 : 'Drag or use arrow keys to move'
               : 'View only'}
-            {selected.resource && (
+            {selectedResource && (
               <small className="compact-resource-status">
-                {selected.resource.label || 'Resource'}: {selected.resource.value} /{' '}
-                {selected.resource.max}
+                {selectedResource.label || 'Resource'}: {selectedResource.value} /{' '}
+                {selectedResource.max}
               </small>
             )}
           </span>
@@ -892,7 +1191,58 @@ export function Tabletop() {
                 : selected.name.split(' · ')[0]}
             </strong>
             {store.selectedIds.length <= 1 && (
-              <TokenResource key={scene.id + selected.id} token={selected} sceneId={scene.id} />
+              <TokenResource
+                key={`resource-${scene.id}-${selected.id}`}
+                token={selected}
+                sceneId={scene.id}
+              />
+            )}
+            {store.selectedIds.length <= 1 && (
+              <TokenStatuses
+                key={`statuses-${scene.id}-${selected.id}`}
+                token={selected}
+                sceneId={scene.id}
+              />
+            )}
+            {store.selectedIds.length <= 1 && selected.characterId && (
+              <QuickAbilities
+                key={`abilities-${selected.characterId}`}
+                characterId={selected.characterId}
+              />
+            )}
+            {store.selectedIds.length > 1 && (
+              <BatchActions sceneId={scene.id} ids={store.selectedIds} />
+            )}
+            {store.selectedIds.length <= 1 && selected.characterId && (
+              <StatRoll
+                key={`stat-${selected.characterId}`}
+                characterIds={[selected.characterId]}
+              />
+            )}
+            {store.selectedIds.length > 1 &&
+              store.self?.role === 'gm' &&
+              (() => {
+                const ids = store.selectedIds.map((id) => scene.tokens[id]?.characterId);
+                return ids.every((id) => !!id) ? <StatRoll characterIds={ids as string[]} /> : null;
+              })()}
+            {store.self && canControl(selected, store.self.id, store.self.role) && (
+              <>
+                <button
+                  title="Rotate token"
+                  aria-label="Rotate token"
+                  disabled={!!rotation.pending}
+                  onClick={() =>
+                    void rotation.run(
+                      { type: 'TOKEN_ROTATE', sceneId: scene.id, tokenId: selected.id, delta: 45 },
+                      'Rotating token…',
+                    )
+                  }
+                >
+                  <RotateCw size={15} />
+                </button>
+                {rotation.pending && <span role="status">{rotation.pending}</span>}
+                {rotation.error && <span role="alert">{rotation.error}</span>}
+              </>
             )}
             {store.self?.role === 'gm' && (
               <>
@@ -902,19 +1252,6 @@ export function Tabletop() {
                   onClick={() => store.set({ dialog: 'token' })}
                 >
                   <Pencil size={15} />
-                </button>
-                <button
-                  title="Rotate token"
-                  aria-label="Rotate token"
-                  onClick={() =>
-                    send({
-                      type: 'TOKEN_UPDATE',
-                      sceneId: scene.id,
-                      token: { ...selected, rotation: (selected.rotation + 45) % 360 },
-                    })
-                  }
-                >
-                  <RotateCw size={15} />
                 </button>
                 <button
                   title="Duplicate token"

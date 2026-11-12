@@ -1,6 +1,7 @@
 import type { Asset } from './model.js';
 export const builtinAssets = new Set([
   'hollow.svg',
+  'torchlit-manor.svg',
   'blank.svg',
   'sanctuary.svg',
   'ranger.svg',

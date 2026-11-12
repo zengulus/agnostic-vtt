@@ -8,7 +8,7 @@ export function FogActions() {
     [error, setError] = useState('');
   if (s.self?.role !== 'gm') return null;
   const change = async (enabled: boolean) => {
-    const scene = s.room.scenes[s.room.activeSceneId];
+    const scene = s.room.scenes[s.viewSceneId || s.room.activeSceneId];
     if (
       !window.confirm(
         enabled
@@ -44,6 +44,7 @@ export function FogActions() {
         <p className="field-note">
           Fog is visual concealment. The shared map image remains accessible to players.
         </p>
+        {busy && <p role="status">Updating fog…</p>}
         {error && (
           <p role="alert" className="form-error">
             {error}

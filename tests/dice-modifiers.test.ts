@@ -113,10 +113,12 @@ describe('keep, drop and reroll dice', () => {
     'd6r<2r=3',
     '2d20kh1junk',
     'd6r<2<3',
-    '21d6kh1',
-    '20d6dl19+d4',
+    '41d6kh1',
+    '40d6dl39+d4',
     'd7kh1',
-    'd6!',
+    'd6!!',
+    '2d6!kh1',
+    'd6r<2!',
     'd6kh1*2',
     'd6r<2++1',
   ])('rejects invalid or unbounded modifiers in ordinary rolls and macros: %s', (source) => {
@@ -127,5 +129,32 @@ describe('keep, drop and reroll dice', () => {
     const random = vi.fn(() => 1);
     expect(() => evaluateDice('d6r<2', random)).toThrow('Reroll limit reached');
     expect(random).toHaveBeenCalledTimes(1001);
+  });
+});
+
+describe('exploding dice', () => {
+  it('adds a die for each maximum, including chains, and preserves the faces for replay', () => {
+    const result = evaluateDice('2d6! - d4', faces([6, 3, 6, 2, 4]));
+    expect(result.total).toBe(13);
+    expect(result.terms[0]).toMatchObject({
+      values: [6, 3, 6, 2],
+      explosions: [false, false, true, true],
+      subtotal: 17,
+    });
+    expect(formatRollValues(result.terms[0])).toBe('6 + 3 + 6 (exploded) + 2 (exploded)');
+    expect(physicalDice(result.terms).map((die) => die.value)).toEqual([6, 3, 6, 2, 4]);
+  });
+  it('shares the explosion budget across macro groups and ordinary terms', () => {
+    const sequence = () => faces([...Array(10).fill(4), 1, ...Array(12).fill(4)]);
+    expect(() => evaluateDice('d4! + d4!', sequence())).toThrow('Explosion limit reached');
+    expect(() =>
+      evaluateMacro(parseMacro('[Test]([One(d4!)],[Two(d4!)])'), {}, sequence()),
+    ).toThrow('Explosion limit reached');
+    const result = evaluateMacro(
+      parseMacro('[Test]([One(-d6!)],[Two(d4! + 1)])'),
+      {},
+      faces([6, 2, 4, 1]),
+    );
+    expect(result.groups.map((group) => group.total)).toEqual([-8, 6]);
   });
 });

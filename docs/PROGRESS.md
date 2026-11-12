@@ -63,6 +63,8 @@ Milestones 1, 2 and 3 implemented, with generic imported dice macros and Discord
 
 4. Generic character data, event hooks, campaign import/export, macros linked to tokens and extension interfaces.
 
+Character sheets, resource-aware abilities and token-to-sheet links have since been implemented. Exploding dice (`!`) are now supported in rolls and macros, with a shared limit of 20 extra dice per action and recorded outcomes for replay. Event hooks, full campaign import/export and extension interfaces remain open.
+
 ## Standalone Pages demo and GM/player sessions
 
 - Added an in-tab demo transport using the shared tabletop action validator, visibility projection and undo operations. It supports GM/player views, token movement, scene editing, fog/drawing, dice, macros and chat without authentication or a backend. Reset/reload discards demo changes; live-only uploads/invitations/Discord are unavailable.

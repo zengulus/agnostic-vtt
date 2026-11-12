@@ -7,7 +7,7 @@ import { openCharacter } from './Characters.js';
 
 export function focusCharacter(id: string) {
   const s = useTable.getState(),
-    token = s.room.scenes[s.room.activeSceneId].tokens[id];
+    token = s.room.scenes[s.viewSceneId || s.room.activeSceneId].tokens[id];
   const rect = document.querySelector('.tabletop canvas')?.getBoundingClientRect();
   if (!token || !rect) return;
   s.set({
@@ -27,7 +27,7 @@ function assigned(t: Token, id?: string) {
 }
 export function CharacterList() {
   const s = useTable(),
-    scene = s.room.scenes[s.room.activeSceneId];
+    scene = s.room.scenes[s.viewSceneId || s.room.activeSceneId];
   const tokens = Object.values(scene.tokens).sort(
     (a, b) => Number(assigned(b, s.self?.id)) - Number(assigned(a, s.self?.id)),
   );
@@ -141,7 +141,7 @@ export function FirstUseGuide() {
 export function TurnAwareness() {
   const s = useTable(),
     tracker = s.room.tracker || emptyTracker(),
-    scene = s.room.scenes[s.room.activeSceneId];
+    scene = s.room.scenes[s.viewSceneId || s.room.activeSceneId];
   const current = tracker.entries.find((e) => e.id === tracker.activeId);
   const index = tracker.entries.findIndex((e) => e.id === current?.id);
   const next =

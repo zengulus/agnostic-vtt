@@ -151,7 +151,7 @@ try {
       };
       socket.send(
         JSON.stringify({
-          v: 2,
+          v: 7,
           type: 'ROOM_SNAPSHOT',
           state: {
             version: 1,

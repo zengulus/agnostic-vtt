@@ -1,6 +1,7 @@
 import type { RollTerm } from './model.js';
 export type DiceModifier =
   | { kind: 'kh' | 'kl' | 'dh' | 'dl'; count: number }
+  | { kind: 'explode' }
   | { kind: 'reroll'; comparison: '<' | '<=' | '>' | '>=' | '='; value: number };
 export interface DiceSpec {
   count: number;
@@ -17,6 +18,7 @@ export interface ParsedTerm {
   modifiers?: DiceModifier[];
 }
 const supported = new Set([4, 6, 8, 10, 12, 20, 100]);
+export const MAX_STARTING_DICE = 40;
 function matchesReroll(value: number, comparison: string, threshold: number): boolean {
   switch (comparison) {
     case '<':
@@ -35,15 +37,25 @@ function matchesReroll(value: number, comparison: string, threshold: number): bo
 export function readDiceTerm(
   input: string,
 ): { spec: DiceSpec; label: string; length: number } | undefined {
-  const match = /^(\d*)d(\d+|%)((?:(?:kh|kl|dh|dl)\d+|r(?:<=|>=|<|>|=)\d+)*)(?![\w<>=%])/i.exec(
+  const match = /^(\d*)d(\d+|%)((?:(?:kh|kl|dh|dl)\d+|r(?:<=|>=|<|>|=)\d+|!)*)(?![\w<>=%!])/i.exec(
     input,
   );
   if (!match) return undefined;
   const count = Number(match[1] || 1),
     sides = match[2] === '%' ? 100 : Number(match[2]);
-  if (!Number.isSafeInteger(count) || count < 1 || count > 20 || !supported.has(sides))
-    throw new Error('Use up to 20 dice: d4, d6, d8, d10, d12, d20 or d100.');
+  if (
+    !Number.isSafeInteger(count) ||
+    count < 1 ||
+    count > MAX_STARTING_DICE ||
+    !supported.has(sides)
+  )
+    throw new Error('Use up to 40 dice: d4, d6, d8, d10, d12, d20 or d100.');
   const modifiers: DiceModifier[] = [];
+  if (match[3].includes('!')) {
+    if (match[3] !== '!')
+      throw new Error('Exploding dice cannot be combined with other modifiers.');
+    modifiers.push({ kind: 'explode' });
+  }
   for (const suffix of match[3].toLowerCase().matchAll(/(kh|kl|dh|dl)(\d+)|r(<=|>=|<|>|=)(\d+)/g)) {
     if (suffix[1]) {
       const amount = Number(suffix[2]);
@@ -87,8 +99,13 @@ export function parseDice(expression: string): ParsedTerm[] {
       if (die.length !== body.length) throw new Error('Use dice and numbers joined by + or −.');
       const { count, sides, modifiers } = die.spec;
       diceCount += count;
-      if (!Number.isSafeInteger(count) || count < 1 || diceCount > 20 || !supported.has(sides))
-        throw new Error('Use up to 20 dice: d4, d6, d8, d10, d12, d20 or d100.');
+      if (
+        !Number.isSafeInteger(count) ||
+        count < 1 ||
+        diceCount > MAX_STARTING_DICE ||
+        !supported.has(sides)
+      )
+        throw new Error('Use up to 40 dice: d4, d6, d8, d10, d12, d20 or d100.');
       return {
         kind: 'dice',
         sign,
@@ -110,6 +127,7 @@ export function evaluateDice(
   expression: string,
   randomInt: (min: number, max: number) => number,
 ): { terms: RollTerm[]; total: number } {
+  const budget = { remaining: 20 };
   const terms = parseDice(expression).map((t): RollTerm => {
     if (t.kind === 'dice')
       return evaluateDiceTerm(
@@ -117,6 +135,7 @@ export function evaluateDice(
         t.sign,
         t.label,
         randomInt,
+        budget,
       );
     const values = [t.value!];
     return {
@@ -135,8 +154,21 @@ export function evaluateDiceTerm(
   sign: 1 | -1,
   label: string,
   randomInt: (min: number, max: number) => number,
+  explosionBudget = { remaining: 20 },
 ): RollTerm {
   const values = Array.from({ length: spec.count }, () => randomInt(1, spec.sides + 1));
+  const exploding = spec.modifiers?.some((m) => m.kind === 'explode');
+  const explosions = exploding ? values.map(() => false) : undefined;
+  if (exploding) {
+    for (let i = 0; i < values.length; i++) {
+      if (values[i] === spec.sides) {
+        if (explosionBudget.remaining-- <= 0)
+          throw new Error('Explosion limit reached (20 extra dice per roll).');
+        values.push(randomInt(1, spec.sides + 1));
+        explosions!.push(true);
+      }
+    }
+  }
   const reroll = spec.modifiers?.find((m) => m.kind === 'reroll');
   const rerolls = reroll ? values.map((): number[] => []) : undefined;
   if (reroll?.kind === 'reroll') {
@@ -151,7 +183,7 @@ export function evaluateDiceTerm(
       }
     }
   }
-  const selection = spec.modifiers?.find((m) => m.kind !== 'reroll');
+  const selection = spec.modifiers?.find((m) => m.kind !== 'reroll' && m.kind !== 'explode');
   let kept: boolean[] | undefined;
   if (selection) {
     const highest = selection.kind.endsWith('h'),
@@ -170,6 +202,7 @@ export function evaluateDiceTerm(
     label,
     ...(kept ? { kept } : {}),
     ...(rerolls ? { rerolls } : {}),
+    ...(explosions ? { explosions } : {}),
     subtotal:
       values.reduce((sum, value, index) => sum + (kept?.[index] === false ? 0 : value), 0) * sign,
   };
@@ -178,7 +211,12 @@ export function evaluateDiceTerm(
 export function formatRollValues(term: RollTerm): string {
   return term.values
     .map((value, index) => {
-      const face = term.kept?.[index] === false ? `${value} (dropped)` : String(value);
+      const face =
+        term.kept?.[index] === false
+          ? `${value} (dropped)`
+          : term.explosions?.[index]
+            ? `${value} (exploded)`
+            : String(value);
       const previous = term.rerolls?.[index];
       return previous?.length ? `${previous.join(' → ')} → ${face} (rerolled)` : face;
     })

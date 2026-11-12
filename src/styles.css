@@ -3113,3 +3113,200 @@ i {
 .macro-preview code {
   overflow-wrap: anywhere;
 }
+
+.scene-presentation-settings,
+.pin-list,
+.proximity-editor {
+  display: grid;
+  gap: 8px;
+  margin: 12px 0;
+}
+.scene-presentation-settings label,
+.proximity-editor label,
+.pin-panel label {
+  display: grid;
+  gap: 4px;
+  margin: 7px 0;
+}
+.pin-list button {
+  display: block;
+  margin: 5px 0;
+}
+.pin-panel {
+  position: absolute;
+  z-index: 7;
+  top: 16px;
+  left: 16px;
+  width: min(360px, calc(100% - 32px));
+  max-height: calc(100% - 32px);
+  overflow: auto;
+  padding: 18px;
+  border: 1px solid #c8b98780;
+  border-radius: 10px;
+  background: #122019f5;
+  color: #f2ead8;
+  box-shadow: 0 12px 42px #0009;
+}
+.pin-panel > button:first-child {
+  float: right;
+}
+.pin-panel p {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+.transition-fade {
+  background-image: none;
+}
+.transition-curtain {
+  background-image: linear-gradient(90deg, #180c12 0%, transparent 50%, #180c12 100%);
+  animation-name: curtain-reveal;
+}
+.transition-flash {
+  background-image: radial-gradient(ellipse, #fff8d9cc, transparent 70%);
+  animation-name: flash-reveal;
+}
+@keyframes curtain-reveal {
+  0% {
+    opacity: 1;
+    clip-path: inset(0);
+  }
+  65% {
+    opacity: 1;
+  }
+  100% {
+    opacity: 0;
+    clip-path: inset(0 48%);
+    visibility: hidden;
+  }
+}
+@keyframes flash-reveal {
+  0% {
+    opacity: 1;
+    filter: brightness(2);
+  }
+  65% {
+    opacity: 1;
+    filter: brightness(1);
+  }
+  100% {
+    opacity: 0;
+    visibility: hidden;
+  }
+}
+.proximity-cues {
+  position: absolute;
+  z-index: 6;
+  right: 16px;
+  top: 16px;
+  max-width: min(360px, 80%);
+  max-height: 40%;
+  overflow: auto;
+}
+.proximity-cues > div {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 6px;
+  padding: 10px;
+  border: 1px solid #c8b98780;
+  border-radius: 8px;
+  background: #122019ef;
+  color: #f2ead8;
+}
+.scene-preview-banner {
+  position: absolute;
+  z-index: 6;
+  bottom: 16px;
+  left: 50%;
+  transform: translateX(-50%);
+  padding: 8px 12px;
+  border: 1px solid #c8b98780;
+  border-radius: 8px;
+  background: #122019f2;
+  color: #f2ead8;
+}
+.lighting-controls {
+  display: grid;
+  gap: 8px;
+  margin: 12px 0;
+}
+.lighting-controls label {
+  display: grid;
+  gap: 4px;
+  margin: 8px 0;
+}
+.wall-list {
+  max-height: 240px;
+  overflow: auto;
+}
+.wall-list > div {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 5px;
+  padding: 6px 0;
+  border-bottom: 1px solid #c8b98725;
+}
+.wall-list > div > span {
+  flex-basis: 100%;
+  font-size: 0.8rem;
+}
+.wall-save-status {
+  position: absolute;
+  z-index: 4;
+  left: 16px;
+  top: 16px;
+  padding: 6px 10px;
+  border-radius: 6px;
+  background: #122019e8;
+  color: #f2ead8;
+}
+.tool-options:has(.light-fields) {
+  max-width: min(760px, calc(100% - 44px));
+}
+.tool-options:has(.light-fields) > p {
+  flex-basis: 100%;
+  margin: 0;
+  font-size: 0.875rem;
+}
+.tool-options .light-fields {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: end;
+  width: 100%;
+}
+.tool-options .light-fields label {
+  flex: 1 1 90px;
+}
+.lighting-controls .light-editor {
+  padding: 10px;
+  border: 1px solid #94785380;
+  border-radius: 6px;
+  margin: 8px 0;
+}
+.lighting-controls .light-editor label {
+  color: #493928;
+}
+.lighting-controls .light-source-row {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+  justify-content: space-between;
+  margin: 6px 0;
+}
+.lighting-controls .light-source-row span {
+  overflow-wrap: anywhere;
+}
+.light-swatch {
+  display: inline-block;
+  width: 12px;
+  height: 12px;
+  border: 1px solid #493928;
+  border-radius: 50%;
+}
+.tool-options .light-fields label {
+  max-width: 150px;
+}
+.tool-options .light-fields label:has(select[aria-label$=' shape']) {
+  min-width: 145px;
+}

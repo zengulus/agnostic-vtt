@@ -27,7 +27,7 @@ function setup() {
     prepareAction(
       room,
       { id: user, name: user },
-      clientMessageSchema.parse({ ...action, v: 2, actionId: crypto.randomUUID() }),
+      clientMessageSchema.parse({ ...action, v: 7, actionId: crypto.randomUUID() }),
       random,
     );
   const act = (action: Action, user = 'player') => {
@@ -122,6 +122,26 @@ describe('text-imported character sheets', () => {
       kind: 'roll',
       roll: { total: 14 },
     });
+  });
+  it('does not spend resources or record a result when an explosion exceeds the limit', () => {
+    const { prepare, sheet, room } = setup();
+    sheet().abilities[0].macro = '[Check]([Roll(d4!)])';
+    const before = structuredClone(sheet());
+    expect(() =>
+      prepare(
+        {
+          type: 'CHARACTER_ABILITY_USE',
+          id: 'kael',
+          abilityId: 'sweeping-strike',
+          variables: {},
+          visibility: 'public',
+        },
+        'player',
+        () => 4,
+      ),
+    ).toThrow('Explosion limit reached');
+    expect(sheet()).toEqual(before);
+    expect(room.state.rolls).toHaveLength(0);
   });
   it('announces text-only spells with no fake numeric total and spends prepared slots', () => {
     const { act, room, sheet } = setup();

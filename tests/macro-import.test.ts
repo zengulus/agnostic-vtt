@@ -13,7 +13,7 @@ import {
 const original = '[Attack]([Hit(d20 + X)])';
 const revised = '[Attack]([Hit(d20 + X + 2)])';
 const message = (action: Action) =>
-  clientMessageSchema.parse({ v: 2, actionId: 'test', ...action });
+  clientMessageSchema.parse({ v: 7, actionId: 'test', ...action });
 function setup() {
   const room = newRoom('test-room', 'gm', 'GM', 'Macros', 'invite');
   room.state.macros = {
@@ -160,7 +160,7 @@ describe('safe revised macro imports', () => {
   it('rejects revision-only legacy replacement requests instead of trusting an ambiguous guard', () => {
     expect(
       clientMessageSchema.safeParse({
-        v: 2,
+        v: 7,
         actionId: 'legacy',
         type: 'MACRO_IMPORT',
         text: revised,

@@ -1,9 +1,10 @@
 import { prepareAction } from '../shared/actions.js';
-import { projectRoom, type DurableRoom, type StateChange } from '../shared/model.js';
+import { projectRoom, tokenVisible, type DurableRoom, type StateChange } from '../shared/model.js';
 import { clientMessageSchema, type Action } from '../shared/protocol.js';
 import { applyChanges, inverseChanges } from '../shared/state.js';
-import { newRoom } from '../shared/sample.js';
+import { newRoom, torchlitManor } from '../shared/sample.js';
 import { useTable, presentRoll } from './store.js';
+import { proximityCues } from '../shared/proximity.js';
 
 const identity = { id: 'demo-gm', name: 'Storykeeper' };
 let room: DurableRoom;
@@ -30,10 +31,16 @@ function publish(reset = false) {
     role === 'player'
       ? Object.values(projected.characters || {}).find((c) => c.ownerId === self.id)
       : undefined;
-  const oldScene = s.room.scenes[s.room.activeSceneId],
-    newScene = projected.scenes[projected.activeSceneId];
+  const viewSceneId =
+    !reset && !contextChanged && s.viewSceneId && projected.scenes[s.viewSceneId]
+      ? s.viewSceneId
+      : null;
+  const oldScene =
+      s.room.scenes[s.viewSceneId || s.room.activeSceneId] || s.room.scenes[s.room.activeSceneId],
+    newScene = projected.scenes[viewSceneId || projected.activeSceneId];
   s.set({
     room: projected,
+    viewSceneId,
     ...(contextChanged
       ? {
           panel: ownCharacter ? ('character' as const) : ('chronicle' as const),
@@ -58,11 +65,8 @@ function publish(reset = false) {
       undoLabel: undo.at(-1)?.label || '',
       redoLabel: redo.at(-1)?.label || '',
     },
-    selected:
-      s.selected && projected.scenes[projected.activeSceneId].tokens[s.selected]
-        ? s.selected
-        : null,
-    selectedIds: s.selectedIds.filter((id) => projected.scenes[projected.activeSceneId].tokens[id]),
+    selected: s.selected && newScene.tokens[s.selected] ? s.selected : null,
+    selectedIds: s.selectedIds.filter((id) => newScene.tokens[id]),
     previews: {},
     fitNonce:
       s.fitNonce +
@@ -71,6 +75,8 @@ function publish(reset = false) {
       ? {
           selected: null,
           selectedIds: [],
+          selectedPin: null,
+          proximityCues: [],
           presentation: null,
           rollQueue: [],
           pings: [],
@@ -84,6 +90,7 @@ function publish(reset = false) {
 }
 export function startDemo(roleChoice: 'gm' | 'player' = 'gm') {
   room = newRoom('offline-demo', identity.id, identity.name, 'The Hollow Chronicles', '');
+  room.state.scenes.manor = torchlitManor();
   role = roleChoice;
   undo = [];
   redo = [];
@@ -92,7 +99,7 @@ export function startDemo(roleChoice: 'gm' | 'player' = 'gm') {
   publish(true);
 }
 export function demoAction(action: Action) {
-  const m = clientMessageSchema.parse({ ...action, v: 2, actionId: crypto.randomUUID() });
+  const m = clientMessageSchema.parse({ ...action, v: 7, actionId: crypto.randomUUID() });
   if (m.type === 'SESSION_ROLE') {
     role = m.role;
     publish(true);
@@ -100,10 +107,20 @@ export function demoAction(action: Action) {
   }
   if (m.type === 'PING') {
     const s = useTable.getState();
+    if (
+      s.pings.some(
+        (p) =>
+          p.userId === identity.id &&
+          p.x === m.position.x &&
+          p.y === m.position.y &&
+          Date.now() - p.at < 2000,
+      )
+    )
+      return m.actionId;
     s.set({
       pings: [
         ...s.pings.filter((p) => Date.now() - p.at < 2000),
-        { ...m.position, at: Date.now() },
+        { ...m.position, at: Date.now(), userId: identity.id, name: identity.name },
       ],
     });
     return m.actionId;
@@ -125,7 +142,10 @@ export function demoAction(action: Action) {
     target.push(edit);
   } else {
     changes = prepareAction(room, identity, m, randomInt, role);
-    if (changes.length && !['DICE_ROLL_REQUEST', 'MACRO_ROLL_REQUEST'].includes(m.type)) {
+    if (
+      changes.length &&
+      !['DICE_ROLL_REQUEST', 'MACRO_ROLL_REQUEST', 'STAT_ROLL_REQUEST'].includes(m.type)
+    ) {
       const edits = changes.filter((change) => change.kind !== 'roll');
       const groupId = m.type === 'FOG_APPEND' ? m.groupId : undefined,
         last = undo.at(-1);
@@ -141,8 +161,41 @@ export function demoAction(action: Action) {
       while (undo.length > 50 || JSON.stringify(undo).length > 1024 * 1024) undo.shift();
     }
   }
+  if (!changes.length) return m.actionId;
   room.state = { ...applyChanges(before, changes), revision: before.revision + 1 };
   publish(before.activeSceneId !== room.state.activeSceneId);
+  const cues =
+    m.type === 'TOKEN_MOVE_COMMIT'
+      ? proximityCues(before, room.state, m.sceneId, [m.tokenId])
+      : m.type === 'TOKEN_MOVE_BATCH'
+        ? proximityCues(
+            before,
+            room.state,
+            m.sceneId,
+            m.positions.map((p) => p.tokenId),
+          )
+        : [];
+  for (const cue of cues) {
+    const cueScene = room.state.scenes[room.state.activeSceneId];
+    const text =
+      role === 'gm'
+        ? cue.gm
+        : cueScene.tokens[cue.tokenId] &&
+            tokenVisible(cueScene.tokens[cue.tokenId], cueScene, 'player', identity.id)
+          ? cue.player
+          : undefined;
+    if (text) {
+      const s = useTable.getState();
+      s.set({
+        proximityCues: [...s.proximityCues, { id: crypto.randomUUID(), message: text }].slice(-20),
+      });
+    }
+  }
+  const transition = changes.find((change) => change.kind === 'scene-active');
+  if (transition?.kind === 'scene-active')
+    useTable
+      .getState()
+      .set({ sceneTransition: Date.now(), transitionEffect: transition.transition || null });
   for (const change of changes)
     if (change.kind === 'roll') {
       presentRoll(change.roll);

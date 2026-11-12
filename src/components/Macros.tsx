@@ -3,13 +3,9 @@ import { useMemo, useState } from 'react';
 import { Lock, Play, Star, Trash2, Upload } from 'lucide-react';
 import { useTable } from '../store.js';
 import { sendAndWait } from '../connection.js';
-import {
-  formatMacroGroup,
-  importMacros,
-  parseMacro,
-  type MacroResult,
-} from '../../shared/macros.js';
-import { planMacroImport } from '../../shared/macroImport.js';
+import { formatMacroGroup, parseMacro, type MacroResult } from '../../shared/macros.js';
+import { useImportPreview } from '../useImportPreview.js';
+import type { MacroPreview, PreviewRequest } from '../preview.worker.js';
 import {
   macroPreferencesKey,
   readMacroPreferences,
@@ -58,9 +54,10 @@ export function MacroResults({
               formatMacroGroup(group)
             )}
           </dd>
-          {(details || group.terms.some((t) => t.kept || t.rerolls)) && group.terms.length > 0 && (
-            <small className="macro-result-terms">{formatRollBreakdown(group.terms)}</small>
-          )}
+          {(details || group.terms.some((t) => t.kept || t.rerolls || t.explosions)) &&
+            group.terms.length > 0 && (
+              <small className="macro-result-terms">{formatRollBreakdown(group.terms)}</small>
+            )}
         </div>
       ))}
     </dl>
@@ -85,15 +82,20 @@ export function MacroLibraryDialog() {
     [privateRoll, setPrivateRoll] = useState(false),
     [busy, setBusy] = useState(false),
     [error, setError] = useState('');
-  const preview = useMemo(() => {
-    if (!text.trim()) return null;
-    try {
-      const imported = importMacros(text);
-      return { ...imported, plan: planMacroImport(imported.macros, macros, s.self?.id || '') };
-    } catch (error) {
-      return { macros: [], plan: [], errors: [{ line: 1, message: (error as Error).message }] };
-    }
-  }, [text, s.room.macros, s.self?.id]);
+  const previewRequest = useMemo<PreviewRequest | null>(
+    () =>
+      text.trim()
+        ? {
+            kind: 'macros',
+            text,
+            macros: Object.values(s.room.macros || {}),
+            ownerId: s.self?.id || '',
+          }
+        : null,
+    [text, s.room.macros, s.self?.id],
+  );
+  const previewState = useImportPreview<MacroPreview>(previewRequest);
+  const preview = previewState.value;
   const macro = macros.find((m) => m.id === selected),
     definition = macro ? parseMacro(macro.source) : null;
   const inputValue = (name: string) => (Object.hasOwn(values, name) ? values[name] : '');
@@ -319,6 +321,12 @@ export function MacroLibraryDialog() {
         >
           Download example macro.txt ↗
         </a>
+        {previewState.pending && <p role="status">Preparing macro preview…</p>}
+        {previewState.error && (
+          <p className="form-error" role="alert">
+            {previewState.error}
+          </p>
+        )}
         {preview && (
           <div className="macro-preview" aria-live="polite">
             {preview.errors.map((error, i) => (

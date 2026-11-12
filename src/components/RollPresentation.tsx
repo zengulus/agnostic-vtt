@@ -8,8 +8,9 @@ import { MacroResults } from './Macros.js';
 import { CharacterActionDetails } from './Characters.js';
 export function RollPresentation({ roll }: { roll: Roll }) {
   const { reducedMotion: reduce, sound, dice, finishRoll } = useTable();
+  const physicalCount = physicalDice(roll.terms).length;
   const reducedMotion =
-    reduce || dice.presentation === 'minimal' || !physicalDice(roll.terms).length;
+    reduce || dice.presentation === 'minimal' || !physicalCount || physicalCount > 20;
   const [phase, setPhase] = useState<'rolling' | 'terms' | 'total'>(
       reducedMotion ? 'total' : 'rolling',
     ),
@@ -57,7 +58,7 @@ export function RollPresentation({ roll }: { roll: Roll }) {
       ? t.values.map((v, i) => ({
           value: v * t.sign,
           dropped: t.kept?.[i] === false,
-          label: `${t.label}${t.kept?.[i] === false ? ' · dropped' : ''}${t.rerolls?.[i].length ? ` · ${t.rerolls[i].join(' → ')} → ${v} (rerolled)` : ''}`,
+          label: `${t.label}${t.explosions?.[i] ? ' · exploded' : ''}${t.kept?.[i] === false ? ' · dropped' : ''}${t.rerolls?.[i]?.length ? ` · ${t.rerolls[i].join(' → ')} → ${v} (rerolled)` : ''}`,
         }))
       : [{ value: t.subtotal, label: 'modifier', dropped: false }],
   );

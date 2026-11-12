@@ -29,7 +29,31 @@ export function clampPoint(p: Point, width: number, height: number, size: number
   };
 }
 export function distance(a: Point, b: Point, g: Grid): number {
-  if (g.measurement === 'grid' && g.enabled) {
+  return pathDistance([a, b], g);
+}
+/** Alternate diagonal costs across the entire path, including its waypoints. */
+export function pathDistance(points: Point[], g: Grid): number {
+  if (g.enabled && g.type !== 'hex' && g.measurement === 'alternating') {
+    let straight = 0,
+      diagonal = 0;
+    for (let i = 1; i < points.length; i++) {
+      const cell = (p: Point) => ({
+        x: Math.floor((p.x - g.offsetX) / g.size),
+        y: Math.floor((p.y - g.offsetY) / g.size),
+      });
+      const a = cell(points[i - 1]),
+        b = cell(points[i]);
+      const dx = Math.abs(b.x - a.x),
+        dy = Math.abs(b.y - a.y);
+      diagonal += Math.min(dx, dy);
+      straight += Math.max(dx, dy) - Math.min(dx, dy);
+    }
+    return (straight + diagonal + Math.floor(diagonal / 2)) * g.distance;
+  }
+  return points.reduce((sum, p, i) => (i ? sum + segmentDistance(points[i - 1], p, g) : sum), 0);
+}
+function segmentDistance(a: Point, b: Point, g: Grid): number {
+  if ((g.measurement === 'grid' || g.measurement === 'alternating') && g.enabled) {
     if (g.type === 'hex') {
       const x = worldToHex(a, g),
         y = worldToHex(b, g),

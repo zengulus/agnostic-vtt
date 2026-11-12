@@ -23,7 +23,7 @@ function editor(existing: boolean) {
     }),
   );
   const commit = (action: Action, role: 'gm' | 'player' = 'gm') => {
-    const message = clientMessageSchema.parse({ ...action, v: 2, actionId: crypto.randomUUID() });
+    const message = clientMessageSchema.parse({ ...action, v: 7, actionId: crypto.randomUUID() });
     const changes = prepareAction(room, { id: role, name: role }, message, () => 1, role);
     room.state = applyChanges(room.state, changes);
   };

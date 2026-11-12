@@ -3,6 +3,7 @@ import { RoomManager } from '../server/rooms.js';
 import type { Persistence } from '../server/persistence.js';
 import {
   emptyTracker,
+  zoneDigest,
   type Annotation,
   type DurableRoom,
   type RoomState,
@@ -163,6 +164,7 @@ const cases: Array<[string, (state: RoomState) => Action]> = [
       type: 'ZONE_UPDATE',
       sceneId: 'hollow',
       zone: { ...zone, label: 'Changed', opacity: 0.7 },
+      expected: zoneDigest(zone),
     }),
   ],
   ['delete region', () => ({ type: 'ZONE_DELETE', sceneId: 'hollow', id: zone.id })],
@@ -255,7 +257,7 @@ describe('durable table tool undo audit', () => {
     manager.handle(
       gm,
       room.state.id,
-      clientMessageSchema.parse({ ...action, v: 2, actionId: crypto.randomUUID() }),
+      clientMessageSchema.parse({ ...action, v: 7, actionId: crypto.randomUUID() }),
     );
   }
   const contents = (s: RoomState) => structuredClone({ ...s, revision: 0, savedAt: null });
@@ -320,7 +322,7 @@ describe('durable table tool undo audit', () => {
       ids: ['drawing', 'secret-text'],
     };
     expect(() =>
-      manager.handle(player, room.state.id, { ...action, v: 2, actionId: crypto.randomUUID() }),
+      manager.handle(player, room.state.id, { ...action, v: 7, actionId: crypto.randomUUID() }),
     ).toThrow('game master');
     expect(() => commit({ ...action, ids: ['drawing', 'drawing'] })).toThrow('Duplicate');
     expect(() =>
@@ -337,7 +339,7 @@ describe('durable table tool undo audit', () => {
       zoneIds: [zone.id],
     };
     expect(() =>
-      manager.handle(player, room.state.id, { ...action, v: 2, actionId: crypto.randomUUID() }),
+      manager.handle(player, room.state.id, { ...action, v: 7, actionId: crypto.randomUUID() }),
     ).toThrow('game master');
     expect(() => commit({ ...action, zoneIds: [zone.id, zone.id] })).toThrow('Duplicate');
     expect(room.state.scenes.hollow.annotations!.drawing).toBeDefined();

@@ -186,7 +186,7 @@ describe('authenticated HTTP asset download cache', () => {
     await manager.join(pc, room.id, room.inviteCode);
     const scene = (await manager.authorize(room.id, owner.id)).state.scenes.hollow;
     manager.handle(gm, room.id, {
-      v: 2,
+      v: 7,
       type: 'SCENE_CONFIG',
       actionId: 'share-image',
       sceneId: scene.id,
@@ -206,7 +206,7 @@ describe('authenticated HTTP asset download cache', () => {
       ownerRead = request('image');
     await vi.waitFor(() => expect(readable).toHaveBeenCalledTimes(2));
     manager.handle(gm, room.id, {
-      v: 2,
+      v: 7,
       type: 'MEMBER_UPDATE',
       actionId: 'revoke-player',
       userId: player.id,

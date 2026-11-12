@@ -26,7 +26,7 @@ class Client {
     return this;
   }
   send(action: Action, id = randomUUID()) {
-    this.ws.send(JSON.stringify({ ...action, v: 2, actionId: id }));
+    this.ws.send(JSON.stringify({ ...action, v: 7, actionId: id }));
     return id;
   }
   async wait<T extends ServerMessage['type']>(
@@ -82,6 +82,129 @@ describe('real authoritative WebSocket server', () => {
     clients.length = 0;
     await app.close();
     await rm(dir, { recursive: true, force: true });
+  });
+  it('keeps staged scenes and private cues on the GM connection until revealed', async () => {
+    const gm = await client(owner);
+    await gm.wait('ROOM_SNAPSHOT');
+    const pc = await client(player);
+    await pc.wait('ROOM_SNAPSHOT');
+    const hide = gm.send({ type: 'SCENE_VISIBILITY', sceneId: 'sanctuary', visibility: 'gm' });
+    await pc.wait('STATE_PATCH', (m) => m.actionId === hide);
+    pc.send({ type: 'STATE_RESYNC' });
+    expect((await pc.wait('ROOM_SNAPSHOT')).state.scenes.sanctuary).toBeUndefined();
+    gm.send({
+      type: 'TOKEN_MOVE_PREVIEW',
+      sceneId: 'sanctuary',
+      tokenId: 'ranger',
+      position: { x: 500, y: 500 },
+    });
+    const denied = pc.send({
+      type: 'TOKEN_MOVE_COMMIT',
+      sceneId: 'sanctuary',
+      tokenId: 'ranger',
+      position: { x: 500, y: 500 },
+    });
+    expect((await pc.wait('ERROR', (m) => m.actionId === denied)).message).toContain(
+      'Scene not found',
+    );
+    const create = gm.send({
+      type: 'PIN_SET',
+      sceneId: 'hollow',
+      pin: {
+        id: 'secret',
+        x: 700,
+        y: 680,
+        label: 'Secret trap',
+        description: '',
+        gmNote: 'Secret text',
+        visibility: 'gm',
+        proximity: { distance: 40, when: 'enter', playerMessage: 'Secret cue' },
+      },
+    });
+    const pinPatch = await pc.wait('STATE_PATCH', (m) => m.actionId === create);
+    expect(JSON.stringify(pinPatch)).not.toContain('Secret');
+    expect(
+      pc.messages.some((m) => m.type === 'TOKEN_MOVE_PREVIEW' && m.sceneId === 'sanctuary'),
+    ).toBe(false);
+    const move = pc.send({
+      type: 'TOKEN_MOVE_COMMIT',
+      sceneId: 'hollow',
+      tokenId: 'ranger',
+      position: { x: 700, y: 680 },
+    });
+    await pc.wait('STATE_PATCH', (m) => m.actionId === move);
+    expect((await gm.wait('PROXIMITY_CUE')).message).toContain('Secret trap');
+    expect(pc.messages.some((m) => m.type === 'PROXIMITY_CUE')).toBe(false);
+    const reveal = gm.send({
+      type: 'SCENE_CHANGE',
+      sceneId: 'sanctuary',
+      transition: {
+        style: 'flash',
+        title: 'The Vault',
+        subtitle: '',
+        duration: 1800,
+        color: '#111111',
+      },
+    });
+    const patch = await pc.wait('STATE_PATCH', (m) => m.actionId === reveal);
+    expect(patch.changes.map((c) => c.kind)).toContain('scene');
+    expect(patch.changes).toContainEqual(
+      expect.objectContaining({
+        kind: 'scene-active',
+        sceneId: 'sanctuary',
+        transition: expect.objectContaining({ style: 'flash', title: 'The Vault' }),
+      }),
+    );
+  });
+  it('keeps occluded tokens off player snapshots and reveals them when a door opens', async () => {
+    const gm = await client(owner);
+    const initial = await gm.wait('ROOM_SNAPSHOT');
+    const pc = await client(player);
+    await pc.wait('ROOM_SNAPSHOT');
+    const scene = initial.state.scenes.hollow;
+    for (const token of Object.values(scene.tokens)) {
+      const edit = gm.send({
+        type: 'TOKEN_UPDATE',
+        sceneId: 'hollow',
+        token: {
+          ...token,
+          owners: token.id === 'ranger' ? [player.id] : [],
+          ...(token.id === 'ranger'
+            ? { x: 100, y: 100 }
+            : token.id === 'mage'
+              ? { x: 300, y: 100 }
+              : {}),
+        },
+      });
+      await pc.wait('STATE_PATCH', (m) => m.actionId === edit);
+    }
+    const wall = {
+      id: 'barrier',
+      a: { x: 200, y: 0 },
+      b: { x: 200, y: 200 },
+      kind: 'door' as const,
+      open: false,
+    };
+    const place = gm.send({ type: 'WALL_SET', sceneId: 'hollow', wall });
+    await pc.wait('STATE_PATCH', (m) => m.actionId === place);
+    const enable = gm.send({
+      type: 'LIGHTING_SET',
+      sceneId: 'hollow',
+      lighting: { vision: true, darkness: 0 },
+    });
+    const change = await pc.wait('STATE_PATCH', (m) => m.actionId === enable);
+    expect(change.changes).toContainEqual({
+      kind: 'token-delete',
+      sceneId: 'hollow',
+      tokenId: 'mage',
+    });
+    pc.send({ type: 'STATE_RESYNC' });
+    expect((await pc.wait('ROOM_SNAPSHOT')).state.scenes.hollow.tokens.mage).toBeUndefined();
+    const open = gm.send({ type: 'WALL_SET', sceneId: 'hollow', wall: { ...wall, open: true } });
+    const revealed = await pc.wait('STATE_PATCH', (m) => m.actionId === open);
+    expect(revealed.changes).toContainEqual(
+      expect.objectContaining({ kind: 'token', token: expect.objectContaining({ id: 'mage' }) }),
+    );
   });
   it('lets one GM account enter as a player without demotion and enforces that connection role', async () => {
     const gm = await client(owner);

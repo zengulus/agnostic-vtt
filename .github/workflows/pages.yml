@@ -76,14 +76,22 @@ jobs:
           - characters
           - connection-cancellation
           - dialogs
+          - effects
+          - encounter-workflows
           - improvements
+          - light-controls
           - usability
           - ux-review
           - macros
           - physical-dice
           - roll-presentation
+          - responsiveness
           - session
+          - staging
           - tabletop
+          - torchlit-manor
+          - ui-review-fixes
+          - vision
           - workshop
     steps:
       - uses: actions/checkout@v4
