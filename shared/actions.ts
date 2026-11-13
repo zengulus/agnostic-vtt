@@ -1,6 +1,8 @@
 import { macroDigest } from './macroDigest.js';
 import {
   canControl,
+  handoutDigest,
+  tableToolDigest,
   emptyTracker,
   sceneSchema,
   pinDigest,
@@ -540,6 +542,44 @@ export function prepareAction(
           token: { ...t, statuses: [...statuses.filter((s) => s.id !== status.id), status] },
         },
       ];
+    }
+    case 'TABLE_TOOL_SAVE': {
+      gm();
+      const old = state.tableTools?.[m.tool.id];
+      if (old ? !m.digest || tableToolDigest(old) !== m.digest : !!m.digest)
+        throw new Error('This table tool changed. Reopen it before saving.');
+      if (old && old.kind !== m.tool.kind) throw new Error('Cannot change the type of a table tool.');
+      if (!old && Object.keys(state.tableTools || {}).length >= 50)
+        throw new Error('A campaign supports up to 50 table tools.');
+      return [{ kind: 'table-tool', id: m.tool.id, tool: m.tool }];
+    }
+    case 'TABLE_TOOL_DELETE':
+      gm();
+      if (!state.tableTools?.[m.id]) throw new Error('Table tool not found.');
+      return [{ kind: 'table-tool', id: m.id, tool: null }];
+    case 'TABLE_TOOL_ADJUST': {
+      const tool = state.tableTools?.[m.id];
+      if (!tool || tool.kind === 'table') throw new Error('Counter not found.');
+      const value = Math.max(tool.kind === 'clock' ? 0 : -1000000, Math.min(tool.kind === 'clock' ? tool.segments : 1000000, tool.value + m.delta));
+      if (value === tool.value) return [];
+      return [{ kind: 'table-tool', id: m.id, tool: { ...tool, value } }];
+    }
+    case 'HANDOUT_SAVE': {
+      gm();
+      const old = state.handouts?.[m.handout.id];
+      if (old ? !m.digest || handoutDigest(old) !== m.digest : !!m.digest)
+        throw new Error('This handout changed. Reopen it before saving.');
+      if (!old && Object.keys(state.handouts || {}).length >= 50)
+        throw new Error('A campaign supports up to 50 handouts.');
+      if (m.handout.imageUrl) validateAsset({ kind: 'external', url: m.handout.imageUrl });
+      return [{ kind: 'handout', id: m.handout.id, handout: m.handout }];
+    }
+    case 'HANDOUT_DELETE': {
+      gm();
+      const old = state.handouts?.[m.id];
+      if (!old || handoutDigest(old) !== m.digest)
+        throw new Error('This handout changed. Reopen it before deleting.');
+      return [{ kind: 'handout', id: m.id, handout: null }];
     }
     case 'STATUS_PRESET_SET':
       gm();

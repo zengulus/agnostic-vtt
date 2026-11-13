@@ -117,6 +117,26 @@ describe('client connection transitions', () => {
     vi.unstubAllEnvs();
     vi.useRealTimers();
   });
+  it('shows shared measurements temporarily and clears them on role change', async () => {
+    const socket = await connect();
+    const message = {
+      v: 7 as const,
+      type: 'MEASUREMENT_SHARE' as const,
+      sceneId: 'hollow',
+      mode: 'distance' as const,
+      start: { x: 1, y: 2 },
+      end: { x: 3, y: 4 },
+      points: [],
+      userId: 'other',
+    };
+    socket.message(message);
+    expect(table.useTable.getState().sharedMeasurement?.start).toEqual({ x: 1, y: 2 });
+    await vi.advanceTimersByTimeAsync(5000);
+    expect(table.useTable.getState().sharedMeasurement).toBeNull();
+    socket.message(message);
+    snapshot(socket, 'campaign-a', 'player');
+    expect(table.useTable.getState().sharedMeasurement).toBeNull();
+  });
   it('ignores late snapshots and results from a replaced socket', async () => {
     const old = await connect();
     await connect('campaign-b');

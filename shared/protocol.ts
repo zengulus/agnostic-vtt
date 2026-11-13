@@ -1,6 +1,8 @@
 import { z } from 'zod';
 import {
   fogSchema,
+  handoutSchema,
+  tableToolSchema,
   gridSchema,
   idSchema,
   pointSchema,
@@ -90,6 +92,15 @@ export const clientMessageSchema = z.discriminatedUnion('type', [
     role: z.enum(['gm', 'player']).optional(),
   }),
   z.object({ ...base, type: z.literal('STATE_RESYNC') }),
+  z.object({
+    ...base,
+    type: z.literal('MEASUREMENT_SHARE'),
+    sceneId,
+    mode: z.enum(['distance', 'path', 'radius', 'cone', 'area']),
+    start: pointSchema,
+    end: pointSchema,
+    points: z.array(pointSchema).max(100),
+  }),
   z.object({ ...base, type: z.literal('SESSION_ROLE'), role: z.enum(['gm', 'player']) }),
   z.object({
     ...base,
@@ -137,6 +148,26 @@ export const clientMessageSchema = z.discriminatedUnion('type', [
       .regex(/^[a-f0-9]{64}$/)
       .optional(),
   }),
+  z.object({
+    ...base,
+    type: z.literal('HANDOUT_SAVE'),
+    handout: handoutSchema,
+    digest: z
+      .string()
+      .regex(/^[a-f0-9]{64}$/)
+      .optional(),
+  }),
+  z.object({
+    ...base,
+    type: z.literal('HANDOUT_DELETE'),
+    id: idSchema,
+    digest: z.string().regex(/^[a-f0-9]{64}$/),
+  }),
+  z.object({ ...base, type: z.literal('TABLE_TOOL_SAVE'), tool: tableToolSchema, digest: z.string().regex(/^[a-f0-9]{64}$/).optional() }),
+  z.object({ ...base, type: z.literal('TABLE_TOOL_DELETE'), id: idSchema }),
+  z.object({ ...base, type: z.literal('TABLE_TOOL_ADJUST'), id: idSchema, delta: z.union([z.literal(-1), z.literal(1)]) }),
+  z.object({ ...base, type: z.literal('HANDOUT_PRESENT'), id: idSchema }),
+  z.object({ ...base, type: z.literal('TABLE_TOOL_ROLL'), id: idSchema }),
   z.object({ ...base, type: z.literal('STATUS_PRESET_SET'), preset: statusPresetSchema }),
   z.object({ ...base, type: z.literal('STATUS_PRESET_DELETE'), id: idSchema }),
   z.object({
@@ -422,8 +453,20 @@ export type ServerMessage =
       position: Point;
       userId: string;
     }
+  | {
+      v: 7;
+      type: 'MEASUREMENT_SHARE';
+      sceneId: string;
+      mode: 'distance' | 'path' | 'radius' | 'cone' | 'area';
+      start: Point;
+      end: Point;
+      points: Point[];
+      userId: string;
+    }
   | { v: 7; type: 'DICE_ROLL_RESULT'; roll: Roll }
-  | { v: 7; type: 'PING'; position: Point; userId: string }
+  | { v: 7; type: 'PING'; position: Point; userId: string; sceneId?: string; attention?: boolean }
+  | { v: 7; type: 'HANDOUT_PRESENT'; handout: import('./model.js').Handout }
+  | { v: 7; type: 'TABLE_TOOL_RESULT'; name: string; result: string }
   | { v: 7; type: 'PROXIMITY_CUE'; message: string }
   | { v: 7; type: 'SAVED'; savedAt: string; revision: number; pending?: boolean }
   | { v: 7; type: 'ERROR'; message: string; actionId?: string };

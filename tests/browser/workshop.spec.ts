@@ -50,7 +50,7 @@ async function drag(page: Page, x: number, y: number, dx: number, dy: number) {
   await page.mouse.up();
 }
 
-test('local uploads, statuses, independent template placement, group edits and undo work through the UI', async ({
+test('image URLs, statuses, independent template placement, group edits and undo work through the UI', async ({
   page,
 }) => {
   const errors: string[] = [];
@@ -62,11 +62,17 @@ test('local uploads, statuses, independent template placement, group edits and u
   })
     .png()
     .toBuffer();
+  await page.route('https://images.example.com/**', (route) =>
+    route.fulfill({ status: 200, contentType: 'image/png', body: png }),
+  );
   await page.getByRole('button', { name: 'Add token', exact: true }).click();
-  await page
-    .getByLabel('Upload image', { exact: true })
-    .setInputFiles({ name: 'warden.png', mimeType: 'image/png', buffer: png });
-  await expect(page.getByAltText('Image preview')).toHaveAttribute('src', /^blob:/);
+  await page.getByLabel('External image URL').fill('https://images.example.com/warden.png');
+  await page.getByRole('button', { name: 'Preview', exact: true }).click();
+  await expect(page.getByAltText('Image preview')).toHaveAttribute(
+    'src',
+    'https://images.example.com/warden.png',
+  );
+  await expect(page.getByLabel('Upload image')).toHaveCount(0);
   await page.getByLabel('Name', { exact: true }).fill('Forest warden');
   await page.getByLabel('Status label').fill('Inspired');
   await page.getByRole('button', { name: 'Add status', exact: true }).click();
@@ -77,7 +83,7 @@ test('local uploads, statuses, independent template placement, group edits and u
     .toBe(1);
   let state = await roomState(page);
   const token = Object.values(state.scenes.hollow.tokens).find((t) => t.name === 'Forest warden')!;
-  expect(token.image.kind).toBe('uploaded');
+  expect(token.image.kind).toBe('external');
   expect(token.statuses?.[0].label).toBe('Inspired');
   expect(JSON.stringify(messages)).not.toContain('data:image');
   await page.getByRole('button', { name: 'Saved token library', exact: true }).click();
@@ -128,19 +134,23 @@ test('local uploads, statuses, independent template placement, group edits and u
   await page.keyboard.press('Control+z');
   await expect.poll(async () => (await roomState(page)).scenes.hollow.tokens.ranger.x).toBe(600);
   await page.getByRole('button', { name: 'Images', exact: true }).click();
-  await expect(page.getByAltText('warden.png')).toBeVisible();
+  await expect(
+    page.getByText('No legacy uploaded images. Paste an image URL in a map or token dialog.'),
+  ).toBeVisible();
   await page.getByRole('button', { name: 'Close dialog' }).click();
   await page.getByRole('button', { name: 'New scene', exact: true }).click();
-  await page
-    .getByLabel('Upload image', { exact: true })
-    .setInputFiles({ name: 'moss-map.png', mimeType: 'image/png', buffer: png });
-  await expect(page.getByAltText('Image preview')).toHaveAttribute('src', /^blob:/);
+  await page.getByLabel('External image URL').fill('https://images.example.com/moss-map.png');
+  await page.getByRole('button', { name: 'Preview', exact: true }).click();
+  await expect(page.getByAltText('Image preview')).toHaveAttribute(
+    'src',
+    'https://images.example.com/moss-map.png',
+  );
   await page.getByLabel('Scene name').fill('Moss archive');
   await page.getByRole('button', { name: 'Add scene', exact: true }).click();
   await page.getByRole('button', { name: 'Moss archive', exact: true }).click();
   await expect(page.getByRole('heading', { name: 'Moss archive', exact: true })).toBeVisible();
   state = await roomState(page);
-  expect(state.scenes[state.activeSceneId].map.kind).toBe('uploaded');
+  expect(state.scenes[state.activeSceneId].map.kind).toBe('external');
   expect(state.scenes[state.activeSceneId].tokens).toEqual({});
   expect(errors).toEqual([]);
 });

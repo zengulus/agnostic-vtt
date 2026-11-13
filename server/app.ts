@@ -9,8 +9,7 @@ import {
 import { metrics } from './persistence.js';
 import { LocalAuth, type Auth } from './auth.js';
 import { RoomManager, type Peer } from './rooms.js';
-import { randomUUID } from 'node:crypto';
-import { normalizeImage, UPLOAD_LIMIT, type AssetStorage } from './assets.js';
+import type { AssetStorage } from './assets.js';
 
 export function createApp(
   manager: RoomManager,
@@ -19,7 +18,6 @@ export function createApp(
   assets?: AssetStorage,
 ) {
   if (assets) manager.setAssetStorage(assets);
-  let decoding = 0;
   const assetCache = new Map<string, Buffer>();
   const pendingAssetReads = new Map<string, Promise<Buffer>>();
   const assetCacheLimit = 16 * 1024 * 1024;
@@ -51,10 +49,7 @@ export function createApp(
     }
     if (origin) res.setHeader('Access-Control-Allow-Origin', origin);
     res.setHeader('Vary', 'Origin');
-    res.setHeader(
-      'Access-Control-Allow-Headers',
-      'Authorization,Content-Type,X-Image-Name,X-Image-Purpose',
-    );
+    res.setHeader('Access-Control-Allow-Headers', 'Authorization,Content-Type');
     res.setHeader('Access-Control-Allow-Methods', 'GET,POST,PUT,DELETE,OPTIONS');
     if (req.method === 'OPTIONS') {
       res.writeHead(204);
@@ -182,41 +177,10 @@ export function createApp(
         }
         await manager.authorize(roomId, user.id, true);
         if (!id && req.method === 'POST') {
-          if (decoding >= 2) {
-            json(res, 429, { error: 'Image processing is busy. Try again shortly.' });
-            return;
-          }
-          decoding++;
-          try {
-            const chunks: Buffer[] = [];
-            let size = 0;
-            for await (const chunk of req) {
-              size += chunk.length;
-              if (size > UPLOAD_LIMIT) throw new Error('Upload images up to 10 MiB.');
-              chunks.push(Buffer.from(chunk));
-            }
-            const image = await normalizeImage(
-                Buffer.concat(chunks),
-                req.headers['x-image-purpose'] === 'token' ? 512 : 4096,
-              ),
-              assetId = randomUUID();
-            const metadata = {
-              id: assetId,
-              name: decodeURIComponent(
-                String(req.headers['x-image-name'] || 'Uploaded image'),
-              ).slice(0, 80),
-              bytes: image.data.length,
-              width: image.width,
-              height: image.height,
-              createdAt: new Date().toISOString(),
-              createdBy: user.id,
-            };
-            await manager.uploadAsset(roomId, user.id, metadata, image.data);
-            json(res, 201, { asset: { kind: 'uploaded', url: assetId }, ...metadata });
-            return;
-          } finally {
-            decoding--;
-          }
+          json(res, 410, {
+            error: 'Image uploads are no longer supported. Use a public HTTPS image URL.',
+          });
+          return;
         }
         if (id && req.method === 'DELETE') {
           try {
@@ -398,7 +362,7 @@ export function createApp(
       try {
         await manager.close();
       } finally {
-        // Upload HTTP requests can outlive the bounded shutdown grace period.
+        // Close any remaining HTTP connections after saving.
         server.closeAllConnections();
         await Promise.all([httpClosed, socketsClosed]);
       }

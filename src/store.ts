@@ -45,6 +45,7 @@ export const demoState: RoomState = {
   rolls: [],
   savedAt: null,
 };
+export type TablePresentation = { kind: 'handout'; handout: import('../shared/model.js').Handout } | { kind: 'table'; name: string; result: string };
 interface UIState {
   room: RoomState;
   self: Presence | null;
@@ -71,7 +72,9 @@ interface UIState {
   error: string | null;
   previews: Record<string, Point>;
   pings: Array<Point & { at: number; userId?: string; name?: string }>;
+  attention: { position: Point; sceneId: string; name: string } | null;
   presentation: Roll | null;
+  tablePresentations: TablePresentation[];
   rollQueue: Roll[];
   reducedMotion: boolean;
   sound: boolean;
@@ -97,6 +100,14 @@ interface UIState {
   eraserSize: number;
   annotationText: string;
   annotationVisibility: 'public' | 'gm';
+  shareMeasurement: boolean;
+  sharedMeasurement: {
+    sceneId: string;
+    mode: 'distance' | 'path' | 'radius' | 'cone' | 'area';
+    start: Point;
+    end: Point;
+    points: Point[];
+  } | null;
   measurementShape: 'distance' | 'path' | 'radius' | 'cone' | 'area';
   sceneTransition: number;
   selectedPin: string | null;
@@ -148,7 +159,9 @@ export const useTable = create<UIState>((set, get) => ({
   error: null,
   previews: {},
   pings: [],
+  attention: null,
   presentation: null,
+  tablePresentations: [],
   rollQueue: [],
   reducedMotion: settings.reducedMotion ?? matchMedia('(prefers-reduced-motion: reduce)').matches,
   sound: settings.sound ?? false,
@@ -175,6 +188,8 @@ export const useTable = create<UIState>((set, get) => ({
   annotationText: 'A note for the party',
   annotationVisibility: 'public',
   measurementShape: 'distance',
+  shareMeasurement: false,
+  sharedMeasurement: null,
   sceneTransition: 0,
   selectedPin: null,
   viewSceneId: null,
@@ -234,4 +249,14 @@ export function presentRoll(roll: Roll) {
     s.set({ activityOpen: false });
   if (s.presentation) s.set({ rollQueue: [...s.rollQueue, roll].slice(-10) });
   else s.set({ presentation: roll });
+}
+
+/** Present transient events in arrival order; bound memory and report overflow. */
+export function enqueueTablePresentation(presentation: TablePresentation) {
+  const state = useTable.getState();
+  if (state.tablePresentations.length >= 50) {
+    notify('Presentation queue is full. Dismiss a presentation before receiving more.');
+    return;
+  }
+  state.set({ tablePresentations: [...state.tablePresentations, presentation] });
 }

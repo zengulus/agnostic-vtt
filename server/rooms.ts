@@ -2,6 +2,7 @@ import { randomBytes } from 'node:crypto';
 import {
   canControl,
   projectRoom,
+  publicHandout,
   tokenVisible,
   type StateChange,
   type DurableRoom,
@@ -686,9 +687,56 @@ export class RoomManager {
     }
     if (!data.members[peer.identity.id])
       throw new Error('You are no longer a member of this campaign.');
+    if (message.type === 'MEASUREMENT_SHARE') {
+      const scene = data.state.scenes[message.sceneId];
+      if (
+        !scene ||
+        (role !== 'gm' && scene.visibility === 'gm' && scene.id !== data.state.activeSceneId)
+      )
+        throw new Error('Scene not found.');
+      const point = (p: typeof message.start) => ({
+        x: Math.max(0, Math.min(scene.width, p.x)),
+        y: Math.max(0, Math.min(scene.height, p.y)),
+      });
+      for (const p of room.peers) {
+        if (
+          p === peer ||
+          (this.role(room, p) !== 'gm' &&
+            scene.visibility === 'gm' &&
+            scene.id !== data.state.activeSceneId)
+        )
+          continue;
+        p.send({
+          v: 7,
+          type: 'MEASUREMENT_SHARE',
+          sceneId: scene.id,
+          mode: message.mode,
+          start: point(message.start),
+          end: point(message.end),
+          points: message.points.map(point),
+          userId: peer.identity.id,
+        });
+      }
+      return;
+    }
+    if (message.type === 'HANDOUT_PRESENT') {
+      if (role !== 'gm') throw new Error('Only the game master can present a handout.');
+      const handout = data.state.handouts?.[message.id];
+      if (!handout) throw new Error('Handout not found.');
+      for (const p of room.peers) p.send({ v: 7, type: 'HANDOUT_PRESENT', handout: publicHandout(handout) });
+      return;
+    }
+    if (message.type === 'TABLE_TOOL_ROLL') {
+      const table = data.state.tableTools?.[message.id];
+      if (!table || table.kind !== 'table') throw new Error('Table not found.');
+      let choice = Math.floor(Math.random() * table.entries.reduce((sum, entry) => sum + entry.weight, 0));
+      const selected = table.entries.find((entry) => (choice -= entry.weight) < 0)!;
+      for (const p of room.peers) p.send({ v: 7, type: 'TABLE_TOOL_RESULT', name: table.name, result: selected.text });
+      return;
+    }
     if (message.type === 'PING') {
       for (const p of room.peers)
-        p.send({ v: 7, type: 'PING', position: message.position, userId: peer.identity.id });
+        p.send({ v: 7, type: 'PING', position: message.position, userId: peer.identity.id, sceneId: data.state.activeSceneId, attention: role === 'gm' });
       return;
     }
     if (message.type === 'TOKEN_MOVE_PREVIEW' || message.type === 'TOKEN_MOVE_PREVIEW_BATCH') {

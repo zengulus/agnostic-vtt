@@ -30,6 +30,7 @@ import { Encounters } from './Encounters.js';
 import { ProximityEditor } from './ProximityEditor.js';
 import { LightFields } from './LightFields.js';
 import { LightingControls } from './Lighting.js';
+import { Handouts } from './Handouts.js';
 import { PinList } from './Pins.js';
 import { ScenePresentation } from './ScenePresentation.js';
 import { useMediaQuery } from '../useMediaQuery.js';
@@ -318,20 +319,30 @@ export function ToolOptions({
         </>
       )}
       {s.tool === 'measure' && (
-        <label>
-          Measurement
-          <select
-            value={s.measurementShape}
-            onChange={(e) => {
-              clearDraft();
-              s.set({ measurementShape: e.target.value as typeof s.measurementShape });
-            }}
-          >
-            {['distance', 'path', 'radius', 'cone', 'area'].map((v) => (
-              <option key={v}>{v}</option>
-            ))}
-          </select>
-        </label>
+        <>
+          <label>
+            Measurement
+            <select
+              value={s.measurementShape}
+              onChange={(e) => {
+                clearDraft();
+                s.set({ measurementShape: e.target.value as typeof s.measurementShape });
+              }}
+            >
+              {['distance', 'path', 'radius', 'cone', 'area'].map((v) => (
+                <option key={v}>{v}</option>
+              ))}
+            </select>
+          </label>
+          <label>
+            <input
+              type="checkbox"
+              checked={s.shareMeasurement}
+              onChange={(e) => s.set({ shareMeasurement: e.target.checked })}
+            />{' '}
+            Share completed measurements
+          </label>
+        </>
       )}
       {s.tool === 'erase' && (
         <>
@@ -401,6 +412,7 @@ export function TokenLibraryDialog() {
       <h3>My characters & scene characters</h3>
       <CharacterList />
       <PinList />
+      <Handouts key={`${s.room.id}-${s.sessionNonce}-${s.self?.role}`} />
       <LightingControls key={scene.id} scene={scene} />
       <ScenePresentation />
       <div className="scene-switcher">
@@ -506,8 +518,8 @@ export function AssetManagerDialog() {
   return (
     <>
       <p className="modal-description">
-        Uploaded images are optimized WebP files in your campaign’s private storage. External links
-        remain on their original host.
+        Previously uploaded images remain in your campaign’s private storage. New images use
+        external URLs.
       </p>
       <div className="asset-summary">
         {assets.length} / 64 images ·{' '}
@@ -581,7 +593,7 @@ export function AssetManagerDialog() {
       )}
       {!assets.length && (
         <p className="field-note">
-          Choose Upload image in a map or token dialog to add your first asset.
+          No legacy uploaded images. Paste an image URL in a map or token dialog.
         </p>
       )}
       <div className="external-references">

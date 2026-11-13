@@ -3,7 +3,7 @@ import { projectRoom, tokenVisible, type DurableRoom, type StateChange } from '.
 import { clientMessageSchema, type Action } from '../shared/protocol.js';
 import { applyChanges, inverseChanges } from '../shared/state.js';
 import { newRoom, torchlitManor } from '../shared/sample.js';
-import { useTable, presentRoll } from './store.js';
+import { useTable, presentRoll, enqueueTablePresentation } from './store.js';
 import { proximityCues } from '../shared/proximity.js';
 
 const identity = { id: 'demo-gm', name: 'Storykeeper' };
@@ -78,8 +78,11 @@ function publish(reset = false) {
           selectedPin: null,
           proximityCues: [],
           presentation: null,
+          tablePresentations: [],
+          attention: null,
           rollQueue: [],
           pings: [],
+          sharedMeasurement: null,
           tool: 'select',
           dialog: null,
           error: null,
@@ -105,6 +108,15 @@ export function demoAction(action: Action) {
     publish(true);
     return m.actionId;
   }
+  if (m.type === 'TABLE_TOOL_ROLL') {
+    const table = room.state.tableTools?.[m.id];
+    if (!table || table.kind !== 'table') throw new Error('Table not found.');
+    let choice = randomInt(0, table.entries.reduce((sum, entry) => sum + entry.weight, 0));
+    const entry = table.entries.find((row) => (choice -= row.weight) < 0)!;
+    enqueueTablePresentation({ kind: 'table', name: table.name, result: entry.text });
+    return m.actionId;
+  }
+  if (m.type === 'MEASUREMENT_SHARE') return m.actionId;
   if (m.type === 'PING') {
     const s = useTable.getState();
     if (

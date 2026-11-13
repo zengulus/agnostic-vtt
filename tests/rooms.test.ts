@@ -43,6 +43,80 @@ describe('room admission and lifecycle', () => {
     await manager.close();
     vi.useRealTimers();
   });
+  it('shares bounded measurements without writes and with scene visibility checks', async () => {
+    const room = await manager.create(owner, 'Measurements');
+    const gm = peer(owner.id),
+      player = peer('player');
+    await manager.join(gm, room.id);
+    await manager.join(player, room.id, room.inviteCode);
+    const save = vi.spyOn(storage, 'save');
+    const revision = storage.rooms.get(room.id)!.state.revision;
+    for (let i = 0; i < 100; i++)
+      manager.handle(gm, room.id, {
+        v: 7,
+        actionId: `measure-${i}`,
+        type: 'MEASUREMENT_SHARE',
+        sceneId: 'hollow',
+        mode: 'distance',
+        start: { x: -10, y: 0 },
+        end: { x: 100, y: 100 },
+        points: [],
+      });
+    const messages = player.messages.filter((message) => message.type === 'MEASUREMENT_SHARE');
+    expect(messages).toHaveLength(100);
+    expect(messages[0]).toMatchObject({ start: { x: 0, y: 0 } });
+    expect(JSON.stringify(messages[0]).length).toBeLessThan(250);
+    await vi.advanceTimersByTimeAsync(60000);
+    expect(save).not.toHaveBeenCalled();
+    expect(storage.rooms.get(room.id)!.state.revision).toBe(revision);
+    manager.handle(gm, room.id, {
+      v: 7,
+      actionId: 'hide',
+      type: 'SCENE_VISIBILITY',
+      sceneId: 'sanctuary',
+      visibility: 'gm',
+    });
+    player.messages.length = 0;
+    manager.handle(gm, room.id, {
+      v: 7,
+      actionId: 'secret-measure',
+      type: 'MEASUREMENT_SHARE',
+      sceneId: 'sanctuary',
+      mode: 'distance',
+      start: { x: 0, y: 0 },
+      end: { x: 10, y: 10 },
+      points: [],
+    });
+    expect(player.messages.filter((message) => message.type === 'MEASUREMENT_SHARE')).toHaveLength(
+      0,
+    );
+  });
+  it('coalesces URL image changes into a single scheduled snapshot', async () => {
+    const room = await manager.create(owner, 'Image URLs');
+    const gm = peer(owner.id);
+    await manager.join(gm, room.id);
+    const before = (await manager.authorize(room.id, owner.id)).state.scenes.hollow;
+    const save = vi.spyOn(storage, 'save');
+    for (let i = 0; i < 5; i++)
+      manager.handle(gm, room.id, {
+        v: 7,
+        actionId: `map-${i}`,
+        type: 'SCENE_CONFIG',
+        sceneId: before.id,
+        name: before.name,
+        width: before.width,
+        height: before.height,
+        map: { kind: 'external', url: `https://images.example.com/map-${i}.png` },
+        create: false,
+      });
+    expect(save).not.toHaveBeenCalled();
+    await vi.advanceTimersByTimeAsync(60000);
+    expect(save).toHaveBeenCalledTimes(1);
+    expect(storage.rooms.get(room.id)!.state.scenes.hollow.map).toEqual({
+      kind: 'external',
+      url: 'https://images.example.com/map-4.png',
+    });
+  });
   it('coalesces wall, door and lighting edits into one scheduled snapshot', async () => {
     const room = await manager.create(owner, 'Lighting'),
       gm = peer(owner.id);

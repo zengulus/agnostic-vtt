@@ -149,6 +149,15 @@ export function Tabletop() {
     if (d.tool === 'measure') {
       d.end = d.points.at(-1) || d.start;
       d.completed = true;
+      if (st.shareMeasurement)
+        send({
+          type: 'MEASUREMENT_SHARE',
+          sceneId: st.viewSceneId || st.room.activeSceneId,
+          mode: st.measurementShape,
+          start: d.start,
+          end: d.end,
+          points: d.points,
+        });
       redraw();
       return;
     }
@@ -340,6 +349,10 @@ export function Tabletop() {
         lightTick: tick,
         pings: s.pings,
         draft: draft.current,
+        sharedMeasurement:
+          s.sharedMeasurement?.sceneId === (s.viewSceneId || s.room.activeSceneId)
+            ? s.sharedMeasurement
+            : null,
         tool: s.tool,
         zoneShape: s.zoneShape,
         fogShape: s.fogShape,
@@ -1041,7 +1054,18 @@ export function Tabletop() {
           },
         });
       if (d.kind !== 'measure') draft.current = null;
-      else shape.completed = true;
+      else {
+        shape.completed = true;
+        if (st.shareMeasurement)
+          send({
+            type: 'MEASUREMENT_SHARE',
+            sceneId: s.id,
+            mode: st.measurementShape,
+            start: shape.start,
+            end: shape.end,
+            points: shape.points,
+          });
+      }
       redraw();
     }
     if (e.currentTarget.hasPointerCapture(e.pointerId))

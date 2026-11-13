@@ -6,10 +6,9 @@ import {
   type DiscordStatus,
   type ServerMessage,
 } from '../shared/protocol.js';
-import { useTable, notify, presentRoll } from './store.js';
+import { useTable, notify, presentRoll, enqueueTablePresentation } from './store.js';
 import { demoState } from './store.js';
 import { applyChanges } from '../shared/state.js';
-import type { Asset, UploadedAsset } from '../shared/model.js';
 const serverUrl = (import.meta.env.VITE_SERVER_URL || '').replace(/\/$/, '');
 export const supabase = !!(
   import.meta.env.VITE_SUPABASE_URL && import.meta.env.VITE_SUPABASE_ANON_KEY
@@ -148,20 +147,6 @@ async function fetchWithSession(path: string, init: RequestInit, identity: Sessi
     throw new Error(message);
   }
   return response;
-}
-export async function uploadImage(file: File, purpose: 'map' | 'token' = 'map') {
-  if (file.size > 10 * 1024 * 1024) throw new Error('Upload images up to 10 MiB.');
-  const room = useTable.getState().room;
-  const response = await authorizedFetch(`/api/assets/${room.id}`, {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/octet-stream',
-      'X-Image-Name': encodeURIComponent(file.name),
-      'X-Image-Purpose': purpose,
-    },
-    body: file,
-  });
-  return (await response.json()) as UploadedAsset & { asset: Asset };
 }
 export async function deleteImage(id: string) {
   await authorizedFetch(`/api/assets/${useTable.getState().room.id}/${id}`, { method: 'DELETE' });
@@ -400,6 +385,11 @@ export async function launch(
 }
 export function send(action: Action) {
   if (useTable.getState().status === 'demo') {
+    if (action.type === 'HANDOUT_PRESENT') {
+      const handout = useTable.getState().room.handouts?.[action.id];
+      if (handout) enqueueTablePresentation({ kind: 'handout', handout: { ...handout, gmNote: '' } });
+      return crypto.randomUUID();
+    }
     try {
       return demoAction(action);
     } catch (error) {
@@ -420,6 +410,9 @@ export function send(action: Action) {
         'STATE_RESYNC',
         'SESSION_ROLE',
         'PING',
+        'HANDOUT_PRESENT',
+        'TABLE_TOOL_ROLL',
+        'MEASUREMENT_SHARE',
         'TOKEN_MOVE_PREVIEW',
         'TOKEN_MOVE_PREVIEW_BATCH',
       ].includes(action.type)
@@ -541,8 +534,11 @@ function open() {
             ? {
                 deliveries: {},
                 presentation: null,
+                tablePresentations: [],
+                attention: null,
                 rollQueue: [],
                 pings: [],
+                sharedMeasurement: null,
                 tool: 'select' as const,
                 viewSceneId: null,
                 dialog: null,
@@ -677,6 +673,7 @@ function open() {
                 proximityCues: [],
                 previews: {},
                 pings: [],
+                sharedMeasurement: null,
                 sceneTransition: Date.now(),
                 transitionEffect,
               }
@@ -739,6 +736,8 @@ function open() {
           dialog: 'launch',
           error: message.message,
           presentation: null,
+          tablePresentations: [],
+          attention: null,
           rollQueue: [],
         });
         break;
@@ -755,10 +754,35 @@ function open() {
           }, 1500);
         }
         break;
+      case 'MEASUREMENT_SHARE': {
+        if (message.sceneId !== (store.viewSceneId || store.room.activeSceneId)) break;
+        const measurement = {
+          sceneId: message.sceneId,
+          mode: message.mode,
+          start: message.start,
+          end: message.end,
+          points: message.points,
+        };
+        store.set({ sharedMeasurement: measurement });
+        setTimeout(() => {
+          const current = useTable.getState();
+          if (current.sharedMeasurement === measurement) current.set({ sharedMeasurement: null });
+        }, 5000);
+        break;
+      }
+      case 'HANDOUT_PRESENT':
+        enqueueTablePresentation({ kind: 'handout', handout: message.handout });
+        break;
+      case 'TABLE_TOOL_RESULT':
+        enqueueTablePresentation({ kind: 'table', name: message.name, result: message.result });
+        break;
       case 'DICE_ROLL_RESULT':
         presentRoll(message.roll);
         break;
       case 'PING':
+        if (message.attention && message.sceneId && message.userId !== store.self?.id)
+          store.set({ attention: { position: message.position, sceneId: message.sceneId, name: store.presence.find((p) => p.id === message.userId)?.name || 'GM' } });
+        if (message.sceneId && message.sceneId !== (store.viewSceneId || store.room.activeSceneId)) break;
         if (
           message.userId === store.self?.id &&
           store.pings.some(

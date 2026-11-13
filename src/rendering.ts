@@ -183,6 +183,7 @@ interface RenderOptions {
   lightTick?: number;
   pings: Array<Point & { at: number; name?: string }>;
   draft: Draft | null;
+  sharedMeasurement?: { mode: string; start: Point; end: Point; points: Point[] } | null;
   tool: Tool;
   zoneShape: string;
   fogShape: string;
@@ -789,6 +790,17 @@ export class SceneRenderer {
       ctx.font = `${12 / c.zoom}px sans-serif`;
       ctx.fillText(`${offscreen ? '◆ ' : ''}${p.name || 'Ping'}`, x, y - 14 / c.zoom);
     }
+    if (o.sharedMeasurement)
+      this.draft(
+        ctx,
+        {
+          tool: 'measure',
+          start: o.sharedMeasurement.start,
+          end: o.sharedMeasurement.end,
+          points: o.sharedMeasurement.points,
+        },
+        { ...o, measurementShape: o.sharedMeasurement.mode },
+      );
     if (o.draft) this.draft(ctx, o.draft, o);
     ctx.restore();
     ctx.restore();

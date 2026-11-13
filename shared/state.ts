@@ -1,6 +1,8 @@
 import { isSharedVisionSource } from './vision.js';
 import {
   emptyTracker,
+  publicHandout,
+  publicTableTool,
   projectScene,
   projectTracker,
   projectAssets,
@@ -86,6 +88,16 @@ export function applyChanges(state: RoomState, changes: StateChange[]): RoomStat
       continue;
     }
     switch (c.kind) {
+      case 'table-tool':
+        next.tableTools = { ...next.tableTools };
+        if (c.tool) next.tableTools[c.id] = c.tool;
+        else delete next.tableTools[c.id];
+        break;
+      case 'handout':
+        next.handouts = { ...next.handouts };
+        if (c.handout) next.handouts[c.id] = c.handout;
+        else delete next.handouts[c.id];
+        break;
       case 'encounter':
         next.encounters = { ...next.encounters };
         if (c.encounter) next.encounters[c.id] = c.encounter;
@@ -140,6 +152,12 @@ export function inverseChanges(state: RoomState, changes: StateChange[]): StateC
   for (const c of changes) {
     const scene = 'sceneId' in c ? current.scenes[c.sceneId] : undefined;
     switch (c.kind) {
+      case 'table-tool':
+        inverse.unshift({ ...c, tool: current.tableTools?.[c.id] || null });
+        break;
+      case 'handout':
+        inverse.unshift({ ...c, handout: current.handouts?.[c.id] || null });
+        break;
       case 'encounter':
         inverse.unshift({ ...c, encounter: current.encounters?.[c.id] || null });
         break;
@@ -293,6 +311,17 @@ export function projectChanges(
         }
         if (!was && c.kind !== 'scene') continue;
       }
+    }
+    if (c.kind === 'table-tool') {
+      projected.push(role === 'gm' || !c.tool ? c : { ...c, tool: publicTableTool(c.tool) });
+      continue;
+    }
+    if (c.kind === 'handout') {
+      const old = before.handouts?.[c.id];
+      if (role === 'gm') projected.push(c);
+      else if (c.handout?.shared) projected.push({ ...c, handout: publicHandout(c.handout) });
+      else if (old?.shared) projected.push({ ...c, handout: null });
+      continue;
     }
     if (c.kind === 'encounter') {
       if (role === 'gm') projected.push(c);

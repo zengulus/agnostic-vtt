@@ -56,6 +56,9 @@ import { unlockSound } from './sound.js';
 import { useMediaQuery } from './useMediaQuery.js';
 import { useActivityFocus } from './useActivityFocus.js';
 import { useConfirmedAction } from './useConfirmedAction.js';
+import { TablePresentation } from './components/TablePresentation.js';
+import { TableTools } from './components/TableTools.js';
+import { Handouts } from './components/Handouts.js';
 import { PinList, PinPanel } from './components/Pins.js';
 import { LightingControls } from './components/Lighting.js';
 import { ScenePresentation } from './components/ScenePresentation.js';
@@ -414,6 +417,8 @@ export function App() {
           </div>
           <CharacterList />
           <PinList />
+          <TableTools />
+          <Handouts key={`${s.room.id}-${s.sessionNonce}-${s.self?.role}`} />
           <LightingControls key={scene.id} scene={scene} />
           <div className="library-actions">
             <button
@@ -536,7 +541,9 @@ export function App() {
           </button>
         </div>
       )}
+      {s.attention && <div role="status" className="attention-prompt">{s.attention.name} points to the table. <button onClick={() => { const attention = s.attention; if (!attention) return; if (!s.room.scenes[attention.sceneId] || attention.sceneId !== s.room.activeSceneId) { s.set({ attention: null }); return; } const canvas = document.querySelector('.tabletop canvas'); const rect = canvas?.getBoundingClientRect(); if (rect) s.set({ viewSceneId: null, camera: { ...s.camera, x: rect.width / 2 - attention.position.x * s.camera.zoom, y: rect.height / 2 - attention.position.y * s.camera.zoom }, attention: null }); }}>Go there</button> <button aria-label="Dismiss ping" onClick={() => s.set({ attention: null })}>×</button></div>}
       <Dialogs />
+      <TablePresentation />
     </div>
   );
 }

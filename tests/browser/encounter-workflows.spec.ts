@@ -55,6 +55,9 @@ test('encounters, batch effects, stat rolls, ability editing and applying result
   await quick.locator('summary').click();
   await quick.getByLabel('Search quick actions').fill('Sweeping');
   await quick.getByRole('button', { name: 'Pin Sweeping Strike' }).click();
+  await expect(
+    page.locator('.quick-ability-shortcuts > button', { hasText: 'Sweeping Strike' }),
+  ).toBeVisible();
   await quick.getByLabel('Favorites only').check();
   await expect(quick.getByRole('button', { name: 'Sweeping Strike', exact: true })).toBeVisible();
   const stat = page.locator('.selection-controls .stat-roll');

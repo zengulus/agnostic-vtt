@@ -1,4 +1,5 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
+import { playTone, unlockSound } from '../sound.js';
 import { useTable } from '../store.js';
 import { AssetImage } from '../assets.js';
 import { canControl, emptyTracker, type Token } from '../../shared/model.js';
@@ -153,6 +154,25 @@ export function TurnAwareness() {
   const token = current?.tokenId ? scene.tokens[current.tokenId] : undefined;
   const yours =
     token && s.self && assigned(token, s.self.id) && canControl(token, s.self.id, s.self.role);
+  const [turnSound, setTurnSound] = useState(() => {
+    try {
+      return localStorage.getItem('aether-turn-sound') === 'true';
+    } catch {
+      return false;
+    }
+  });
+  const previousTurn = useRef({ room: s.room.id, active: tracker.activeId, round: tracker.round });
+  useEffect(() => {
+    const previous = previousTurn.current;
+    if (
+      turnSound &&
+      yours &&
+      previous.room === s.room.id &&
+      (previous.active !== tracker.activeId || previous.round !== tracker.round)
+    )
+      playTone(0.6);
+    previousTurn.current = { room: s.room.id, active: tracker.activeId, round: tracker.round };
+  }, [s.room.id, tracker.activeId, tracker.round, turnSound, yours]);
   if (!tracker.entries.length) return null;
   return (
     <div
@@ -175,6 +195,23 @@ export function TurnAwareness() {
         </strong>
       )}
       {token && <button onClick={() => focusCharacter(token.id)}>Focus character</button>}
+      <label>
+        <input
+          type="checkbox"
+          checked={turnSound}
+          onChange={(e) => {
+            const enabled = e.target.checked;
+            setTurnSound(enabled);
+            if (enabled) unlockSound();
+            try {
+              localStorage.setItem('aether-turn-sound', String(enabled));
+            } catch {
+              /* optional preference */
+            }
+          }}
+        />{' '}
+        Turn sound
+      </label>
     </div>
   );
 }

@@ -8,6 +8,29 @@ export const idSchema = z
   .string()
   .regex(/^[a-zA-Z0-9_-]{1,64}$/)
   .refine((id) => !['__proto__', 'prototype', 'constructor'].includes(id));
+export const handoutSchema = z.object({
+  id: idSchema,
+  title: z.string().trim().min(1).max(120),
+  text: z.string().max(8000),
+  imageUrl: z.string().max(2048),
+  gmNote: z.string().max(4000),
+  shared: z.boolean(),
+  kind: z.enum(['handout', 'quest', 'recap']).optional(),
+  status: z.enum(['active', 'completed', 'paused']).optional(),
+});
+export type Handout = z.infer<typeof handoutSchema>;
+export const handoutDigest = (handout: Handout) =>
+  sha256(JSON.stringify(handoutSchema.parse(handout)));
+export const publicHandout = (handout: Handout): Handout => ({ ...handout, gmNote: '' });
+export const tableToolSchema = z.union([
+  z.object({ id: idSchema, kind: z.literal('clock'), name: z.string().trim().min(1).max(80), value: z.number().int().min(0).max(12), segments: z.number().int().min(2).max(12) }).refine((x) => x.value <= x.segments),
+  z.object({ id: idSchema, kind: z.literal('counter'), name: z.string().trim().min(1).max(80), value: z.number().int().min(-1000000).max(1000000) }),
+  z.object({ id: idSchema, kind: z.literal('table'), name: z.string().trim().min(1).max(80), entries: z.array(z.object({ text: z.string().trim().min(1).max(200), weight: z.number().int().min(1).max(1000) })).min(1).max(50) }),
+]);
+export type TableTool = z.infer<typeof tableToolSchema>;
+export const tableToolDigest = (tool: TableTool) => sha256(JSON.stringify(tableToolSchema.parse(tool)));
+export const publicTableTool = (tool: TableTool): TableTool =>
+  tool.kind === 'table' ? { ...tool, entries: [] } : tool;
 export const pointSchema = z.object({ x: z.number().finite(), y: z.number().finite() });
 export type Point = z.infer<typeof pointSchema>;
 export const assetSchema = z.object({
@@ -365,6 +388,8 @@ export interface RoomState {
   characters?: Record<string, CharacterSheet>;
   statusPresets?: Record<string, StatusPreset>;
   encounters?: Record<string, Encounter>;
+  handouts?: Record<string, Handout>;
+  tableTools?: Record<string, TableTool>;
 }
 /** Server-only fields are NEVER included in ROOM_SNAPSHOT. */
 export interface DurableRoom {
@@ -414,6 +439,8 @@ export type StateChange =
   | MacroChange
   | { kind: 'status-preset'; id: string; preset: StatusPreset | null }
   | { kind: 'encounter'; id: string; encounter: Encounter | null }
+  | { kind: 'handout'; id: string; handout: Handout | null }
+  | { kind: 'table-tool'; id: string; tool: TableTool | null }
   | { kind: 'character'; id: string; character: CharacterSheet | null };
 
 export function canControl(token: Token, userId: string, role: 'gm' | 'player') {
@@ -502,6 +529,15 @@ export function projectRoom(
   return {
     ...state,
     encounters: role === 'gm' ? state.encounters : undefined,
+    tableTools: role === 'gm' ? state.tableTools : Object.fromEntries(Object.entries(state.tableTools || {}).map(([id, tool]) => [id, publicTableTool(tool)])),
+    handouts:
+      role === 'gm'
+        ? state.handouts
+        : Object.fromEntries(
+            Object.entries(state.handouts || {})
+              .filter(([, h]) => h.shared)
+              .map(([id, h]) => [id, publicHandout(h)]),
+          ),
     scenes: Object.fromEntries(
       Object.entries(room.state.scenes)
         .filter(

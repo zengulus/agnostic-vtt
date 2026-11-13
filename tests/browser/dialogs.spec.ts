@@ -198,9 +198,9 @@ test('a synchronous scene change cannot submit a stale form before React closes 
   }
 });
 
-test('an upload completing after another form edit preserves both the edit and image', async ({
+test('a URL preview completing after another form edit preserves both the edit and image', async ({
   page,
-}, info) => {
+}) => {
   await create(page);
   const png = await sharp({
     create: { width: 96, height: 96, channels: 4, background: '#57927680' },
@@ -211,67 +211,31 @@ test('an upload completing after another form edit preserves both the edit and i
   const gate = new Promise<void>((resolve) => {
     release = resolve;
   });
-  await page.route(/\/api\/assets\/[^/]+$/, async (route) => {
-    if (route.request().method() === 'POST') await gate;
-    await route.continue();
+  await page.route('https://images.example.com/portrait.png', async (route) => {
+    await gate;
+    await route.fulfill({ status: 200, contentType: 'image/png', body: png });
   });
   await page.getByRole('button', { name: 'Add token', exact: true }).click();
-  const uploaded = page.waitForResponse(
-    (response) =>
-      /\/api\/assets\/[^/]+$/.test(new URL(response.url()).pathname) &&
-      response.request().method() === 'POST',
-  );
-  const downloaded = page.waitForResponse(
-    (response) =>
-      /\/api\/assets\/[^/]+\/[^/]+$/.test(new URL(response.url()).pathname) &&
-      response.request().method() === 'GET',
-  );
-  // An upload failure is reported below; do not add an unrelated unhandled GET timeout.
-  void downloaded.catch(() => {});
-  await page
-    .getByLabel('Upload image', { exact: true })
-    .setInputFiles({ name: 'portrait.png', mimeType: 'image/png', buffer: png });
-  await page.getByLabel('Name', { exact: true }).fill('Edited while uploading');
+  await page.getByLabel('External image URL').fill('https://images.example.com/portrait.png');
+  const started = Date.now();
+  await page.getByRole('button', { name: 'Preview', exact: true }).click();
+  await expect(page.getByRole('button', { name: 'Loading…', exact: true })).toBeVisible();
+  expect(Date.now() - started).toBeLessThan(400);
+  await page.getByLabel('Name', { exact: true }).fill('Edited during preview');
   await expect(page.getByRole('button', { name: 'Add to the table', exact: true })).toBeDisabled();
   release();
-  const uploadResponse = await uploaded;
-  const uploadBody = await uploadResponse.text();
-  await info.attach('upload-response.json', {
-    body: JSON.stringify({ status: uploadResponse.status(), body: uploadBody }),
-    contentType: 'application/json',
-  });
-  expect(uploadResponse.status(), uploadBody).toBe(201);
-  expect(JSON.parse(uploadBody).asset.kind).toBe('uploaded');
-  const imageResponse = await downloaded;
-  expect(imageResponse.status()).toBe(200);
-  await expect(page.getByAltText('Image preview')).toHaveAttribute('src', /^blob:/);
-  // Assert the bytes consumed by the browser and its actual image decoder. CDP's
-  // response-body diagnostics may be empty even when transfer sizes are present.
-  const preview = page.getByAltText('Image preview');
-  await expect
-    .poll(() => preview.evaluate((image) => (image as HTMLImageElement).naturalWidth))
-    .toBe(96);
-  const decoded = await preview.evaluate(async (element) => {
-    const image = element as HTMLImageElement;
-    const blob = await (await fetch(image.src)).blob();
-    return {
-      width: image.naturalWidth,
-      height: image.naturalHeight,
-      bytes: blob.size,
-      type: blob.type,
-    };
-  });
-  await info.attach('asset-download.json', {
-    body: JSON.stringify({ status: imageResponse.status(), decoded }),
-    contentType: 'application/json',
-  });
-  expect(decoded).toMatchObject({ width: 96, height: 96, type: 'image/webp' });
-  expect(decoded.bytes).toBe(JSON.parse(uploadBody).bytes);
-  await expect(page.getByLabel('Name', { exact: true })).toHaveValue('Edited while uploading');
+  await expect(page.getByAltText('Image preview')).toHaveAttribute(
+    'src',
+    'https://images.example.com/portrait.png',
+  );
+  await expect(page.getByLabel('Name', { exact: true })).toHaveValue('Edited during preview');
   await page.getByRole('button', { name: 'Add to the table', exact: true }).click();
   await expect(page.getByRole('dialog')).toHaveCount(0);
   const token = Object.values((await roomState(page)).scenes.hollow.tokens).find(
-    (t) => t.name === 'Edited while uploading',
+    (t) => t.name === 'Edited during preview',
   );
-  expect(token?.image.kind).toBe('uploaded');
+  expect(token?.image).toEqual({
+    kind: 'external',
+    url: 'https://images.example.com/portrait.png',
+  });
 });

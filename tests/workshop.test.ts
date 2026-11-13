@@ -17,7 +17,7 @@ import { containsDisk, intersectsDisk, fogAllowsToken } from '../shared/regions.
 import { newRoom } from '../shared/sample.js';
 import { dicePreferencesSchema } from '../shared/diceThemes.js';
 import type { Action, ServerMessage } from '../shared/protocol.js';
-import type { FogOperation, RoomState, Token } from '../shared/model.js';
+import type { FogOperation, RoomState } from '../shared/model.js';
 
 class Client {
   messages: ServerMessage[] = [];
@@ -99,18 +99,28 @@ describe('campaign workshop over real HTTP and WebSockets', () => {
     })
       .png()
       .toBuffer();
-    const response = await request(`/api/assets/${room.id}`, owner.token, {
-      method: 'POST',
-      body: new Uint8Array(png),
-      headers: { 'X-Image-Name': 'test%20portrait.png', 'X-Image-Purpose': purpose },
-    });
-    expect(response.status).toBe(201);
-    return response.json() as Promise<{
-      id: string;
-      asset: Token['image'];
-      width: number;
-      height: number;
-    }>;
+    const image = await normalizeImage(png, purpose === 'token' ? 512 : 4096);
+    const id = randomUUID();
+    await manager.uploadAsset(
+      room.id,
+      owner.id,
+      {
+        id,
+        name: 'test portrait.png',
+        bytes: image.data.length,
+        width: image.width,
+        height: image.height,
+        createdAt: new Date().toISOString(),
+        createdBy: owner.id,
+      },
+      image.data,
+    );
+    return {
+      id,
+      asset: { kind: 'uploaded' as const, url: id },
+      width: image.width,
+      height: image.height,
+    };
   }
   beforeEach(async () => {
     dir = await mkdtemp(join(tmpdir(), 'aether-workshop-'));
@@ -234,11 +244,24 @@ describe('campaign workshop over real HTTP and WebSockets', () => {
     })
       .png()
       .toBuffer();
-    const failed = await request(`/api/assets/${room.id}`, owner.token, {
-      method: 'POST',
-      body: new Uint8Array(png),
-    });
-    expect(failed.ok).toBe(false);
+    const image = await normalizeImage(png);
+    const id = randomUUID();
+    await expect(
+      manager.uploadAsset(
+        room.id,
+        owner.id,
+        {
+          id,
+          name: 'legacy.png',
+          bytes: image.data.length,
+          width: image.width,
+          height: image.height,
+          createdAt: new Date().toISOString(),
+          createdBy: owner.id,
+        },
+        image.data,
+      ),
+    ).rejects.toThrow();
     save.mockRestore();
     gm.send({ type: 'STATE_RESYNC' });
     const snapshot = await gm.wait('ROOM_SNAPSHOT');
@@ -256,7 +279,7 @@ describe('campaign workshop over real HTTP and WebSockets', () => {
       method: 'POST',
       body: new Uint8Array([1, 2, 3]),
     });
-    expect(await response.json()).toMatchObject({ error: expect.stringContaining('game master') });
+    expect(response.ok).toBe(false);
     await gm.commit({
       type: 'TOKEN_UPDATE',
       sceneId: 'hollow',

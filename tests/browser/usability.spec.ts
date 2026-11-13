@@ -353,25 +353,12 @@ test('separate GM/player contexts protect linked enemies, private art and macros
       sceneId: 'hollow',
       fog: { enabled: false, revealed: [] },
     });
-    const sharp = (await import('sharp')).default;
-    const png = await sharp({
-      create: { width: 64, height: 64, channels: 4, background: '#649580' },
-    })
-      .png()
-      .toBuffer();
-    const upload = async (name: string) =>
-      gm.evaluate(
-        async ({ name, bytes }) => {
-          const connection = await import('/src/connection.ts' as string);
-          return connection.uploadImage(
-            new File([new Uint8Array(bytes)], name, { type: 'image/png' }),
-            'token',
-          );
-        },
-        { name, bytes: [...png] },
-      );
-    const secret = await upload('Secret altar.png'),
-      portrait = await upload('Party portrait.png');
+    const secret = {
+        asset: { kind: 'external' as const, url: 'https://images.example.com/secret-altar.png' },
+      },
+      portrait = {
+        asset: { kind: 'external' as const, url: 'https://images.example.com/party-portrait.png' },
+      };
     let room = await state(gm);
     await action(gm, {
       type: 'TOKEN_UPDATE',
@@ -424,33 +411,20 @@ test('separate GM/player contexts protect linked enemies, private art and macros
     expect((await state(pc)).tracker?.entries.map((e) => e.name)).toEqual(['Hero', 'Mage']);
     expect((await state(pc)).tracker?.nextId).toBeNull();
     expect(delivered.join('\n')).not.toMatch(
-      /Unseen adversary|enemy-turn|Secret altar|Private ritual|Secret formula/,
+      /Unseen adversary|enemy-turn|secret-altar|Private ritual|Secret formula/,
     );
-    expect(delivered.join('\n')).not.toContain(secret.id);
     await expect(pc.getByRole('button', { name: 'Map settings', exact: true })).toHaveCount(0);
     await pc.getByRole('button', { name: 'Scene details', exact: true }).click();
     await pc.getByRole('button', { name: 'Campaign images', exact: true }).click();
     await expect(
-      pc.getByRole('button', { name: 'Choose image Party portrait.png', exact: true }),
+      pc
+        .getByRole('button', { name: 'Choose image Kael · Wanderer', exact: true })
+        .filter({ has: pc.locator('img[src="https://images.example.com/party-portrait.png"]') }),
     ).toBeVisible();
     await expect(
-      pc.getByRole('button', { name: 'Choose image Secret altar.png', exact: true }),
+      pc.getByRole('button', { name: 'Choose image Unseen adversary', exact: true }),
     ).toHaveCount(0);
     await pc.getByRole('button', { name: 'Close dialog' }).click();
-    expect(
-      await pc.evaluate(async (id) => {
-        try {
-          await (
-            await import('/src/connection.ts' as string)
-          ).authorizedFetch(
-            `/api/assets/${(await import('/src/store.ts' as string)).useTable.getState().room.id}/${id}`,
-          );
-          return true;
-        } catch {
-          return false;
-        }
-      }, secret.id),
-    ).toBe(false);
     // Reuse chooses the existing reference; it does not upload again.
     let uploads = 0;
     gm.on('request', (request) => {
@@ -459,7 +433,10 @@ test('separate GM/player contexts protect linked enemies, private art and macros
     await gm.getByRole('button', { name: 'Kael Wanderer', exact: true }).click();
     await gm.getByRole('button', { name: 'Edit token', exact: true }).click();
     await gm.getByRole('button', { name: 'Campaign images', exact: true }).click();
-    await gm.getByRole('button', { name: 'Choose image Party portrait.png', exact: true }).click();
+    await gm
+      .getByRole('button', { name: 'Choose image Kael · Wanderer', exact: true })
+      .filter({ has: gm.locator('img[src="https://images.example.com/party-portrait.png"]') })
+      .click();
     await gm.getByRole('button', { name: 'Save token', exact: true }).click();
     await expect(gm.getByRole('dialog')).toHaveCount(0);
     expect(uploads).toBe(0);

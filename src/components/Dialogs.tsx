@@ -13,7 +13,6 @@ import {
   send,
   sendAndWait,
   supabase,
-  uploadImage,
   savedCampaigns,
   signIn,
   currentAccount,
@@ -23,6 +22,8 @@ import {
 import { assetUrl, validateAsset } from '../../shared/assets.js';
 import { resolveAsset } from '../assets.js';
 import { invalidateImage } from '../rendering.js';
+import { TableTools } from './TableTools.js';
+import { Handouts } from './Handouts.js';
 import { TokenLibraryDialog, AssetManagerDialog, ObjectsDialog } from './Workshop.js';
 import { DiceSettings } from './DiceSettings.js';
 import { MacroLibraryDialog } from './Macros.js';
@@ -79,7 +80,7 @@ export function Dialogs() {
   const s = useTable(),
     ref = useRef<HTMLDivElement>(null);
   useEffect(() => {
-    if (!s.dialog) return;
+    if (!s.dialog || s.tablePresentations.length) return;
     const previous = document.activeElement as HTMLElement;
     const el = ref.current;
     const backdrop = el?.parentElement;
@@ -132,7 +133,7 @@ export function Dialogs() {
       });
       if (previous?.isConnected) previous.focus();
     };
-  }, [s.dialog, s.set]);
+  }, [s.dialog, s.set, !!s.tablePresentations.length]);
   if (!s.dialog) return null;
   const title = {
     launch: supabase ? 'Your campaigns' : 'Your table',
@@ -186,7 +187,7 @@ export function Dialogs() {
         ) : s.dialog === 'settings' ? (
           <Settings />
         ) : s.dialog === 'library' ? (
-          <TokenLibraryDialog />
+          <><div className="mobile-table-library"><TableTools key={`${s.room.id}-${s.sessionNonce}-${s.self?.role}`} /><Handouts key={`${s.room.id}-${s.sessionNonce}-${s.self?.role}`} /></div><TokenLibraryDialog /></>
         ) : s.dialog === 'assets' ? (
           <AssetManagerDialog />
         ) : s.dialog === 'objects' ? (
@@ -534,10 +535,8 @@ function AssetPicker({
   asset,
   onChange,
   onBusyChange,
-  purpose = 'map',
 }: {
   asset: Asset;
-  purpose?: 'map' | 'token';
   onChange: (a: Asset, width?: number, height?: number) => void;
   onBusyChange?: (busy: boolean) => void;
 }) {
@@ -580,9 +579,7 @@ function AssetPicker({
       generation.current++;
     };
   }, []);
-  const roomId = useTable((state) => state.room.id),
-    gm = useTable((state) => state.self?.role === 'gm'),
-    demo = useTable((state) => state.status === 'demo');
+  const roomId = useTable((state) => state.room.id);
   useEffect(() => {
     let current = true;
     setUrl(asset.kind === 'external' ? asset.url : '');
@@ -597,25 +594,6 @@ function AssetPicker({
       current = false;
     };
   }, [asset.kind, asset.url, roomId]);
-  async function upload(file: File) {
-    const n = ++generation.current;
-    setLoading(true);
-    setError('');
-    try {
-      const result = await uploadImage(file, purpose);
-      if (!active.current || n !== generation.current) return;
-      invalidateImage(result.asset, roomId);
-      const uri = await resolveAsset(result.asset, roomId);
-      if (active.current && n === generation.current) {
-        setPreview(uri);
-        onChange(result.asset, result.width, result.height);
-      }
-    } catch (e) {
-      if (active.current && n === generation.current) setError((e as Error).message);
-    } finally {
-      if (active.current && n === generation.current) setLoading(false);
-    }
-  }
   async function check() {
     const n = ++generation.current;
     setError('');
@@ -694,35 +672,9 @@ function AssetPicker({
             </button>
           )}
           {!images.size && (
-            <p className="field-note">No images available yet. Upload an image or preview a URL.</p>
+            <p className="field-note">No images available yet. Preview an image URL.</p>
           )}
         </div>
-      )}
-      {gm && !demo && (
-        <label className="upload-control">
-          Upload image
-          <input
-            aria-label="Upload image"
-            type="file"
-            accept="image/png,image/jpeg,image/webp"
-            disabled={busy}
-            onChange={(e) => {
-              const file = e.target.files?.[0];
-              if (file) void upload(file);
-              e.target.value = '';
-            }}
-          />
-          <small>
-            {busy
-              ? 'Processing image…'
-              : 'PNG, JPEG, WebP · up to 10 MiB · stored with the campaign'}
-          </small>
-        </label>
-      )}
-      {demo && (
-        <p className="field-note">
-          Uploads need a live campaign. Try the included artwork or a public image URL.
-        </p>
       )}
       <div className="asset-preview">
         <img
@@ -1044,7 +996,6 @@ function TokenDialog() {
           )}
           <h3>Appearance</h3>
           <AssetPicker
-            purpose="token"
             asset={token.image}
             onChange={(image) => update({ image })}
             onBusyChange={setAssetBusy}
@@ -1867,10 +1818,10 @@ function Help() {
         </span>
       </div>
       <p className="field-note">
-        Upload PNG, JPEG or WebP images from Scene or Token settings. Saved token templates and
-        image management live in the library. On tablets, the layers button opens the library and
-        scene controls; pinch with two fingers to zoom. The Turns tab has a generic tracker with
-        custom order, rounds and hidden entries.
+        Paste a public image URL in Scene or Token settings. Saved token templates and image
+        management live in the library. On tablets, the layers button opens the library and scene
+        controls; pinch with two fingers to zoom. The Turns tab has a generic tracker with custom
+        order, rounds and hidden entries.
       </p>
       <p className="field-note">
         History retains the latest 100 rolls and messages. Changes save in periodic snapshots (90
