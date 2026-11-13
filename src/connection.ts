@@ -6,7 +6,13 @@ import {
   type DiscordStatus,
   type ServerMessage,
 } from '../shared/protocol.js';
-import { useTable, notify, presentRoll, enqueueTablePresentation } from './store.js';
+import {
+  useTable,
+  notify,
+  presentRoll,
+  enqueueTablePresentation,
+  showDramaticCue,
+} from './store.js';
 import { demoState } from './store.js';
 import { applyChanges } from '../shared/state.js';
 const serverUrl = (import.meta.env.VITE_SERVER_URL || '').replace(/\/$/, '');
@@ -387,7 +393,8 @@ export function send(action: Action) {
   if (useTable.getState().status === 'demo') {
     if (action.type === 'HANDOUT_PRESENT') {
       const handout = useTable.getState().room.handouts?.[action.id];
-      if (handout) enqueueTablePresentation({ kind: 'handout', handout: { ...handout, gmNote: '' } });
+      if (handout)
+        enqueueTablePresentation({ kind: 'handout', handout: { ...handout, gmNote: '' } });
       return crypto.randomUUID();
     }
     try {
@@ -410,6 +417,7 @@ export function send(action: Action) {
         'STATE_RESYNC',
         'SESSION_ROLE',
         'PING',
+        'DRAMATIC_CUE',
         'HANDOUT_PRESENT',
         'TABLE_TOOL_ROLL',
         'MEASUREMENT_SHARE',
@@ -779,10 +787,20 @@ function open() {
       case 'DICE_ROLL_RESULT':
         presentRoll(message.roll);
         break;
+      case 'DRAMATIC_CUE':
+        showDramaticCue(message.text);
+        break;
       case 'PING':
         if (message.attention && message.sceneId && message.userId !== store.self?.id)
-          store.set({ attention: { position: message.position, sceneId: message.sceneId, name: store.presence.find((p) => p.id === message.userId)?.name || 'GM' } });
-        if (message.sceneId && message.sceneId !== (store.viewSceneId || store.room.activeSceneId)) break;
+          store.set({
+            attention: {
+              position: message.position,
+              sceneId: message.sceneId,
+              name: store.presence.find((p) => p.id === message.userId)?.name || 'GM',
+            },
+          });
+        if (message.sceneId && message.sceneId !== (store.viewSceneId || store.room.activeSceneId))
+          break;
         if (
           message.userId === store.self?.id &&
           store.pings.some(

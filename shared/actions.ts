@@ -548,7 +548,8 @@ export function prepareAction(
       const old = state.tableTools?.[m.tool.id];
       if (old ? !m.digest || tableToolDigest(old) !== m.digest : !!m.digest)
         throw new Error('This table tool changed. Reopen it before saving.');
-      if (old && old.kind !== m.tool.kind) throw new Error('Cannot change the type of a table tool.');
+      if (old && old.kind !== m.tool.kind)
+        throw new Error('Cannot change the type of a table tool.');
       if (!old && Object.keys(state.tableTools || {}).length >= 50)
         throw new Error('A campaign supports up to 50 table tools.');
       return [{ kind: 'table-tool', id: m.tool.id, tool: m.tool }];
@@ -560,7 +561,10 @@ export function prepareAction(
     case 'TABLE_TOOL_ADJUST': {
       const tool = state.tableTools?.[m.id];
       if (!tool || tool.kind === 'table') throw new Error('Counter not found.');
-      const value = Math.max(tool.kind === 'clock' ? 0 : -1000000, Math.min(tool.kind === 'clock' ? tool.segments : 1000000, tool.value + m.delta));
+      const value = Math.max(
+        tool.kind === 'clock' ? 0 : -1000000,
+        Math.min(tool.kind === 'clock' ? tool.segments : 1000000, tool.value + m.delta),
+      );
       if (value === tool.value) return [];
       return [{ kind: 'table-tool', id: m.id, tool: { ...tool, value } }];
     }
@@ -600,6 +604,71 @@ export function prepareAction(
           kind: 'token',
           sceneId: m.sceneId,
           token: { ...t, statuses: t.statuses.filter((s) => s.id !== m.statusId) },
+        },
+      ];
+    }
+    case 'BOSS_SET': {
+      gm();
+      const current = scene(m.sceneId);
+      const target = current.tokens[m.tokenId];
+      if (!target) throw new Error('Token not found.');
+      if (m.boss && target.visibility !== 'public')
+        throw new Error('Make the boss token visible to the party first.');
+      return update(
+        m.sceneId,
+        Object.values(current.tokens)
+          .filter((t) => t.id === target.id || (m.boss && t.boss))
+          .map((t) => ({ ...t, boss: t.id === target.id ? m.boss || undefined : undefined })),
+      );
+    }
+    case 'DEFEAT_SELECTED': {
+      gm();
+      if (new Set(m.tokenIds).size !== m.tokenIds.length)
+        throw new Error('Duplicate tokens in batch.');
+      const current = scene(m.sceneId);
+      const tokens = m.tokenIds.map((id) => {
+        const token = current.tokens[id];
+        if (!token) throw new Error('Token not found.');
+        if (token.owners.length || token.characterId)
+          throw new Error('Only unowned enemy tokens can be defeated this way.');
+        const statuses = token.statuses || [];
+        if (statuses.some((status) => status.label.toLowerCase() === 'defeated')) return token;
+        if (statuses.length >= 16) throw new Error('A selected token has too many conditions.');
+        return {
+          ...token,
+          statuses: [
+            ...statuses,
+            { id: randomUUID(), label: 'Defeated', color: '#a52a2a', icon: 'circle' as const },
+          ],
+        };
+      });
+      const tracker = state.tracker || emptyTracker();
+      const removed = new Set(
+        tracker.entries.filter((e) => e.tokenId && m.tokenIds.includes(e.tokenId)).map((e) => e.id),
+      );
+      // Keep timed effects valid: removing an anchor must not silently destroy them.
+      for (const sc of Object.values(state.scenes)) {
+        if (
+          Object.values(sc.tokens).some((t) =>
+            t.statuses?.some((st) => st.duration && removed.has(st.duration.participantId)),
+          ) ||
+          Object.values(sc.zones).some((z) => z.duration && removed.has(z.duration.participantId))
+        )
+          throw new Error('Remove or reassign effects timed to a selected participant first.');
+      }
+      const entries = tracker.entries.filter((e) => !removed.has(e.id));
+      return [
+        ...update(m.sceneId, tokens),
+        {
+          kind: 'tracker',
+          tracker: {
+            ...tracker,
+            entries,
+            activeId:
+              tracker.activeId && removed.has(tracker.activeId)
+                ? entries[0]?.id || null
+                : tracker.activeId,
+          },
         },
       ];
     }

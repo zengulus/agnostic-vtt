@@ -20,6 +20,19 @@ export function BatchActions({ sceneId, ids }: { sceneId: string; ids: string[] 
   return (
     <details className="token-statuses batch-actions">
       <summary>Selected actions · {ids.length}</summary>
+      {s.self?.role === 'gm' && (
+        <button
+          disabled={!!action.pending}
+          onClick={() =>
+            void action.run(
+              { type: 'DEFEAT_SELECTED', sceneId, tokenIds: ids },
+              'Defeating selected…',
+            )
+          }
+        >
+          Defeat selected
+        </button>
+      )}
       <label>
         Condition preset
         <select

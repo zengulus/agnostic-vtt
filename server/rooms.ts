@@ -723,20 +723,36 @@ export class RoomManager {
       if (role !== 'gm') throw new Error('Only the game master can present a handout.');
       const handout = data.state.handouts?.[message.id];
       if (!handout) throw new Error('Handout not found.');
-      for (const p of room.peers) p.send({ v: 7, type: 'HANDOUT_PRESENT', handout: publicHandout(handout) });
+      for (const p of room.peers)
+        p.send({ v: 7, type: 'HANDOUT_PRESENT', handout: publicHandout(handout) });
       return;
     }
     if (message.type === 'TABLE_TOOL_ROLL') {
       const table = data.state.tableTools?.[message.id];
       if (!table || table.kind !== 'table') throw new Error('Table not found.');
-      let choice = Math.floor(Math.random() * table.entries.reduce((sum, entry) => sum + entry.weight, 0));
+      let choice = Math.floor(
+        Math.random() * table.entries.reduce((sum, entry) => sum + entry.weight, 0),
+      );
       const selected = table.entries.find((entry) => (choice -= entry.weight) < 0)!;
-      for (const p of room.peers) p.send({ v: 7, type: 'TABLE_TOOL_RESULT', name: table.name, result: selected.text });
+      for (const p of room.peers)
+        p.send({ v: 7, type: 'TABLE_TOOL_RESULT', name: table.name, result: selected.text });
+      return;
+    }
+    if (message.type === 'DRAMATIC_CUE') {
+      if (role !== 'gm') throw new Error('Only the game master can announce a cue.');
+      for (const p of room.peers) p.send({ v: 7, type: 'DRAMATIC_CUE', text: message.text });
       return;
     }
     if (message.type === 'PING') {
       for (const p of room.peers)
-        p.send({ v: 7, type: 'PING', position: message.position, userId: peer.identity.id, sceneId: data.state.activeSceneId, attention: role === 'gm' });
+        p.send({
+          v: 7,
+          type: 'PING',
+          position: message.position,
+          userId: peer.identity.id,
+          sceneId: data.state.activeSceneId,
+          attention: role === 'gm',
+        });
       return;
     }
     if (message.type === 'TOKEN_MOVE_PREVIEW' || message.type === 'TOKEN_MOVE_PREVIEW_BATCH') {

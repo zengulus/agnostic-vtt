@@ -179,6 +179,50 @@ export function ToolOptions({
       {s.tool === 'zone' && (
         <>
           <label>
+            Attack preset
+            <select
+              aria-label="Attack preset"
+              defaultValue=""
+              onChange={(e) => {
+                const presets = {
+                  fire: ['Fire breath', 'cone'],
+                  blast: ['Blast', 'circle'],
+                  beam: ['Beam', 'line'],
+                } as const;
+                const preset = presets[e.target.value as keyof typeof presets];
+                if (preset) {
+                  clearDraft();
+                  s.set({
+                    zoneLabel: preset[0],
+                    zoneShape: preset[1],
+                    zoneVisibility: 'public',
+                    drawColor: '#e45735',
+                  });
+                }
+              }}
+            >
+              <option value="">Choose preset</option>
+              <option value="fire">Fire breath · cone</option>
+              <option value="blast">Blast · circle</option>
+              <option value="beam">Beam · line</option>
+            </select>
+          </label>
+          <label>
+            Expires at next turn of
+            <select
+              aria-label="Attack duration"
+              value={s.zoneDurationParticipant}
+              onChange={(e) => s.set({ zoneDurationParticipant: e.target.value })}
+            >
+              <option value="">Manual removal</option>
+              {(s.room.tracker?.entries || []).map((e) => (
+                <option key={e.id} value={e.id}>
+                  {e.name}
+                </option>
+              ))}
+            </select>
+          </label>
+          <label>
             Region name
             <input
               aria-label="New region name"

@@ -1,3 +1,4 @@
+import { BossAndCues } from './components/BossAndCues.js';
 import { FogActions } from './components/FogActions.js';
 import { CharacterList, FirstUseGuide, TurnAwareness } from './components/TableAwareness.js';
 import { DiceWorkbench } from './components/DiceWorkbench.js';
@@ -484,6 +485,7 @@ export function App() {
             ))}
           </section>
         )}
+        <BossAndCues />
         <div className="table-awareness">
           {s.self && <TurnAwareness />}
           <FirstUseGuide />
@@ -541,7 +543,38 @@ export function App() {
           </button>
         </div>
       )}
-      {s.attention && <div role="status" className="attention-prompt">{s.attention.name} points to the table. <button onClick={() => { const attention = s.attention; if (!attention) return; if (!s.room.scenes[attention.sceneId] || attention.sceneId !== s.room.activeSceneId) { s.set({ attention: null }); return; } const canvas = document.querySelector('.tabletop canvas'); const rect = canvas?.getBoundingClientRect(); if (rect) s.set({ viewSceneId: null, camera: { ...s.camera, x: rect.width / 2 - attention.position.x * s.camera.zoom, y: rect.height / 2 - attention.position.y * s.camera.zoom }, attention: null }); }}>Go there</button> <button aria-label="Dismiss ping" onClick={() => s.set({ attention: null })}>×</button></div>}
+      {s.attention && (
+        <div role="status" className="attention-prompt">
+          {s.attention.name} points to the table.{' '}
+          <button
+            onClick={() => {
+              const attention = s.attention;
+              if (!attention) return;
+              if (!s.room.scenes[attention.sceneId] || attention.sceneId !== s.room.activeSceneId) {
+                s.set({ attention: null });
+                return;
+              }
+              const canvas = document.querySelector('.tabletop canvas');
+              const rect = canvas?.getBoundingClientRect();
+              if (rect)
+                s.set({
+                  viewSceneId: null,
+                  camera: {
+                    ...s.camera,
+                    x: rect.width / 2 - attention.position.x * s.camera.zoom,
+                    y: rect.height / 2 - attention.position.y * s.camera.zoom,
+                  },
+                  attention: null,
+                });
+            }}
+          >
+            Go there
+          </button>{' '}
+          <button aria-label="Dismiss ping" onClick={() => s.set({ attention: null })}>
+            ×
+          </button>
+        </div>
+      )}
       <Dialogs />
       <TablePresentation />
     </div>

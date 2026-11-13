@@ -3302,9 +3302,98 @@ i {
   color: white;
   border-radius: 0.5rem;
 }
-.clock-segments { display: inline-flex; gap: 3px; vertical-align: middle; }
-.clock-segments span { width: 10px; height: 10px; border: 1px solid currentColor; border-radius: 50%; }
-.clock-segments .filled { background: currentColor; }
+.clock-segments {
+  display: inline-flex;
+  gap: 3px;
+  vertical-align: middle;
+}
+.clock-segments span {
+  width: 10px;
+  height: 10px;
+  border: 1px solid currentColor;
+  border-radius: 50%;
+}
+.clock-segments .filled {
+  background: currentColor;
+}
 
-.mobile-table-library { display: none; }
-@media (max-width: 1000px) { .mobile-table-library { display: block; } }
+.mobile-table-library {
+  display: none;
+}
+@media (max-width: 1000px) {
+  .mobile-table-library {
+    display: block;
+  }
+}
+
+.boss-hud {
+  position: absolute;
+  z-index: 8;
+  top: 12px;
+  left: 50%;
+  transform: translateX(-50%);
+  width: min(560px, 60%);
+  display: grid;
+  text-align: center;
+  gap: 3px;
+  padding: 8px 14px;
+  background: #160d0ded;
+  border: 1px solid #bd8e50;
+  border-radius: 5px;
+  pointer-events: none;
+}
+.boss-hud strong {
+  letter-spacing: 0.12em;
+  font-size: 1.1rem;
+}
+.boss-hud progress {
+  width: 100%;
+  height: 17px;
+  accent-color: #bd3535;
+}
+.boss-controls {
+  position: absolute;
+  z-index: 12;
+  top: 12px;
+  right: 12px;
+  max-width: 240px;
+  background: #171611f2;
+  padding: 8px;
+}
+.boss-controls[open] {
+  display: grid;
+  gap: 5px;
+  max-height: 70vh;
+  overflow: auto;
+}
+.boss-controls label {
+  display: grid;
+}
+.dramatic-cue {
+  position: absolute;
+  z-index: 30;
+  top: 30%;
+  left: 0;
+  width: 100%;
+  text-align: center;
+  padding: 18px;
+  background: #170c0ce8;
+  color: #f6d89d;
+  font-size: clamp(1.5rem, 4vw, 3rem);
+  letter-spacing: 0.12em;
+  pointer-events: none;
+  animation: cue-appear 0.3s ease-out;
+}
+.dramatic-cue.reduced {
+  animation: none;
+}
+@keyframes cue-appear {
+  from {
+    opacity: 0;
+    transform: translateY(-15px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}

@@ -42,3 +42,9 @@ Legacy image deletions use immediate snapshot writes for their durable transitio
 ## Verification
 
 Run `npm test` and `npm run build`. Regression coverage includes independent manager CAS conflicts at equal gameplay revisions, concurrent membership/configuration rollback, legacy local snapshot upgrades, HTTP cache concurrency/accounting/eviction, Storage failures, replay after restart, cleanup acknowledgment crashes, interrupted uploads, and uncertain manifest commits. The PostgreSQL CI job additionally exercises the actual SQL RPC and concurrent database writers against a disposable database. Live Supabase and Render verification still requires an authorized deployment.
+
+### Boss encounters
+
+Boss designation and phase are bounded token metadata and use the ordinary coalesced room snapshot scheduler. Defeating up to 50 selected unowned tokens is one atomic action and one undo entry; it produces one set of token/turn changes rather than a write per token. Existing timed effects must be reassigned before removing their turn anchor. Attack presets create ordinary regions and inherit their turn expiry and save behavior. Cue banners are ephemeral WebSocket messages, are not included in snapshots or replayed after reconnect, and do not trigger a durable save. Boss metadata adds less than 150 JSON characters in the covered test; batch size is capped at 50 tokens.
+
+The boss and defeat controls show pending feedback immediately while awaiting confirmation; cues show a sending state and display only on receipt. Preset selection updates the local tool immediately. These feedback paths do not wait for a database save, but no representative device or network latency measurement was performed for this change, so the 400 ms target has not been empirically verified.

@@ -163,9 +163,22 @@ export const clientMessageSchema = z.discriminatedUnion('type', [
     id: idSchema,
     digest: z.string().regex(/^[a-f0-9]{64}$/),
   }),
-  z.object({ ...base, type: z.literal('TABLE_TOOL_SAVE'), tool: tableToolSchema, digest: z.string().regex(/^[a-f0-9]{64}$/).optional() }),
+  z.object({
+    ...base,
+    type: z.literal('TABLE_TOOL_SAVE'),
+    tool: tableToolSchema,
+    digest: z
+      .string()
+      .regex(/^[a-f0-9]{64}$/)
+      .optional(),
+  }),
   z.object({ ...base, type: z.literal('TABLE_TOOL_DELETE'), id: idSchema }),
-  z.object({ ...base, type: z.literal('TABLE_TOOL_ADJUST'), id: idSchema, delta: z.union([z.literal(-1), z.literal(1)]) }),
+  z.object({
+    ...base,
+    type: z.literal('TABLE_TOOL_ADJUST'),
+    id: idSchema,
+    delta: z.union([z.literal(-1), z.literal(1)]),
+  }),
   z.object({ ...base, type: z.literal('HANDOUT_PRESENT'), id: idSchema }),
   z.object({ ...base, type: z.literal('TABLE_TOOL_ROLL'), id: idSchema }),
   z.object({ ...base, type: z.literal('STATUS_PRESET_SET'), preset: statusPresetSchema }),
@@ -267,6 +280,22 @@ export const clientMessageSchema = z.discriminatedUnion('type', [
     visibility: z.enum(['public', 'private']),
   }),
   z.object({ ...base, type: z.literal('PING'), position: pointSchema }),
+  z.object({ ...base, type: z.literal('DRAMATIC_CUE'), text: z.string().trim().min(1).max(80) }),
+  z.object({
+    ...base,
+    type: z.literal('BOSS_SET'),
+    sceneId,
+    tokenId: idSchema,
+    boss: z
+      .object({ title: z.string().trim().min(1).max(80), phase: z.string().max(48) })
+      .nullable(),
+  }),
+  z.object({
+    ...base,
+    type: z.literal('DEFEAT_SELECTED'),
+    sceneId,
+    tokenIds: z.array(idSchema).min(1).max(50),
+  }),
   z.object({ ...base, type: z.literal('FOG_UPDATE'), sceneId, fog: fogSchema }),
   z.object({
     ...base,
@@ -464,6 +493,7 @@ export type ServerMessage =
       userId: string;
     }
   | { v: 7; type: 'DICE_ROLL_RESULT'; roll: Roll }
+  | { v: 7; type: 'DRAMATIC_CUE'; text: string }
   | { v: 7; type: 'PING'; position: Point; userId: string; sceneId?: string; attention?: boolean }
   | { v: 7; type: 'HANDOUT_PRESENT'; handout: import('./model.js').Handout }
   | { v: 7; type: 'TABLE_TOOL_RESULT'; name: string; result: string }

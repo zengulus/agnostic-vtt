@@ -23,12 +23,39 @@ export const handoutDigest = (handout: Handout) =>
   sha256(JSON.stringify(handoutSchema.parse(handout)));
 export const publicHandout = (handout: Handout): Handout => ({ ...handout, gmNote: '' });
 export const tableToolSchema = z.union([
-  z.object({ id: idSchema, kind: z.literal('clock'), name: z.string().trim().min(1).max(80), value: z.number().int().min(0).max(12), segments: z.number().int().min(2).max(12) }).refine((x) => x.value <= x.segments),
-  z.object({ id: idSchema, kind: z.literal('counter'), name: z.string().trim().min(1).max(80), value: z.number().int().min(-1000000).max(1000000) }),
-  z.object({ id: idSchema, kind: z.literal('table'), name: z.string().trim().min(1).max(80), entries: z.array(z.object({ text: z.string().trim().min(1).max(200), weight: z.number().int().min(1).max(1000) })).min(1).max(50) }),
+  z
+    .object({
+      id: idSchema,
+      kind: z.literal('clock'),
+      name: z.string().trim().min(1).max(80),
+      value: z.number().int().min(0).max(12),
+      segments: z.number().int().min(2).max(12),
+    })
+    .refine((x) => x.value <= x.segments),
+  z.object({
+    id: idSchema,
+    kind: z.literal('counter'),
+    name: z.string().trim().min(1).max(80),
+    value: z.number().int().min(-1000000).max(1000000),
+  }),
+  z.object({
+    id: idSchema,
+    kind: z.literal('table'),
+    name: z.string().trim().min(1).max(80),
+    entries: z
+      .array(
+        z.object({
+          text: z.string().trim().min(1).max(200),
+          weight: z.number().int().min(1).max(1000),
+        }),
+      )
+      .min(1)
+      .max(50),
+  }),
 ]);
 export type TableTool = z.infer<typeof tableToolSchema>;
-export const tableToolDigest = (tool: TableTool) => sha256(JSON.stringify(tableToolSchema.parse(tool)));
+export const tableToolDigest = (tool: TableTool) =>
+  sha256(JSON.stringify(tableToolSchema.parse(tool)));
 export const publicTableTool = (tool: TableTool): TableTool =>
   tool.kind === 'table' ? { ...tool, entries: [] } : tool;
 export const pointSchema = z.object({ x: z.number().finite(), y: z.number().finite() });
@@ -212,6 +239,7 @@ export const tokenSchema = z.object({
     .optional(),
   note: z.string().max(2000).optional(),
   groupId: idSchema.optional(),
+  boss: z.object({ title: z.string().min(1).max(80), phase: z.string().max(48) }).optional(),
   statuses: z.array(tokenStatusSchema).max(16).optional(),
 });
 export type Token = z.infer<typeof tokenSchema>;
@@ -529,7 +557,12 @@ export function projectRoom(
   return {
     ...state,
     encounters: role === 'gm' ? state.encounters : undefined,
-    tableTools: role === 'gm' ? state.tableTools : Object.fromEntries(Object.entries(state.tableTools || {}).map(([id, tool]) => [id, publicTableTool(tool)])),
+    tableTools:
+      role === 'gm'
+        ? state.tableTools
+        : Object.fromEntries(
+            Object.entries(state.tableTools || {}).map(([id, tool]) => [id, publicTableTool(tool)]),
+          ),
     handouts:
       role === 'gm'
         ? state.handouts

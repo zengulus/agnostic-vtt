@@ -45,7 +45,9 @@ export const demoState: RoomState = {
   rolls: [],
   savedAt: null,
 };
-export type TablePresentation = { kind: 'handout'; handout: import('../shared/model.js').Handout } | { kind: 'table'; name: string; result: string };
+export type TablePresentation =
+  | { kind: 'handout'; handout: import('../shared/model.js').Handout }
+  | { kind: 'table'; name: string; result: string };
 interface UIState {
   room: RoomState;
   self: Presence | null;
@@ -72,6 +74,7 @@ interface UIState {
   error: string | null;
   previews: Record<string, Point>;
   pings: Array<Point & { at: number; userId?: string; name?: string }>;
+  dramaticCue: { text: string; id: number } | null;
   attention: { position: Point; sceneId: string; name: string } | null;
   presentation: Roll | null;
   tablePresentations: TablePresentation[];
@@ -86,6 +89,7 @@ interface UIState {
   ownerId: string | null;
   discord: DiscordStatus;
   deliveries: Record<string, { status: 'queued' | 'sent' | 'failed'; message: string }>;
+  zoneDurationParticipant: string;
   zoneShape: 'rectangle' | 'circle' | 'polygon' | 'line' | 'cone';
   wallKind: 'wall' | 'door' | 'window';
   lightDraft: LightDraft;
@@ -160,6 +164,7 @@ export const useTable = create<UIState>((set, get) => ({
   previews: {},
   pings: [],
   attention: null,
+  dramaticCue: null,
   presentation: null,
   tablePresentations: [],
   rollQueue: [],
@@ -173,6 +178,7 @@ export const useTable = create<UIState>((set, get) => ({
   ownerId: null,
   discord: { configured: false, enabled: false, mode: 'automatic', canManage: false },
   deliveries: {},
+  zoneDurationParticipant: '',
   zoneShape: 'rectangle',
   wallKind: 'wall',
   lightDraft: structuredClone(lightPresets.torch),
@@ -259,4 +265,12 @@ export function enqueueTablePresentation(presentation: TablePresentation) {
     return;
   }
   state.set({ tablePresentations: [...state.tablePresentations, presentation] });
+}
+
+export function showDramaticCue(text: string) {
+  const cue = { text, id: Date.now() };
+  useTable.getState().set({ dramaticCue: cue });
+  setTimeout(() => {
+    if (useTable.getState().dramaticCue === cue) useTable.getState().set({ dramaticCue: null });
+  }, 4000);
 }

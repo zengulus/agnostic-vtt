@@ -1014,6 +1014,11 @@ export function Tabletop() {
             color: st.drawColor,
             opacity: 0.2,
             tags: [],
+            duration:
+              st.zoneDurationParticipant &&
+              st.room.tracker?.entries.some((e) => e.id === st.zoneDurationParticipant)
+                ? { participantId: st.zoneDurationParticipant, remaining: 1, phase: 'start' }
+                : undefined,
           },
         });
       }
@@ -1234,8 +1239,11 @@ export function Tabletop() {
                 characterId={selected.characterId}
               />
             )}
-            {store.selectedIds.length > 1 && (
-              <BatchActions sceneId={scene.id} ids={store.selectedIds} />
+            {(store.selectedIds.length > 1 || store.self?.role === 'gm') && (
+              <BatchActions
+                sceneId={scene.id}
+                ids={store.selectedIds.length ? store.selectedIds : [selected.id]}
+              />
             )}
             {store.selectedIds.length <= 1 && selected.characterId && (
               <StatRoll
